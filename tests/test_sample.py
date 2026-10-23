@@ -1425,7 +1425,7 @@ def test_version_sync():
         '升级前必须把 .env / 证书 / 数据排除在本地代码改动之外'
     assert 'restore_runtime_from_backup' in inst, \
         '旧版脚本已 stash 运行时文件时，新版必须能自动恢复'
-    assert 'LEGACY_UPGRADE=1' in inst and 'INSTALL_DIR="$HOME/iperf3-fleet"' in inst, \
+    assert 'LEGACY_UPGRADE=1' in inst and 'com.docker.compose.project.working_dir' in inst, \
         '从旧版 iperf3-fleet 升级时必须优先原地迁移，避免同名容器冲突'
     assert '检测到旧版 iperf3-fleet' in inst, \
         '旧版原地升级需要给出明确提示'

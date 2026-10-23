@@ -32,19 +32,40 @@ APP_NAME="LinkPilot"
 REPO_SLUG="LinkPilot"
 # 当前版本：与 app/app.py 的 APP_VERSION 保持一致（app.py 是唯一权威）。
 # 升级时脚本会用「更新后的代码里」的版本号自我重跑，所以这里的值只对「全新安装」生效。
-APP_VERSION="0.5.1"
+APP_VERSION="0.5.2"
 REPO_URL="${IPERF3_FLEET_REPO_URL:-https://github.com/se-tang/LinkPilot.git}"
 BRANCH="${IPERF3_FLEET_BRANCH:-main}"
+TARGET_HOME="$(getent passwd "$(id -u)" 2>/dev/null | cut -d: -f6)"
+[ -n "$TARGET_HOME" ] || TARGET_HOME="$HOME"
+CONTAINER_PROJECT_DIR=""
+if command -v docker >/dev/null 2>&1; then
+  CONTAINER_PROJECT_DIR="$(docker inspect \
+    -f '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}' \
+    iperf3-fleet 2>/dev/null || true)"
+fi
 LEGACY_UPGRADE=0
 if [ -n "${IPERF3_FLEET_DIR+x}" ]; then
   INSTALL_DIR="$IPERF3_FLEET_DIR"
-elif [ -f "$HOME/iperf3-fleet/docker-compose.yml" ] && [ ! -f "$HOME/LinkPilot/data/auth.json" ]; then
+elif [ -n "$CONTAINER_PROJECT_DIR" ] && [ -f "$CONTAINER_PROJECT_DIR/docker-compose.yml" ] \
+    && [ ! -f "$TARGET_HOME/LinkPilot/data/auth.json" ]; then
   # 旧部署优先原地升级：继续使用旧 compose 项目名和目录，避免同名容器冲突，
   # 同时保留 .env、data、证书与 Caddy 数据卷。
-  INSTALL_DIR="$HOME/iperf3-fleet"
+  INSTALL_DIR="$CONTAINER_PROJECT_DIR"
   LEGACY_UPGRADE=1
 else
-  INSTALL_DIR="$HOME/LinkPilot"
+  LEGACY_INSTALL_DIR=""
+  for _candidate in "$TARGET_HOME/iperf3-fleet" /root/iperf3-fleet; do
+    if [ -f "$_candidate/docker-compose.yml" ]; then
+      LEGACY_INSTALL_DIR="$_candidate"
+      break
+    fi
+  done
+  if [ -n "$LEGACY_INSTALL_DIR" ] && [ ! -f "$TARGET_HOME/LinkPilot/data/auth.json" ]; then
+    INSTALL_DIR="$LEGACY_INSTALL_DIR"
+    LEGACY_UPGRADE=1
+  else
+    INSTALL_DIR="$TARGET_HOME/LinkPilot"
+  fi
 fi
 LOG_FILE="${IPERF3_FLEET_LOG:-/tmp/LinkPilot-install.log}"
 VERBOSE="${IPERF3_FLEET_VERBOSE:-0}"
