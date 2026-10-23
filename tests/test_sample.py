@@ -1415,10 +1415,16 @@ def test_dashboard_interactions_present():
                 'AbortController', 'skeleton-chart', 'comparisonTableHtml', '生成报告中',
                 '@media (max-width:700px)', 'params-grid', '保存后会立即开始首轮测试',
                 'showPopconfirm', 'eventStream', 'runSummary', 'qualityCellHtml',
-                'renderRunEvents', 'rating_diagnostics'):
+                'renderRunEvents', 'rating_diagnostics', 'event-stage',
+                'chart-control-label', '<th>上行</th><th>下行</th>'):
         assert key in html, f'缺少面板交互：{key}'
     assert "confirm('确定删除该测试记录？')" not in html, '测试记录删除不应使用原生确认框'
     assert 'data-pop="confirm"' in html, 'Popconfirm 缺少确认按钮'
+    start_block = html.split('function startRun(anchor)', 1)[1].split('/* ---------------- 测试记录', 1)[0]
+    assert 'if (!confirm(' not in start_block and "confirm('" not in start_block, \
+        '开始测试不应使用原生确认框'
+    assert 'showPopconfirm(anchor' in start_block, '开始测试应使用 Popconfirm'
+    assert '上行 (sender)' not in html and '下行 (receiver)' not in html
     for removed in ('默认 IPv4：iperf3 与 ping 都使用目标机的 IPv4 地址',
                     '参数即 iperf3 原生命令'):
         assert removed not in html, f'冗长说明未移除：{removed}'

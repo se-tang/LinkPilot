@@ -528,12 +528,12 @@ def build_report(run, target, items):
     lines.append(f"- **测试时间**：{run['created_at']} ~ {run.get('finished_at') or ''}")
     lines.append('')
     if udp:
-        lines.append('| 后端机器 | 地区 | 带宽 | ping 丢包 | RTT avg | ping 抖动 | 上行 (sender) '
-                     '| 下行 (receiver) | UDP 丢包 上/下 | UDP 抖动 上/下 | 线路质量评价 |')
+        lines.append('| 后端机器 | 地区 | 带宽 | ping 丢包 | RTT avg | ping 抖动 | 上行 '
+                     '| 下行 | UDP 丢包 上/下 | UDP 抖动 上/下 | 线路质量评价 |')
         lines.append('|---|---|---|---|---|---|---|---|---|---|---|')
     else:
-        lines.append('| 后端机器 | 地区 | 带宽 | 丢包率 | RTT avg | 抖动 mdev | 上行 (sender) '
-                     '| 下行 (receiver) | 重传 | 线路质量评价 |')
+        lines.append('| 后端机器 | 地区 | 带宽 | 丢包率 | RTT avg | 抖动 mdev | 上行 '
+                     '| 下行 | 重传 | 线路质量评价 |')
         lines.append('|---|---|---|---|---|---|---|---|---|---|')
     for it in items:
         name = it['machine_name']

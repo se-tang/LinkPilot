@@ -377,7 +377,7 @@ body[data-theme='dark'] .rb.rating-c{background:#452c3b;color:#ffb1bb}
 }
 .run-summary>div{min-width:0}.run-summary b{display:block;font-size:18px}.run-summary span{font-size:11px;color:var(--muted)}
 .run-summary .summary-status{grid-column:auto}
-.quality-cell{min-width:210px;display:flex;flex-direction:column;gap:5px}
+.quality-cell{min-width:210px;display:flex;flex-direction:column;gap:5px;align-items:flex-start}
 #detailResultTable{min-width:1080px}
 .quality-tags{display:flex;gap:4px;flex-wrap:wrap}
 .quality-tag{display:inline-block;padding:1px 6px;border-radius:5px;background:var(--surface2);border:1px solid var(--border);font-size:11px;color:var(--orange)}
@@ -389,22 +389,27 @@ body[data-theme='dark'] .rb.rating-c{background:#452c3b;color:#ffb1bb}
 .diagnostic-item b{font-weight:650}.diagnostic-item.warn b{color:var(--orange)}
 .diagnostic-item.bad b,.diagnostic-item.critical b{color:var(--red)}
 .diagnostic-item.ok b{color:var(--green)}.diagnostic-item.unknown b{color:var(--muted)}
-.event-stream{display:grid;gap:8px;margin:8px 0 12px}
-.event-group{border:1px solid var(--border);border-radius:11px;background:var(--surface2);overflow:hidden}
-.event-head{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--border);font-size:12px;font-weight:700}
-.event-head .event-state{margin-left:auto;font-size:11px;font-weight:600;color:var(--muted)}
-.event-row{display:grid;grid-template-columns:58px minmax(180px,.75fr) minmax(0,1.25fr);gap:8px;padding:7px 10px;border-bottom:1px solid var(--border);font-size:12px;line-height:1.5}
-.event-row:last-child{border-bottom:0}.event-row .event-time{color:var(--muted);font-family:ui-monospace,Consolas,monospace}
-.event-row .event-title{font-weight:600}.event-row .event-summary{color:var(--muted);min-width:0;word-break:break-word}
-.event-row.done .event-title{color:var(--green)}.event-row.warning .event-title{color:var(--orange)}
-.event-row.failed .event-title,.event-row.stopped .event-title{color:var(--red)}
+.event-stream{
+  background:var(--code-bg);color:var(--text);border:1px solid var(--border);border-radius:14px;
+  padding:13px 14px;max-height:260px;overflow:auto;
+  font:12px/1.7 ui-monospace,Menlo,Consolas,monospace;
+}
+.event-stage{color:var(--accent);font-weight:750;margin:10px 0 3px}
+.event-stage:first-child{margin-top:0}
+.event-line{display:flex;gap:8px;align-items:baseline;padding:1px 0;min-width:0}
+.event-time{color:var(--muted);flex:none}
+.event-title{font-weight:650;flex:none}
+.event-summary{color:var(--muted);min-width:0;word-break:break-word}
+.event-line.done .event-title{color:var(--green)}.event-line.warning .event-title{color:var(--orange)}
+.event-line.failed .event-title,.event-line.stopped .event-title{color:var(--red)}
+.event-line.running .event-title{color:var(--accent)}
 .raw-log-box{margin:6px 0 12px}.raw-log-box summary{color:var(--muted);font-size:12px}
 .popconfirm{
   position:fixed;z-index:120;width:min(280px,calc(100vw - 20px));padding:12px;
   border:1px solid var(--border);border-radius:12px;background:var(--card);
   color:var(--text);box-shadow:0 18px 50px rgba(0,0,0,.28);
 }
-.popconfirm h4{margin:0 0 4px;font-size:13px}.popconfirm p{margin:0 0 10px;color:var(--muted);font-size:12px;line-height:1.55}
+.popconfirm h4{margin:0 0 4px;font-size:13px}.popconfirm p{margin:0 0 10px;color:var(--muted);font-size:12px;line-height:1.55;white-space:pre-line}
 .popconfirm .actions{justify-content:flex-end}
 pre,.md-render{background:var(--code-bg);border:1px solid var(--border);border-radius:14px}
 pre{padding:13px 14px;font-size:12px;line-height:1.7}
@@ -429,6 +434,15 @@ details{border-radius:10px;background:color-mix(in srgb,var(--card) 92%,var(--su
 .sched-lifetime-row{background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:8px 10px}
 .toast{background:#111015;border-radius:10px;padding:8px 14px;box-shadow:0 12px 34px rgba(0,0,0,.3)}
 .chart-toolbar{margin-bottom:10px}
+.chips{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:8px 0}
+.chart-control-label{color:var(--muted);font-size:12px;margin-right:2px}
+.chip{
+  min-height:28px;padding:2px 9px;border:1px solid var(--border);border-radius:8px;
+  background:var(--bg);color:var(--text);font-size:12px;box-shadow:none;
+}
+.chip:hover{transform:none;background:var(--btn-hover);border-color:var(--border)}
+.chip.on,.chip.active{background:var(--btn-hover);border-color:transparent;color:var(--accent);font-weight:700}
+.chip i{display:inline-block;width:14px;height:3px;margin-right:6px;vertical-align:middle;border-radius:2px}
 .segmented{border-radius:9px;background:var(--surface2);padding:3px}
 .segmented button{min-height:28px;border:0;background:transparent;box-shadow:none;color:var(--muted)}
 .segmented button:hover{transform:none;background:rgba(123,108,246,.08);border-color:transparent}
@@ -440,7 +454,8 @@ details{border-radius:10px;background:color-mix(in srgb,var(--card) 92%,var(--su
 }
 .chart-chip:hover{transform:none;background:var(--btn-hover)}
 .chart-chip.active{border-color:transparent;background:var(--btn-hover);color:var(--accent)}
-#chartWrap{background:var(--code-bg);border-radius:14px;padding:10px}
+#chartWrap{background:var(--surface2);border:1px solid var(--border);border-radius:14px;padding:0}
+#chartWrap svg{min-width:660px}
 .legend{color:var(--muted)}
 .run-group td{background:rgba(123,108,246,.09);border-top:1px solid var(--border)}
 .run-child{background:color-mix(in srgb,var(--card) 88%,var(--surface2))}
@@ -490,8 +505,9 @@ details{border-radius:10px;background:color-mix(in srgb,var(--card) 92%,var(--su
   .run-child td:first-child{padding-left:14px}
   .run-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
   .run-summary .summary-status{grid-column:span 2}
-  .event-row{grid-template-columns:50px minmax(0,1fr)}
-  .event-row .event-summary{grid-column:2}
+  .event-line{display:block}
+  .event-line .event-time{margin-right:6px}
+  .event-summary{display:block;padding-left:0}
   .quality-cell{min-width:210px}
 }
 @media (max-width:420px){
@@ -600,17 +616,19 @@ details{border-radius:10px;background:color-mix(in srgb,var(--card) 92%,var(--su
     </div>
     <p class="muted" id="schedDetailMeta" style="margin:4px 0"></p>
     <div class="chart-toolbar">
-      <div class="segmented" id="chartModeButtons">
-        <button data-action="setChartMode" data-mode="single">单线</button>
-        <button data-action="setChartMode" data-mode="multi">自定义多线</button>
+      <div class="chips" id="chartModeButtons">
+        <span class="chart-control-label">模式</span>
+        <button class="chip" data-action="setChartMode" data-mode="single">单线</button>
+        <button class="chip" data-action="setChartMode" data-mode="multi">多线</button>
       </div>
-      <div class="segmented" id="chartDirButtons">
-        <button data-action="setChartDirection" data-direction="up">上行</button>
-        <button data-action="setChartDirection" data-direction="down">下行</button>
-        <button data-action="setChartDirection" data-direction="both">双向</button>
+      <div class="chips" id="chartDirButtons">
+        <span class="chart-control-label">方向</span>
+        <button class="chip" data-action="setChartDirection" data-direction="both">双向</button>
+        <button class="chip" data-action="setChartDirection" data-direction="up">仅上行</button>
+        <button class="chip" data-action="setChartDirection" data-direction="down">仅下行</button>
       </div>
     </div>
-    <div class="chart-picker" id="chartPicker"></div>
+    <div class="chips" id="chartPicker"></div>
     <h3>吞吐趋势（Mbit/s）</h3>
     <div id="chartWrap"></div>
     <div class="legend" id="chartLegend"></div>
@@ -675,7 +693,7 @@ details{border-radius:10px;background:color-mix(in srgb,var(--card) 92%,var(--su
     <table id="detailResultTable">
       <thead><tr>
         <th>后端机器</th><th>地区</th><th>带宽</th><th>丢包率</th><th>RTT avg</th><th>抖动 mdev</th>
-        <th>上行 (sender)</th><th>下行 (receiver)</th><th id="thRetr">重传</th><th>线路质量评价</th>
+        <th>上行</th><th>下行</th><th id="thRetr">重传</th><th>线路质量评价</th>
       </tr></thead>
       <tbody id="detailTableBody"></tbody>
     </table>
@@ -1269,7 +1287,7 @@ function updateIpv6Ui() {
   $('ipv6Hint').textContent = hints.join(' · ');
 }
 
-async function startRun() {
+function startRun(anchor) {
   const target_id = parseInt($('targetSelect').value, 10);
   const backend_ids = [...document.querySelectorAll('#backendList input[type=checkbox]:checked')].map(x => parseInt(x.value, 10));
   const ip_version = $('useIpv6').disabled ? 4 : ($('useIpv6').checked ? 6 : 4);
@@ -1308,11 +1326,6 @@ async function startRun() {
     }
   }
   const proto = ip_version === 6 ? 'IPv6' : 'IPv4';
-  if (ip_version === 6 && !confirm(
-      '确认所选后端机器都支持 IPv6？\n\n' +
-      'IPv6 测试要求每台后端机器与目标机之间都有 IPv6 连通性，\n' +
-      '任一机器没有 IPv6 出口都会导致该台测试失败。\n\n' +
-      '继续开始 IPv6 测试？')) return;
   // 把实际要用的目标地址与端口显式写进确认框：地址取错/端口对不上能立刻看出来
   const tgt = MACHINES.find(m => String(m.id) === String(target_id)) || {};
   const tgtAddr = testAddr(tgt, ip_version) || '地址未探测';
@@ -1320,20 +1333,31 @@ async function startRun() {
   const params = `${streams} 线程 · 上/下行各 ${duration} 秒 · ${portTxt} · `
     + `${udp ? `UDP（-b ${udp_bandwidth}/流，总目标约 ${streams}×）` : 'TCP'} · ping ${ping_count} 次`;
   const mins = Math.ceil((Math.max(backend_ids.length * (duration * 2 + 5), ping_count) + 30) / 60);
-  if (!confirm(`目标机：${tgt.name || target_id} → ${tgtAddr}:${port}\n`
-      + `后端机 ${backend_ids.length} 台，逐台执行：iperf3 -c <目标机> ${perMachinePorts ? '(各自端口)' : `-p ${port}`} `
-      + `-t ${duration} -P ${streams}${udp ? ` -u -b ${udp_bandwidth}` : ''}（+ 下行 -R）\n`
-      + `测试协议：${proto}；预计总时长约 ${mins} 分钟。\n确认开始？`)) return;
-  try {
-    const r = await api('/api/runs', {method: 'POST', body: JSON.stringify({
-      target_id, backend_ids, ip_version, streams, duration, port,
-      udp, udp_bandwidth, ping_count, ports,
-    })});
-    await loadRuns();
-    openRun(r.run_id);
-  } catch (e) {
-    alert('启动失败: ' + e.message);
-  }
+  const ipv6Warning = ip_version === 6
+    ? '\n\nIPv6 测试要求所有后端机与目标机均具备 IPv6 连通性，任一机器失败会导致该台结果失败。'
+    : '';
+  const message = `目标机：${tgt.name || target_id} → ${tgtAddr}:${port}\n`
+    + `后端机：${backend_ids.length} 台\n`
+    + `参数：${params}\n`
+    + `方向：上行 + 下行（-R）\n`
+    + `预计时长：约 ${mins} 分钟`
+    + ipv6Warning;
+  showPopconfirm(anchor, {
+    title: `开始 ${proto} 线路测试`,
+    message,
+    confirmText: '开始测试',
+    busyText: '启动中…',
+    errorPrefix: '启动失败',
+    onConfirm: async () => {
+      const r = await api('/api/runs', {method: 'POST', body: JSON.stringify({
+        target_id, backend_ids, ip_version, streams, duration, port,
+        udp, udp_bandwidth, ping_count, ports,
+      })});
+      await loadRuns();
+      openRun(r.run_id);
+      toast('测试已启动');
+    },
+  });
 }
 
 /* ---------------- 测试记录 ---------------- */
@@ -1459,23 +1483,13 @@ function renderRunEvents(events) {
     const ai = order.indexOf(a), bi = order.indexOf(b);
     return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
   });
-  box.innerHTML = stages.map(stage => {
-    const rows = groups.get(stage);
-    const bad = rows.find(r => ['failed', 'stopped'].includes(r.status));
-    const done = rows.find(r => ['done', 'warning', 'partial'].includes(r.status));
-    const warn = rows.find(r => ['warning', 'partial'].includes(r.status));
-    const running = rows.find(r => r.status === 'running');
-    const state = bad && done ? 'partial' : bad ? 'failed' : warn ? 'warning' : running ? 'running' : 'done';
-    return `<section class="event-group">
-      <div class="event-head"><span>${esc(EVENT_STAGE_LABELS[stage] || stage)}</span>
-        <span class="event-state">${esc(EVENT_STATUS_LABELS[state] || state)}</span></div>
-      ${rows.map(event => `<div class="event-row ${esc(event.status || 'done')}">
-        <span class="event-time">${esc(event.time || '')}</span>
+  box.innerHTML = stages.map(stage => `<div class="event-stage">── ${esc(EVENT_STAGE_LABELS[stage] || stage)} ──</div>`
+    + groups.get(stage).map(event => `<div class="event-line ${esc(event.status || 'done')}">
+        <span class="event-time">[${esc(event.time || '')}]</span>
         <span class="event-title">${esc(event.title || '')}</span>
-        <span class="event-summary">${esc(event.summary || '')}</span>
-      </div>`).join('')}
-    </section>`;
-  }).join('');
+        ${event.summary ? `<span class="event-summary">${esc(event.summary)}</span>` : ''}
+      </div>`).join('')
+  ).join('');
 }
 
 function openRun(id) {
@@ -1712,14 +1726,17 @@ function closePopconfirm() {
   activePopconfirm = null;
 }
 
-function showPopconfirm(anchor, {title, message, confirmText = '删除', onConfirm}) {
+function showPopconfirm(anchor, {
+  title, message, confirmText = '确认', onConfirm,
+  danger = false, errorPrefix = '操作失败', busyText = '处理中…',
+}) {
   closePopconfirm();
   if (!anchor) return;
   const bubble = document.createElement('div');
   bubble.className = 'popconfirm';
   bubble.innerHTML = `<h4>${esc(title)}</h4><p>${esc(message)}</p>
     <div class="actions"><button class="small" data-pop="cancel">取消</button>
-    <button class="small danger" data-pop="confirm">${esc(confirmText)}</button></div>`;
+    <button class="small ${danger ? 'danger' : 'primary'}" data-pop="confirm">${esc(confirmText)}</button></div>`;
   document.body.appendChild(bubble);
 
   const rect = anchor.getBoundingClientRect();
@@ -1743,14 +1760,14 @@ function showPopconfirm(anchor, {title, message, confirmText = '删除', onConfi
   bubble.querySelector('[data-pop="confirm"]').addEventListener('click', async (event) => {
     const btn = event.currentTarget;
     btn.disabled = true;
-    btn.textContent = '删除中…';
+    btn.textContent = busyText;
     try {
       await onConfirm();
       closePopconfirm();
     } catch (error) {
       btn.disabled = false;
       btn.textContent = confirmText;
-      toast('删除失败：' + error.message);
+      toast(`${errorPrefix}：` + error.message);
     }
   });
 }
@@ -1760,6 +1777,8 @@ function removeRun(id, anchor) {
     title: '删除测试记录',
     message: '删除后该轮结果和原始数据将无法恢复。',
     confirmText: '删除',
+    danger: true,
+    errorPrefix: '删除失败',
     onConfirm: async () => {
       await api(`/api/runs/${id}`, {method: 'DELETE'});
       if (CURRENT_RUN === Number(id)) {
@@ -2301,18 +2320,19 @@ function renderChartControls(d) {
     CHART_STATE.selected = new Set([String(machines[0].key)]);
   }
   document.querySelectorAll('#chartModeButtons button').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.mode === CHART_STATE.mode);
+    btn.classList.toggle('on', btn.dataset.mode === CHART_STATE.mode);
   });
   document.querySelectorAll('#chartDirButtons button').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.direction === CHART_STATE.direction);
+    btn.classList.toggle('on', btn.dataset.direction === CHART_STATE.direction);
   });
   const picker = $('chartPicker');
   if (picker) {
-    picker.innerHTML = machines.map(m => {
+    picker.innerHTML = machines.map((m, index) => {
       const key = String(m.key);
       const on = CHART_STATE.selected.has(key);
-      return `<button class="chart-chip ${on ? 'active' : ''}" data-action="toggleChartMachine"
-        data-key="${esc(key)}">${on ? '✓' : '＋'} ${esc(m.name)}</button>`;
+      const color = CHART_COLORS[index % CHART_COLORS.length];
+      return `<button class="chip ${on ? 'on' : ''}" data-action="toggleChartMachine"
+        data-key="${esc(key)}"><i style="background:${color}"></i>${esc(m.name)}</button>`;
     }).join('') || '<span class="muted">暂无可绘制线路</span>';
   }
 }
@@ -2354,7 +2374,7 @@ function buildTrendChartSvg(d, forClipboard = false) {
     if (p.status === 'done' && p[k] !== null && p[k] !== undefined) values.push(p[k]);
   })));
   if (!values.length) return {svg: '', legend: ''};
-  const W = 980, H = 300, PL = 58, PR = 18, PT = 18, PB = 42;
+  const W = 720, H = 250, PL = 44, PR = 12, PT = 18, PB = 24;
   let max = Math.max(...values), min = Math.min(...values);
   max = max * 1.08;
   min = Math.max(0, min * 0.9);
@@ -2377,8 +2397,7 @@ function buildTrendChartSvg(d, forClipboard = false) {
   const step = Math.max(1, Math.ceil(roundIds.length / 8));
   roundIds.forEach((rid, i) => {
     if (i % step !== 0 && i !== roundIds.length - 1) return;
-    const label = String(roundAt[rid] || ('#' + rid)).slice(5, 16);
-    g += `<text x="${x(i).toFixed(1)}" y="${H - PB + 18}" font-size="11" text-anchor="middle" fill="${text}">${esc(label)}</text>`;
+    g += `<text x="${x(i).toFixed(1)}" y="${H - 6}" font-size="10" text-anchor="middle" fill="${text}">第 ${i + 1} 轮</text>`;
   });
 
   selected.forEach(m => {
@@ -2389,7 +2408,7 @@ function buildTrendChartSvg(d, forClipboard = false) {
       let cur = [];
       const flush = () => {
         if (cur.length > 1) {
-          g += `<polyline points="${cur.join(' ')}" fill="none" stroke="${color}" stroke-width="2.2"${dash}/>`;
+          g += `<polyline points="${cur.join(' ')}" fill="none" stroke="${color}" stroke-width="2"${dash}/>`;
         }
         cur = [];
       };
@@ -2397,7 +2416,7 @@ function buildTrendChartSvg(d, forClipboard = false) {
         const v = pt.status === 'done' ? pt[dir] : null;
         if (v === null || v === undefined) { flush(); return; }
         cur.push(`${x(i).toFixed(1)},${y(v).toFixed(1)}`);
-        g += `<circle cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="2.7" fill="${color}">`
+        g += `<circle cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="4" fill="${color}" opacity="0">`
           + `<title>${esc(m.name)} · ${dir === 'up' ? '上行' : '下行'} ${fmt(v)} Mbit/s · ${esc(pt.at || '')}</title></circle>`;
       });
       flush();
@@ -2441,7 +2460,7 @@ const ACTIONS = {
   regenToken,
   copyAgentCmd: () => copyText($('agentCmd').textContent, '已复制接入命令'),
   logout,
-  startRun,
+  startRun: (d, el) => startRun(el),
   loadRuns: () => loadRuns(),
   openRun: (d) => openRun(d.id),
   removeRun: (d, el) => removeRun(d.id, el),
