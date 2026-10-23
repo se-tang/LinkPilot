@@ -1333,6 +1333,8 @@ def test_schedule_comparison_report():
     rep = scheduler.build_comparison_report(sch['id'])
     assert '# iperf3 长期对比报告' in rep, rep
     assert '对比用例' in rep and 'cmp-b' in rep and '趋势' in rep, rep
+    assert '| 机器 | 地区 | 样本 | 上行 均/低/高 | 下行 均/低/高' in rep, rep
+    assert '最低' not in rep.split('## 线路表现', 1)[1].split('## ', 1)[0], rep
     assert '93.184.*.*' in rep and '216.34' not in rep, rep         # 报告脱敏
     assert '每 10\u00a0分钟' in rep, rep
     assert '已完成轮次' in rep and '成功 6' in rep, rep
@@ -1446,7 +1448,9 @@ def test_dashboard_interactions_present():
                 'ratingExplanationHtml', 'ratingText',
                 'renderRunEvents', 'rating_diagnostics', 'event-stage',
                 'chart-control-label', '<th>上行</th><th>下行</th>',
-                'run-form', 'run-section-label', 'run-submit'):
+                'run-form', 'run-section-label', 'run-submit',
+                '<th>上行 均/低/高</th><th>下行 均/低/高</th>',
+                'ratingText'):
         assert key in html, f'缺少面板交互：{key}'
     assert "confirm('确定删除该测试记录？')" not in html, '测试记录删除不应使用原生确认框'
     assert 'data-pop="confirm"' in html, 'Popconfirm 缺少确认按钮'
@@ -1455,6 +1459,7 @@ def test_dashboard_interactions_present():
         '开始测试不应使用原生确认框'
     assert 'showPopconfirm(anchor' in start_block, '开始测试应使用 Popconfirm'
     assert '上行 (sender)' not in html and '下行 (receiver)' not in html
+    assert '最低 ${fmt' not in html, '跨轮汇总不应再用换行堆叠最低/最高说明'
     for fn_name, end_marker in (
         ('function saveSchedule(anchor)', 'function editSchedule'),
         ('function toggleSchedule(id, anchor)', 'function deleteSchedule'),

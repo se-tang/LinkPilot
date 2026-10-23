@@ -379,6 +379,7 @@ body[data-theme='dark'] .rb.rating-c{background:#452c3b;color:#ffb1bb}
 .run-summary .summary-status{grid-column:auto}
 .quality-cell{min-width:210px;display:flex;flex-direction:column;gap:5px;align-items:flex-start}
 #detailResultTable{min-width:1080px}
+#schedStatsBody td{white-space:nowrap}
 .quality-tags{display:flex;gap:4px;flex-wrap:wrap}
 .quality-tag{display:inline-block;padding:1px 6px;border-radius:5px;background:var(--surface2);border:1px solid var(--border);font-size:11px;color:var(--orange)}
 .quality-tag.info{color:var(--muted)}
@@ -648,9 +649,9 @@ details{border-radius:10px;background:color-mix(in srgb,var(--card) 92%,var(--su
     <div class="tbl-wrap">
     <table>
       <thead><tr>
-        <th>后端机器</th><th>地区</th><th>样本</th><th>上行均值</th><th>下行均值</th>
-        <th>丢包均值</th><th>RTT 均值</th><th>抖动均值</th><th>重传均值</th>
-        <th>趋势（后半段 vs 前半段）</th><th>评价（最好 / 最差）</th>
+        <th>机器</th><th>地区</th><th>样本</th><th>上行 均/低/高</th><th>下行 均/低/高</th>
+        <th>丢包均值</th><th>RTT</th><th>抖动</th><th>重传</th>
+        <th>趋势（后半 vs 前半）</th><th>最好/最差</th>
       </tr></thead>
       <tbody id="schedStatsBody"></tbody>
     </table>
@@ -2291,19 +2292,20 @@ function renderScheduleComparison(d) {
   const stats = d.stats || [];
   $('schedStatsBody').innerHTML = stats.length ? stats.map(st => {
     const trend = st.trend_pct === null || st.trend_pct === undefined
-      ? `<span class="trend-flat">—</span>${st.trend_reason ? `<br><span class="muted" style="font-size:11px">${esc(st.trend_reason)}</span>` : ''}`
-      : (st.trend_pct > 3 ? `<span class="trend-up">↑ +${fmt(st.trend_pct)}%</span>`
-        : (st.trend_pct < -3 ? `<span class="trend-down">↓ ${fmt(st.trend_pct)}%</span>`
-          : `<span class="trend-flat">→ ${fmt(st.trend_pct)}%</span>`));
-    const cell = (agg, nd, suffix) => agg
-      ? `${fmt(agg.avg, suffix || '')}<br><span class="muted" style="font-size:11px">最低 ${fmt(agg.min, suffix || '')} / 最高 ${fmt(agg.max, suffix || '')}</span>`
-      : '<span class="muted">—</span>';
+      ? `<span class="trend-flat" title="${esc(st.trend_reason || '结果不足')}">样本不足</span>`
+      : (st.trend_pct > 3 ? `<span class="trend-up"><b>+${fmt(st.trend_pct)}%</b></span>`
+        : (st.trend_pct < -3 ? `<span class="trend-down"><b>${fmt(st.trend_pct)}%</b></span>`
+          : `<span class="trend-flat"><b>${fmt(st.trend_pct)}%</b></span>`));
+    const tri = (agg, nd) => agg
+      ? `${fmt(agg.avg, nd)} / ${fmt(agg.min, nd)} / ${fmt(agg.max, nd)}`
+      : '—';
+    const avg = (agg, nd, suffix = '') => agg ? `${fmt(agg.avg, nd)}${suffix}` : '—';
     const ratings = [st.best_rating, st.worst_rating].filter(Boolean);
     return `<tr>
       <td>${esc(st.name)}</td><td>${esc(st.region) || '—'}</td><td>${st.samples}</td>
-      <td>${cell(st.up, 1, ' Mbit/s')}</td><td>${cell(st.down, 1, ' Mbit/s')}</td>
-      <td>${cell(st.loss, 2, '%')}</td><td>${cell(st.rtt, 1, ' ms')}</td>
-      <td>${cell(st.mdev, 2, ' ms')}</td><td>${cell(st.retr, 0, '')}</td>
+      <td>${tri(st.up, 1)}</td><td>${tri(st.down, 1)}</td>
+      <td>${avg(st.loss, 2, '%')}</td><td>${avg(st.rtt, 1, ' ms')}</td>
+      <td>${avg(st.mdev, 2, ' ms')}</td><td>${avg(st.retr, 0)}</td>
       <td>${trend}</td>
       <td>${ratings.length ? ratings.map(r => `<span class="rb ${ratingClass(r)}">${ratingText(r)}</span>`).join(' / ') : '—'}</td>
     </tr>`;

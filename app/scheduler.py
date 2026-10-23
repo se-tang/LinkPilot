@@ -595,45 +595,38 @@ def build_comparison_report(sid, limit=ROUND_LIMIT, view_limit=VIEW_ROUNDS):
         lines.append('> 还没有完成任何一轮测试，稍后再来看。')
         return quality.mask_report_text('\n'.join(lines))
 
-    series_len = {}
-    for m in data['machines']:
-        series_len[m['name']] = len(m['series'])
     lines += [
         '## 线路表现',
         '',
-        '| 线路 | 成功率 | 上行均值 / 区间 (Mbit/s) | 下行均值 / 区间 (Mbit/s) '
-        '| 丢包 / RTT | 趋势 | 评价 |',
-        '|---|---:|---|---|---|---:|---|',
+        '| 机器 | 地区 | 样本 | 上行 均/低/高 | 下行 均/低/高 '
+        '| 丢包均值 | RTT | 抖动 | 重传 | 趋势（后半 vs 前半） | 最好/最差 |',
+        '|---|---|---:|---|---|---:|---:|---:|---:|---:|---|',
     ]
     for st in data['stats']:
         up, down, loss = st['up'], st['down'], st['loss']
-        rtt = st['rtt']
         trend = '—'
         if st['trend_pct'] is not None:
             t = st['trend_pct']
-            arrow = '↑' if t > 3 else ('↓' if t < -3 else '→')
-            trend = f'{arrow} {t:+.1f}%'
+            trend = f'{t:+.1f}%'
         elif st.get('trend_reason'):
-            trend = f"—（{st['trend_reason']}）"
+            trend = '样本不足'
         ratings = ' / '.join(x for x in (st['best_rating'], st['worst_rating']) if x) or '—'
-        total = max(1, series_len.get(st['name'], st['samples']))
-        success = st['samples'] / total * 100
         up_text = '—'
         if up:
-            up_text = (f"{quality.fmt_num(up['avg'])} / "
-                       f"{quality.fmt_num(up['min'])}–{quality.fmt_num(up['max'])}")
+            up_text = (f"{quality.fmt_num(up['avg'])} / {quality.fmt_num(up['min'])} / "
+                       f"{quality.fmt_num(up['max'])}")
         down_text = '—'
         if down:
-            down_text = (f"{quality.fmt_num(down['avg'])} / "
-                         f"{quality.fmt_num(down['min'])}–{quality.fmt_num(down['max'])}")
-        quality_text = '—'
-        if loss:
-            quality_text = quality.fmt_num(loss['avg'], 2) + '%'
-            if rtt:
-                quality_text += ' / ' + quality.fmt_num(rtt['avg']) + ' ms'
+            down_text = (f"{quality.fmt_num(down['avg'])} / {quality.fmt_num(down['min'])} / "
+                         f"{quality.fmt_num(down['max'])}")
+        loss_text = quality.fmt_num(loss['avg'], 2) + '%' if loss else '—'
+        rtt_text = quality.fmt_num(st['rtt']['avg']) + ' ms' if st['rtt'] else '—'
+        mdev_text = quality.fmt_num(st['mdev']['avg'], 2) + ' ms' if st['mdev'] else '—'
+        retr_text = quality.fmt_num(st['retr']['avg'], 0) if st['retr'] else '—'
         lines.append(
-            f"| {st['name']} | {success:.0f}% ({st['samples']}/{total}) | {up_text} "
-            f"| {down_text} | {quality_text} | {trend} | {ratings} |")
+            f"| {st['name']} | {st['region'] or '—'} | {st['samples']} | {up_text} "
+            f"| {down_text} | {loss_text} | {rtt_text} | {mdev_text} | {retr_text} "
+            f"| {trend} | {ratings} |")
     lines.append('')
 
     by_round = {}
