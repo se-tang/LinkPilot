@@ -427,6 +427,16 @@ details{border-radius:10px;background:color-mix(in srgb,var(--card) 92%,var(--su
 .field label,.grid2 label{color:var(--muted);font-size:12px}
 #backendList{background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:8px 10px}
 #backendList .chk{padding:3px 0}
+.run-form{display:flex;flex-direction:column;gap:9px}
+.run-section-label{display:flex;flex-direction:column;gap:4px;color:var(--muted);font-size:12px}
+.run-section-label>select{width:100%;color:var(--text);font-size:13px}
+.run-backend-list{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:7px 10px;display:flex;flex-direction:column;gap:3px}
+.run-options{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--text)}
+.run-options .chk{font-size:12px}
+.run-hint{color:var(--muted);font-size:11px;min-height:16px;line-height:1.45}
+.run-params-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin:0}
+.run-params-grid>.field{width:auto!important;margin:0!important}
+.run-submit{width:100%;min-height:36px;margin-top:2px}
 #sBackendList{border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--surface2)}
 #sBackendList .sched-backend-option{padding:8px 10px;border-bottom:1px solid var(--border);border-radius:0}
 #sBackendList .sched-backend-option:last-child{border-bottom:0}
@@ -518,6 +528,7 @@ details{border-radius:10px;background:color-mix(in srgb,var(--card) 92%,var(--su
   .card{padding:0 10px 10px}
   .card-head{margin-left:-10px;margin-right:-10px}
   .params-grid{grid-template-columns:1fr}
+  .run-params-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 @media (prefers-reduced-motion:reduce){
   *{transition:none!important;scroll-behavior:auto!important}
@@ -558,32 +569,33 @@ details{border-radius:10px;background:color-mix(in srgb,var(--card) 92%,var(--su
 
   <section class="card" id="runCard">
     <div class="card-head"><h2>发起测试</h2></div>
-    <div class="row"><b>目标机器：</b><select id="targetSelect" style="min-width:360px"></select></div>
-    <div class="row" style="align-items:flex-start">
-      <b>后端机器：</b>
-      <div id="backendList" style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:280px"></div>
-    </div>
-    <div class="row">
-      <label class="chk"><input type="checkbox" id="useIpv6"> 🌐 使用 IPv6 测试（需双端均支持 IPv6）</label>
-      <span class="muted" id="ipv6Hint" style="font-size:12px"></span>
-    </div>
-    <div class="row params-grid">
-      <div class="field" style="width:92px;margin-bottom:0"><label>线程数 -P</label>
+    <div class="run-form">
+      <label class="run-section-label">目标机器
+        <select id="targetSelect"></select>
+      </label>
+      <div class="run-section-label">后端机器</div>
+      <div id="backendList" class="run-backend-list"></div>
+      <div class="run-options">
+        <label class="chk"><input type="checkbox" id="useIpv6"> 使用 IPv6 测试</label>
+        <label class="chk"><input type="checkbox" id="cfgUdp"> UDP 测试</label>
+        <label class="chk"><input type="checkbox" id="cfgAdvPorts"> 每台机器单独指定端口</label>
+      </div>
+      <div class="run-hint" id="ipv6Hint"></div>
+      <div class="row params-grid run-params-grid">
+      <div class="field"><label>线程数 -P</label>
         <input type="number" id="cfgStreams" value="1" min="1" max="32" step="1"></div>
-      <div class="field" style="width:104px;margin-bottom:0"><label>单向时长 -t</label>
+      <div class="field"><label>单向时长 -t</label>
         <input type="number" id="cfgDuration" value="10" min="1" max="300" step="1"></div>
-      <div class="field" style="width:124px;margin-bottom:0"><label>目标机端口 -p</label>
+      <div class="field"><label>目标机端口 -p</label>
         <input type="number" id="cfgPort" value="5201" min="1" max="65535" step="1" data-prev="5201"
                title="目标机 iperf3 -s 的端口；后端机默认也连这个端口（NAT 端口映射一般是同号映射，只改这里即可）"></div>
-      <div class="field" style="width:110px;margin-bottom:0"><label>ping 次数 -c</label>
+      <div class="field"><label>Ping 次数 -c</label>
         <input type="number" id="cfgPing" value="200" min="1" max="2000" step="1"></div>
-      <label class="chk" style="margin-bottom:6px"><input type="checkbox" id="cfgUdp"> 📦 UDP 测试 -u</label>
-      <div class="field" style="width:132px;margin-bottom:0"><label>UDP 带宽/流 -b</label>
+      <div class="field"><label>UDP 带宽/流</label>
         <input id="cfgUdpBw" value="100M" placeholder="100M" disabled></div>
-      <label class="chk" style="margin-bottom:6px" title="一般不需要：后端机默认就用目标机端口，只有个别机器要走不同端口时才勾">
-        <input type="checkbox" id="cfgAdvPorts"> 每台机器单独指定端口</label>
+      </div>
+      <button class="primary run-submit" data-action="startRun">开始测试</button>
     </div>
-    <div class="row"><button class="primary" data-action="startRun">🚀 开始测试</button></div>
   </section>
   </div>
 
@@ -1819,6 +1831,7 @@ function syncUdpControls(checkId, bandwidthId) {
   const bandwidth = $(bandwidthId);
   bandwidth.disabled = !on;
   bandwidth.style.opacity = on ? '1' : '.55';
+  if (bandwidth.closest('.field')) bandwidth.closest('.field').classList.toggle('hidden', !on);
 }
 
 function syncLifetimeControls() {
@@ -2000,7 +2013,7 @@ function closeSchedModal() {
   CURRENT_SCHED = null;
 }
 
-async function saveSchedule() {
+function saveSchedule(anchor) {
   const interval = intervalSeconds();
   if (!interval) return alert('请填写间隔时间（≥ 1）');
   if (interval < 300 || interval > 30 * 86400) {
@@ -2041,29 +2054,33 @@ async function saveSchedule() {
   };
   const per = `每 ${humanDuration(interval)}跑一轮，单轮约 ${Math.ceil((backend_ids.length * (duration * 2 + 5) + ping_count + 30) / 60)} 分钟`;
   const lifeText = lifetime ? `连续运行 ${humanDuration(lifetime)}` : '不限时运行';
-  if (!CURRENT_SCHED && !confirm(
-      `${body.name}\n目标机 + ${backend_ids.length} 台后端机，${per}，${lifeText}。\n`
-      + '保存后会立即开始首轮测试。确认创建？')) return;
-  try {
-    if (CURRENT_SCHED) {
-      await api(`/api/schedules/${CURRENT_SCHED}`, {method: 'PUT', body: JSON.stringify(body)});
-      toast('已保存（下一轮按新设置执行）');
-    } else {
-      const created = await api('/api/schedules', {method: 'POST', body: JSON.stringify(body)});
-      toast(created.started
-        ? `定时任务已创建，首轮 ${created.start_note || '已开始'}`
-        : `定时任务已创建，首轮未启动：${created.start_note || '请稍后重试'}`,
-        created.started ? 5000 : 8000);
-      if (created.started && created.last_run_id) {
-        await loadRuns();
-        openRun(created.last_run_id);
+  const editingId = CURRENT_SCHED;
+  showPopconfirm(anchor, {
+    title: editingId ? '保存定时任务修改' : '创建定时任务',
+    message: `${body.name}\n目标机 + ${backend_ids.length} 台后端机\n${per}\n${lifeText}`
+      + (editingId ? '' : '\n保存后会立即开始首轮测试。'),
+    confirmText: editingId ? '保存修改' : '创建任务',
+    busyText: editingId ? '保存中…' : '创建中…',
+    errorPrefix: '保存失败',
+    onConfirm: async () => {
+      if (editingId) {
+        await api(`/api/schedules/${editingId}`, {method: 'PUT', body: JSON.stringify(body)});
+        toast('已保存（下一轮按新设置执行）');
+      } else {
+        const created = await api('/api/schedules', {method: 'POST', body: JSON.stringify(body)});
+        toast(created.started
+          ? `定时任务已创建，首轮 ${created.start_note || '已开始'}`
+          : `定时任务已创建，首轮未启动：${created.start_note || '请稍后重试'}`,
+          created.started ? 5000 : 8000);
+        if (created.started && created.last_run_id) {
+          await loadRuns();
+          openRun(created.last_run_id);
+        }
       }
-    }
-    closeSchedModal();
-    await loadSchedules();
-  } catch (e) {
-    alert('保存失败: ' + e.message);
-  }
+      closeSchedModal();
+      await loadSchedules();
+    },
+  });
 }
 
 function editSchedule(id) {
@@ -2071,43 +2088,61 @@ function editSchedule(id) {
   if (s) openScheduleForm(s);
 }
 
-async function toggleSchedule(id) {
+function toggleSchedule(id, anchor) {
   const s = SCHEDULES.find(x => x.id === Number(id));
   if (!s) return;
-  if (s.enabled && !confirm(`停用「${s.name}」？停用后不再自动执行，已有记录与对比数据都保留。`)) return;
-  try {
-    await api(`/api/schedules/${id}/toggle`, {method: 'POST'});
-    await loadSchedules();
-    toast(s.enabled ? '已停用' : '已启用');
-  } catch (e) { alert(e.message); }
+  showPopconfirm(anchor, {
+    title: s.enabled ? '停用定时任务' : '启用定时任务',
+    message: s.enabled
+      ? `停用「${s.name}」？停用后不再自动执行，已有记录和对比数据都会保留。`
+      : `启用「${s.name}」？启用后会按当前间隔重新排期。`,
+    confirmText: s.enabled ? '停用' : '启用',
+    danger: s.enabled,
+    errorPrefix: s.enabled ? '停用失败' : '启用失败',
+    onConfirm: async () => {
+      await api(`/api/schedules/${id}/toggle`, {method: 'POST'});
+      await loadSchedules();
+      toast(s.enabled ? '已停用' : '已启用');
+    },
+  });
 }
 
-async function deleteSchedule(id) {
+function deleteSchedule(id, anchor) {
   const s = SCHEDULES.find(x => x.id === Number(id));
   if (!s) return;
-  if (!confirm(`删除定时任务「${s.name}」？\n\n它的测试记录（每一轮的完整报告）会保留在「测试记录」里，只删除这个定时任务本身。`)) return;
-  try {
-    await api(`/api/schedules/${id}`, {method: 'DELETE'});
-    if (CURRENT_SCHED === Number(id)) closeSchedDetail();
-    await loadSchedules();
-    toast('已删除');
-  } catch (e) { alert(e.message); }
+  showPopconfirm(anchor, {
+    title: '删除定时任务',
+    message: `删除「${s.name}」？\n已有测试记录、逐轮数据和长期对比图都会保留。`,
+    confirmText: '删除',
+    danger: true,
+    errorPrefix: '删除失败',
+    onConfirm: async () => {
+      await api(`/api/schedules/${id}`, {method: 'DELETE'});
+      if (CURRENT_SCHED === Number(id)) closeSchedDetail();
+      await loadSchedules();
+      toast('定时任务已删除，历史记录保留');
+    },
+  });
 }
 
-async function runScheduleNow(id) {
+function runScheduleNow(id, anchor) {
   const s = SCHEDULES.find(x => x.id === Number(id));
   if (!s) return;
-  if (!confirm(`立即为「${s.name}」跑一轮？\n（不会改变原有的间隔排期；若面板已有测试在跑，会按该任务的冲突策略处理）`)) return;
-  try {
-    const r = await api(`/api/schedules/${id}/run-now`, {method: 'POST'});
-    toast(r.note || '已开始');
-    await loadSchedules();
-    await loadRuns();
-    const st = await api('/api/status');
-    if (st.active_run_id) openRun(st.active_run_id);
-  } catch (e) {
-    alert('启动失败: ' + e.message);
-  }
+  showPopconfirm(anchor, {
+    title: '立即执行一轮',
+    message: `立即为「${s.name}」执行一轮？\n不会改变原有排期；若已有测试运行，将按该任务的冲突策略处理。`,
+    confirmText: '立即执行',
+    busyText: '启动中…',
+    errorPrefix: '启动失败',
+    onConfirm: async () => {
+      const r = await api(`/api/schedules/${id}/run-now`, {method: 'POST'});
+      toast(r.note || '已开始');
+      await loadSchedules();
+      await loadRuns();
+      const st = await api('/api/status');
+      if (st.active_run_id) openRun(st.active_run_id);
+    },
+  });
 }
 
 /* --- 对比视图 --- */
@@ -2472,11 +2507,11 @@ const ACTIONS = {
   stopCurrentRun,
   openScheduleForm: () => openScheduleForm(null),
   closeSchedModal,
-  saveSchedule,
+  saveSchedule: (d, el) => saveSchedule(el),
   editSchedule: (d) => editSchedule(d.id),
-  toggleSchedule: (d) => toggleSchedule(d.id),
-  deleteSchedule: (d) => deleteSchedule(d.id),
-  runScheduleNow: (d) => runScheduleNow(d.id),
+  toggleSchedule: (d, el) => toggleSchedule(d.id, el),
+  deleteSchedule: (d, el) => deleteSchedule(d.id, el),
+  runScheduleNow: (d, el) => runScheduleNow(d.id, el),
   compareSchedule: (d) => compareSchedule(d.id),
   setChartMode: (d) => setChartMode(d.mode),
   setChartDirection: (d) => setChartDirection(d.direction),
@@ -2521,9 +2556,17 @@ $('backendList').addEventListener('change', updateIpv6Ui);
 $('useIpv6').addEventListener('change', () => {
   // 勾选 IPv6 时给出一次显式确认，避免误选后整轮失败
   const cb = $('useIpv6');
-  if (cb.checked && !confirm('IPv6 测试将使用目标机的 IPv6 地址：\n确认所有选中的后端机器都支持 IPv6？')) {
-    cb.checked = false;
-  }
+  if (!cb.checked) return;
+  cb.checked = false;
+  showPopconfirm(cb, {
+    title: '启用 IPv6 测试',
+    message: 'IPv6 测试要求所有后端机与目标机均具备 IPv6 连通性。任一机器缺少 IPv6 会导致该台测试失败。',
+    confirmText: '启用 IPv6',
+    onConfirm: async () => {
+      cb.checked = true;
+      updateIpv6Ui();
+    },
+  });
 });
 
 $('cfgUdp').addEventListener('change', () => {
