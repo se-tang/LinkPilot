@@ -92,6 +92,12 @@ def test_rating_system():
     actual_shape = dict(good)
     quality.evaluate(actual_shape, {'machine_bandwidth': '500M'}, {'duration': 10})
     assert '吞吐基线缺失' not in actual_shape['rating_tags'], actual_shape
+    no_latency = dict(good)
+    no_latency.pop('rtt_avg', None)
+    no_latency.pop('mdev_ms', None)
+    no_latency['retr_total'] = None
+    quality.evaluate(no_latency, {'bandwidth': '500M'}, {'duration': 10})
+    assert no_latency['rating_code'] == 'S', no_latency
 
     poor = dict(good, loss_pct=2.5, rtt_avg=240.0, mdev_ms=18.0,
                 up_mbits=120.0, down_mbits=90.0, retr_total=40,
@@ -645,8 +651,8 @@ def test_multistream_and_udp_parse():
     assert mt['retr_total'] is None, mt          # UDP 没有重传概念
     assert mt['up_mbits'] == 96.4 and mt['down_mbits'] == 91.6, mt
     quality.evaluate(mt, {'bandwidth': ''}, {'duration': 10})
-    assert 'UDP 最大丢包' in mt['rating_detail'] and 'UDP 最大抖动' in mt['rating_detail'], mt
-    assert mt['rating_code'] == '?', mt
+    assert '丢包 0.5%' in mt['rating_detail'] and '不参与评级' in mt['rating_detail'], mt
+    assert mt['rating_code'] in ('S', 'A', 'B', 'C'), mt
     print('多线程 / UDP 解析 OK:', mt['rating'], '|', mt['rating_detail'])
 
 

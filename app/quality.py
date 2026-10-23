@@ -17,14 +17,8 @@ HEADER_RE = re.compile(r'^\[\s*ID\s*\]')
 # 项目自定义的初始经验阈值，不是行业标准。后续应根据真实线路样本校准。
 RATING_THRESHOLDS = {
     'loss_pct': {'warn': 0.1, 'bad': 1.0, 'critical': 3.0},
-    'rtt_ms': {'warn': 80.0, 'bad': 180.0, 'critical': 350.0},
-    'mdev_ms': {'warn': 2.0, 'bad': 5.0, 'critical': 15.0},
     'throughput_pct': {'warn': 85.0, 'bad': 65.0, 'critical': 40.0},
-    'retr_per_gib': {'warn': 2.0, 'bad': 10.0, 'critical': 30.0},
-    'retr_per_min': {'warn': 1.0, 'bad': 6.0, 'critical': 20.0},
-    'udp_loss_pct': {'warn': 0.1, 'bad': 1.0, 'critical': 3.0},
-    'udp_jitter_ms': {'warn': 1.0, 'bad': 5.0, 'critical': 15.0},
-    'receiver_ratio': {'warn': 0.9, 'bad': 0.7, 'critical': 0.4},
+    'throughput_abs_mbps': {'warn': 300.0, 'bad': 100.0, 'critical': 20.0},
 }
 RATING_SEVERITY_SCORE = {'ok': 0, 'warn': 1, 'bad': 3, 'critical': 6}
 RATING_CODE_INFO = {
@@ -241,10 +235,10 @@ def _issue_text(tag):
 
 
 def evaluate(mt, machine, run=None):
-    """按初始经验阈值计算 S/A/B/C/F 评级和结构化诊断。
+    """按丢包和上下行吞吐计算 S/A/B/C 评级。
 
-    所有阈值集中在 RATING_THRESHOLDS，仅用于项目内部比较，不代表行业标准。
-    缺失关键指标时返回“数据不足”，不会按 0 或优秀处理。
+    RTT、mdev、重传只作为展示/诊断信息，不参与等级计算，也不会因缺失而返回数据不足。
+    阈值集中在 RATING_THRESHOLDS，属于项目初始经验值，不是行业标准。
     """
     run = run or {}
     diagnostics = []
@@ -263,27 +257,8 @@ def evaluate(mt, machine, run=None):
             issues.append({'tag': tag, 'severity': status,
                            'score': RATING_SEVERITY_SCORE[status]})
 
-    loss = mt.get('loss_pct')
-    if loss is None:
-        missing.append('ping 丢包率')
-    else:
-        sev = _lower_better_severity(loss, RATING_THRESHOLDS['loss_pct'])
-        add('丢包率', sev, f'ping 丢包 {fmt_num(loss, 2)}%', '存在丢包' if sev != 'ok' else None, loss)
-
-    rtt = mt.get('rtt_avg')
-    if rtt is None:
-        missing.append('RTT')
-    else:
-        sev = _lower_better_severity(rtt, RATING_THRESHOLDS['rtt_ms'])
-        add('RTT', sev, f'RTT 平均 {fmt_num(rtt)} ms', 'RTT 偏高' if sev != 'ok' else None, rtt)
-
-    mdev = mt.get('mdev_ms')
-    if mdev is None:
-        missing.append('抖动 mdev')
-    else:
-        sev = _lower_better_severity(mdev, RATING_THRESHOLDS['mdev_ms'])
-        add('抖动', sev, f'ping 抖动 {fmt_num(mdev, 2)} ms',
-            '抖动偏高' if sev != 'ok' else None, mdev)
+    def info(name, text, value=None):
+        diagnostics.append({'name': name, 'status': 'info', 'text': text, 'value': value})
 
     up = mt.get('up_mbits')
     down = mt.get('down_mbits')
@@ -292,73 +267,48 @@ def evaluate(mt, machine, run=None):
     if down is None or float(down or 0) <= 0:
         missing.append('下行吞吐')
 
-    labeled = parse_bw(machine.get('bandwidth') or machine.get('machine_bandwidth'))
-    if not labeled:
-        tags.append('吞吐基线缺失')
-        diagnostics.append({
-            'name': '吞吐达成率', 'status': 'unknown', 'value': None,
-            'text': '机器未填写带宽标记，无法计算标称吞吐达成率',
-        })
+    loss_values = []
+    if mt.get('loss_pct') is not None:
+        loss_values.append(float(mt['loss_pct']))
+    for key in ('up_udp_loss_pct', 'down_udp_loss_pct'):
+        if mt.get(key) is not None:
+            loss_values.append(float(mt[key]))
+    if not loss_values:
+        missing.append('丢包率')
+        loss = None
     else:
-        for direction, val in (('上行', up), ('下行', down)):
-            if val is None or float(val) <= 0:
-                continue
+        loss = max(loss_values)
+        sev = _lower_better_severity(loss, RATING_THRESHOLDS['loss_pct'])
+        add('丢包率', sev, f'丢包 {fmt_num(loss, 2)}%',
+            '存在丢包' if sev != 'ok' else None, loss)
+
+    labeled = parse_bw(machine.get('bandwidth') or machine.get('machine_bandwidth'))
+    for direction, val in (('上行', up), ('下行', down)):
+        if val is None or float(val) <= 0:
+            continue
+        if labeled:
             pct = float(val) / labeled * 100.0
             sev = _higher_better_severity(pct, RATING_THRESHOLDS['throughput_pct'])
-            tag = f'{direction}吞吐偏低' if sev != 'ok' else None
-            add(f'{direction}吞吐', sev,
-                f'{direction} {fmt_num(val)} Mbit/s，约为标称 {labeled:g}M 的 {pct:.0f}%',
-                tag, pct)
+            text = f'{direction} {fmt_num(val)} Mbit/s，约为标称 {labeled:g}M 的 {pct:.0f}%'
+            metric_value = pct
+        else:
+            sev = _higher_better_severity(
+                float(val), RATING_THRESHOLDS['throughput_abs_mbps'])
+            text = f'{direction} {fmt_num(val)} Mbit/s（机器未标记带宽，按绝对吞吐评估）'
+            metric_value = float(val)
+        tag = f'{direction}吞吐偏低' if sev != 'ok' else None
+        add(f'{direction}吞吐', sev, text, tag, metric_value)
 
+    rtt = mt.get('rtt_avg')
+    mdev = mt.get('mdev_ms')
     retr = mt.get('retr_total')
-    transfer_mb = mt.get('transfer_total_mb')
+    info('RTT（仅展示）',
+         f'RTT 平均 {fmt_num(rtt)} ms，不参与评级' if rtt is not None else '未提供 RTT，不影响评级')
+    info('抖动（仅展示）',
+         f'抖动 {fmt_num(mdev, 2)} ms，不参与评级' if mdev is not None else '未提供抖动，不影响评级')
     if not mt.get('udp'):
-        if retr is None or transfer_mb is None or float(transfer_mb or 0) <= 0:
-            missing.append('TCP 重传/传输量')
-        else:
-            duration = max(1.0, float(run.get('duration') or 10))
-            per_gib = float(retr) / (float(transfer_mb) / 1024.0)
-            per_min = float(retr) / (duration / 60.0)
-            sev_gib = _lower_better_severity(per_gib, RATING_THRESHOLDS['retr_per_gib'])
-            sev_min = _lower_better_severity(per_min, RATING_THRESHOLDS['retr_per_min'])
-            rank = {'ok': 0, 'warn': 1, 'bad': 2, 'critical': 3}
-            sev = max((sev_gib, sev_min), key=lambda x: rank.get(x, 0))
-            add('重传', sev,
-                f'重传 {int(retr)} 次，约 {fmt_num(per_gib, 2)} 次/GiB、'
-                f'{fmt_num(per_min, 2)} 次/分钟',
-                '重传偏高' if sev != 'ok' else None, per_gib)
-
-        us_, ur_ = mt.get('up_sender_mbits'), mt.get('up_receiver_mbits')
-        ds_, dr_ = mt.get('down_sender_mbits'), mt.get('down_receiver_mbits')
-        if us_ and ur_:
-            ratio = float(ur_) / float(us_)
-            sev = _higher_better_severity(ratio, RATING_THRESHOLDS['receiver_ratio'])
-            add('上行接收率', sev, f'上行接收率 {ratio * 100:.1f}%',
-                '传输损耗' if sev != 'ok' else None, ratio)
-        if ds_ and dr_:
-            ratio = float(dr_) / float(ds_)
-            sev = _higher_better_severity(ratio, RATING_THRESHOLDS['receiver_ratio'])
-            add('下行接收率', sev, f'下行接收率 {ratio * 100:.1f}%',
-                '传输损耗' if sev != 'ok' else None, ratio)
-    else:
-        udp_losses = [v for v in (mt.get('up_udp_loss_pct'), mt.get('down_udp_loss_pct'))
-                      if v is not None]
-        udp_jitters = [v for v in (mt.get('up_jitter_ms'), mt.get('down_jitter_ms'))
-                       if v is not None]
-        if not udp_losses:
-            missing.append('UDP 丢包')
-        else:
-            worst = max(udp_losses)
-            sev = _lower_better_severity(worst, RATING_THRESHOLDS['udp_loss_pct'])
-            add('UDP 丢包', sev, f'UDP 最大丢包 {fmt_num(worst, 2)}%',
-                'UDP 丢包偏高' if sev != 'ok' else None, worst)
-        if not udp_jitters:
-            missing.append('UDP 抖动')
-        else:
-            worst = max(udp_jitters)
-            sev = _lower_better_severity(worst, RATING_THRESHOLDS['udp_jitter_ms'])
-            add('UDP 抖动', sev, f'UDP 最大抖动 {fmt_num(worst, 2)} ms',
-                'UDP 抖动偏高' if sev != 'ok' else None, worst)
+        info('重传（仅展示）',
+             f'重传 {int(retr)} 次，不参与评级' if retr is not None else '未提供重传数据，不影响评级')
 
     missing = list(dict.fromkeys(missing))
     if missing:
@@ -369,14 +319,11 @@ def evaluate(mt, machine, run=None):
             'text': '缺少关键指标：' + '、'.join(missing), 'value': missing,
         })
 
-    if missing or not labeled:
-        code = '?'
-    else:
-        code = _grade_for_score(score)
+    code = '?' if missing else _grade_for_score(score)
     label = RATING_CODE_INFO[code]
     needs_attention = code in ('B', 'C', 'F', '?') or bool(issues)
     if code == '?':
-        summary = '关键指标或吞吐基线不完整，暂不能给出可靠等级，请查看诊断并复测。'
+        summary = '缺少丢包或上下行结果，暂不能给出可靠等级，请查看诊断并复测。'
     elif code == 'S':
         summary = '关键指标均处于当前经验阈值内，未发现明显异常。'
     else:
