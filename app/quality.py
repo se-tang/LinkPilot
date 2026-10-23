@@ -323,12 +323,30 @@ def evaluate(mt, machine, run=None):
     label = RATING_CODE_INFO[code]
     needs_attention = code in ('B', 'C', 'F', '?') or bool(issues)
     if code == '?':
-        summary = '缺少丢包或上下行结果，暂不能给出可靠等级，请查看诊断并复测。'
+        summary = '数据不足'
+        advice = '缺少丢包或上下行结果，暂不能给出可靠等级，请查看诊断并复测。'
     elif code == 'S':
-        summary = '关键指标均处于当前经验阈值内，未发现明显异常。'
+        summary = '表现正常'
+        advice = '丢包、上行吞吐和下行吞吐均处于当前经验阈值内。'
     else:
         primary = max(issues, key=lambda x: x['score']) if issues else None
-        summary = _issue_text(primary['tag']) if primary else '存在质量波动，建议查看诊断详情。'
+        issue_tags = {item['tag'] for item in issues}
+        has_loss = '存在丢包' in issue_tags
+        has_up = '上行吞吐偏低' in issue_tags
+        has_down = '下行吞吐偏低' in issue_tags
+        if has_loss and (has_up or has_down):
+            summary = '丢包且吞吐偏低'
+        elif has_loss:
+            summary = '存在丢包'
+        elif has_up and has_down:
+            summary = '上下行吞吐偏低'
+        elif has_up:
+            summary = '上行吞吐偏低'
+        elif has_down:
+            summary = '下行吞吐偏低'
+        else:
+            summary = '质量一般'
+        advice = _issue_text(primary['tag']) if primary else '查看诊断详情进一步定位。'
     detail = '；'.join(d['text'] for d in diagnostics)
     mt.update({
         'rating_code': code,
@@ -336,6 +354,7 @@ def evaluate(mt, machine, run=None):
         'rating_label': label,
         'rating_tags': tags,
         'rating_summary': summary,
+        'rating_advice': advice,
         'rating_detail': detail or '—',
         'rating_diagnostics': diagnostics,
         'rating_penalty': score,
@@ -359,7 +378,8 @@ def failure_metrics(machine, error, run=None):
         'rating': '失败',
         'rating_label': '失败',
         'rating_tags': ['测试失败'],
-        'rating_summary': '测试失败，未获得可用于线路质量判断的完整结果。',
+        'rating_summary': '测试失败',
+        'rating_advice': '未获得可用于线路质量判断的完整结果。',
         'rating_detail': message,
         'rating_diagnostics': diagnostics,
         'rating_penalty': None,
@@ -501,12 +521,12 @@ def build_report(run, target, items):
                 row += f"| {fmt_num(mt.get('retr_total'), 0)} "
             code = mt.get('rating_code') or '?'
             label = mt.get('rating_label') or mt.get('rating') or RATING_CODE_INFO.get(code, '—')
-            lines.append(row + f"| **{code} · {label}**：{mt.get('rating_summary', '—')} |")
+            lines.append(row + f"| **{code} {label}**：{mt.get('rating_summary', '—')} |")
         else:
             err = (it['error'] or it['status']).replace('|', '\\|').replace('\n', ' ')
             lines.append(f"| {name} | {region} | {bw} | "
                          + ' | '.join(['—'] * (ncols - 4))
-                         + f" | **F · 失败**：{err} |")
+                         + f" | **F 失败**：{err} |")
 
     lines.append('')
     lines.append('## 诊断详情')
@@ -521,13 +541,13 @@ def build_report(run, target, items):
             code = mt.get('rating_code') or '?'
             label = mt.get('rating_label') or mt.get('rating') or RATING_CODE_INFO.get(code, '—')
             tags = mt.get('rating_tags') or []
-            lines.append(f"- **评级**：{code} · {label}")
+            lines.append(f"- **评级**：{code} {label}")
             lines.append(f"- **异常标签**：{'、'.join(tags) if tags else '无'}")
             lines.append(f"- **结论**：{mt.get('rating_summary') or '—'}")
             for d in mt.get('rating_diagnostics') or []:
                 lines.append(f"- **{d.get('name', '指标')}**（{d.get('status', 'unknown')}）：{d.get('text', '')}")
         else:
-            lines.append(f"- **评级**：F · 失败")
+            lines.append(f"- **评级**：F 失败")
             lines.append(f"- **原因**：{it['error'] or it['status']}")
         lines.append('')
 

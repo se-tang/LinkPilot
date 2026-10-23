@@ -705,7 +705,7 @@ details{border-radius:10px;background:color-mix(in srgb,var(--card) 92%,var(--su
     <table id="detailResultTable">
       <thead><tr>
         <th>后端机器</th><th>地区</th><th>带宽</th><th>丢包率</th><th>RTT avg</th><th>抖动 mdev</th>
-        <th>上行</th><th>下行</th><th id="thRetr">重传</th><th>线路质量评价</th>
+        <th>上行</th><th>下行</th><th id="thRetr">重传</th><th>评级</th><th>说明</th>
       </tr></thead>
       <tbody id="detailTableBody"></tbody>
     </table>
@@ -889,6 +889,14 @@ function ratingClass(r) {
           'C': 'rating-c', 'F': 'rating-f', '?': 'rating-unknown'}[code] || 'rating-unknown';
 }
 
+function ratingText(value) {
+  const code = {'优秀': 'S', '良好': 'A', '一般': 'B', '较差': 'C',
+                '失败': 'F', '数据不足': '?'}[value] || value;
+  const label = {'S': '优秀', 'A': '良好', 'B': '一般',
+                 'C': '较差', 'F': '失败', '?': '数据不足'}[code];
+  return code && label ? `${code} ${label}` : (value || '—');
+}
+
 function ratingInfo(metrics, status, error) {
   const mt = metrics || {};
   const code = mt.rating_code || ({'优秀':'S','良好':'A','一般':'B','较差':'C','失败':'F','数据不足':'?'}[mt.rating]) || '';
@@ -916,23 +924,17 @@ function ratingInfo(metrics, status, error) {
 }
 
 function ratingBadgeHtml(info) {
-  return `<span class="rb ${ratingClass(info.code)}">${esc(info.code)} · ${esc(info.label)}</span>`;
+  return `<span class="rb ${ratingClass(info.code)}">${esc(info.code)} ${esc(info.label)}</span>`;
 }
 
-function qualityCellHtml(metrics, status, error) {
+function ratingCellHtml(metrics, status, error) {
   const info = ratingInfo(metrics, status, error);
-  const tags = info.tags.length
-    ? `<div class="quality-tags">${info.tags.map(t => `<span class="quality-tag">${esc(t)}</span>`).join('')}</div>`
-    : '';
-  const diagnostics = info.diagnostics.length
-    ? `<details class="quality-details"><summary>查看诊断详情</summary><div class="diagnostic-list">${
-        info.diagnostics.map(d => `<div class="diagnostic-item ${esc(d.status || 'unknown')}">
-          <b>${esc(d.name || '指标')}</b><span>${esc(d.text || '')}</span>
-        </div>`).join('')
-      }</div></details>`
-    : '';
-  return `<div class="quality-cell">${ratingBadgeHtml(info)}${tags}
-    <div class="quality-summary">${esc(info.summary || '—')}</div>${diagnostics}</div>`;
+  return ratingBadgeHtml(info);
+}
+
+function ratingExplanationHtml(metrics, status, error) {
+  const info = ratingInfo(metrics, status, error);
+  return `<span class="quality-summary">${esc(info.summary || '—')}</span>`;
 }
 
 function copyText(text, tip) {
@@ -1598,20 +1600,22 @@ function renderRunDetail(d) {
         <td>${fmt(mt.up_mbits, ' Mbit/s')}</td>
         <td>${fmt(mt.down_mbits, ' Mbit/s')}</td>
         <td>${last}</td>
-        <td>${qualityCellHtml(mt, it.status, it.error)}</td>
+        <td>${ratingCellHtml(mt, it.status, it.error)}</td>
+        <td>${ratingExplanationHtml(mt, it.status, it.error)}</td>
       </tr>`;
     }
     if (it.status === 'running') {
       return `<tr>
         <td>${name}</td><td>${region}</td><td>${bw}</td>
         <td colspan="6"><span class="badge running">⏳ ${esc(it.phase || '执行中')}…</span></td>
-        <td class="muted">等待完成</td>
+        <td class="muted">—</td><td class="muted">等待完成</td>
       </tr>`;
     }
     return `<tr>
       <td>${name}</td><td>${region}</td><td>${bw}</td>
       <td colspan="6" class="muted">—</td>
-      <td>${qualityCellHtml(it.metrics_obj, it.status, it.error)}</td>
+      <td>${ratingCellHtml(it.metrics_obj, it.status, it.error)}</td>
+      <td>${ratingExplanationHtml(it.metrics_obj, it.status, it.error)}</td>
     </tr>`;
   }).join('');
   $('detailTableBody').innerHTML = rows || '<tr><td colspan="10" class="muted">等待执行...</td></tr>';
@@ -2235,7 +2239,7 @@ function comparisonRows(d) {
         r.run_id, r.created_at, r.finished_at, r.status, d.schedule.target_name,
         x.name, x.region, x.bandwidth, value(pt.up), value(pt.down), value(pt.loss),
         value(pt.rtt), value(pt.mdev), value(pt.retr), value(pt.udp_loss),
-        pt.rating, pt.error,
+        pt.rating ? ratingText(pt.rating) : '', pt.error,
       ].map(clean));
     });
   });
@@ -2287,7 +2291,7 @@ function renderScheduleComparison(d) {
   const stats = d.stats || [];
   $('schedStatsBody').innerHTML = stats.length ? stats.map(st => {
     const trend = st.trend_pct === null || st.trend_pct === undefined
-      ? '<span class="trend-flat">—</span>'
+      ? `<span class="trend-flat">—</span>${st.trend_reason ? `<br><span class="muted" style="font-size:11px">${esc(st.trend_reason)}</span>` : ''}`
       : (st.trend_pct > 3 ? `<span class="trend-up">↑ +${fmt(st.trend_pct)}%</span>`
         : (st.trend_pct < -3 ? `<span class="trend-down">↓ ${fmt(st.trend_pct)}%</span>`
           : `<span class="trend-flat">→ ${fmt(st.trend_pct)}%</span>`));
@@ -2301,7 +2305,7 @@ function renderScheduleComparison(d) {
       <td>${cell(st.loss, 2, '%')}</td><td>${cell(st.rtt, 1, ' ms')}</td>
       <td>${cell(st.mdev, 2, ' ms')}</td><td>${cell(st.retr, 0, '')}</td>
       <td>${trend}</td>
-      <td>${ratings.length ? ratings.map(r => `<span class="rb ${ratingClass(r)}">${r}</span>`).join(' / ') : '—'}</td>
+      <td>${ratings.length ? ratings.map(r => `<span class="rb ${ratingClass(r)}">${ratingText(r)}</span>`).join(' / ') : '—'}</td>
     </tr>`;
   }).join('') : '<tr><td colspan="11" class="muted">还没有完成任何一轮测试</td></tr>';
 
@@ -2324,7 +2328,7 @@ function renderScheduleComparison(d) {
       const body = pt.status === 'done'
         ? `<td>${fmt(pt.up, ' Mbit/s')}</td><td>${fmt(pt.down, ' Mbit/s')}</td>
            <td>${fmt(pt.loss, '%')}</td><td>${fmt(pt.rtt, ' ms')}</td>
-           <td><span class="rb ${ratingClass(pt.rating)}">${pt.rating || '—'}</span></td>`
+           <td><span class="rb ${ratingClass(pt.rating)}">${ratingText(pt.rating)}</span></td>`
         : `<td colspan="4" style="color:var(--red)">❌ ${esc(pt.error || pt.status)}</td><td>—</td>`;
       rows.push(`<tr>
         <td>${first ? '#' + r.run_id : ''}</td>

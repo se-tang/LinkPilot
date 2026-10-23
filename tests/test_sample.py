@@ -143,7 +143,7 @@ def test_report():
     ]
     report = quality.build_report(run, {'name': '目标VPS', 'host': '1.2.3.4', 'region': '洛杉矶', 'bandwidth': '1G'}, items)
     assert '| HK-01 | 香港 | 500M | 0% | 144.4 ms | 0.26 ms | 137 Mbit/s | 108 Mbit/s | 0 |' in report
-    assert '**F · 失败**：SSH 连接失败' in report
+    assert '**F 失败**：SSH 连接失败' in report
     assert '### 后端机器1：HK-01' in report
     assert 'rtt min/avg/max/mdev = 144.239/144.402/146.898/0.255 ms' in report
     # IP 脱敏：C/D 段打码
@@ -1324,6 +1324,7 @@ def test_schedule_comparison_report():
     assert st['samples'] == 6 and abs(st['up']['min'] - 70.0) < 1e-6, st
     assert abs(st['up']['max'] - 100.0) < 1e-6 and abs(st['up']['avg'] - (100 + 98 + 96 + 82 + 76 + 70) / 6) < 1e-6, st
     assert st['trend_pct'] is not None and st['trend_pct'] < -3, st   # 明显下滑
+    assert st['trend_reason'] is None, st
 
     view = scheduler.comparison_data(sch['id'], view_limit=3)
     assert len(view['rounds']) == 3 and view['total_rounds'] == 6, view['total_rounds']
@@ -1354,6 +1355,27 @@ def test_schedule_comparison_report():
     assert r.status_code == 200 and len(r.get_json()['rounds']) == 6, r.get_json()
     r = c.get(f"/api/schedules/{sch['id']}/report")
     assert r.status_code == 200 and '历史归档' in r.get_data(as_text=True), r.status_code
+
+    short = db.create_schedule(dict(
+        scheduler.normalize_schedule({'target_id': t['id'], 'backend_ids': [b['id']],
+                                      'name': '两轮趋势用例'}),
+        next_run_at='2026-01-01 00:00:00'))
+    for up_value in (100.0, 101.0):
+        rid = db.create_run(t, [b['id']], 4, target_host='93.184.216.34',
+                            source='schedule', schedule_id=short['id'], port=5201,
+                            streams=1, duration=10, udp=False,
+                            udp_bandwidth='100M', ping_count=10)
+        up_raw = (f'[SUM]   0.00-10.00  sec   100 MBytes   {up_value} Mbits/sec   0             sender\n'
+                  f'[SUM]   0.00-10.10  sec   100 MBytes   {up_value} Mbits/sec                  receiver')
+        mt_short = quality.parse_metrics(PING_RAW, up_raw, DOWN_RAW)
+        quality.evaluate(mt_short, b, {'duration': 10})
+        db.update_item(db.get_run_items(rid)[0]['id'], status='done', metrics=json.dumps(mt_short))
+        db.update_run(rid, status='finished')
+        db.record_schedule_run(short['id'], rid, scheduler.now_str(), status='finished')
+        db.finish_schedule_run(short['id'], rid, 'finished')
+    short_data = scheduler.comparison_data(short['id'])
+    assert short_data['stats'][0]['trend_pct'] is None, short_data
+    assert '样本不足 4 轮' in short_data['stats'][0]['trend_reason'], short_data
 
     # 空数据不能炸
     empty = db.create_schedule(dict(
@@ -1420,7 +1442,8 @@ def test_dashboard_interactions_present():
                 'buildTrendChartSvg', 'copyRichText', 'toggleRunGroup', 'run-group',
                 'AbortController', 'skeleton-chart', 'comparisonTableHtml', '生成报告中',
                 '@media (max-width:700px)', 'params-grid', '保存后会立即开始首轮测试',
-                'showPopconfirm', 'eventStream', 'runSummary', 'qualityCellHtml',
+                'showPopconfirm', 'eventStream', 'runSummary', 'ratingCellHtml',
+                'ratingExplanationHtml', 'ratingText',
                 'renderRunEvents', 'rating_diagnostics', 'event-stage',
                 'chart-control-label', '<th>上行</th><th>下行</th>',
                 'run-form', 'run-section-label', 'run-submit'):

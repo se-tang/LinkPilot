@@ -508,12 +508,17 @@ def comparison_data(sid, limit=ROUND_LIMIT, view_limit=None):
     for m in machines:
         ups, downs = m['up'], m['down']
         trend = None
+        trend_reason = None
         # 趋势用「后半段均值 vs 前半段均值」比较：比首末单点更抗抖动
         if len(ups) >= 4:
             half = len(ups) // 2
             a, b = _agg(ups[:half]), _agg(ups[half:])
             if a and b and a['avg']:
                 trend = (b['avg'] - a['avg']) / a['avg'] * 100.0
+            else:
+                trend_reason = '前半段均值为 0，无法计算'
+        else:
+            trend_reason = f'有效样本不足 4 轮（当前 {len(ups)} 轮）'
         stats.append({
             'name': m['name'], 'region': m['region'], 'bandwidth': m['bandwidth'],
             'samples': len(ups),
@@ -522,6 +527,7 @@ def comparison_data(sid, limit=ROUND_LIMIT, view_limit=None):
             'mdev': _agg(m['mdev']), 'retr': _agg(m['retr']),
             'udp_loss': _agg(m['udp_loss']),
             'trend_pct': trend,
+            'trend_reason': trend_reason,
             'best_rating': max(m['rating'], key=lambda r: RATING_RANK.get(r, -1)) if m['rating'] else None,
             'worst_rating': min(m['rating'], key=lambda r: RATING_RANK.get(r, -1)) if m['rating'] else None,
         })
@@ -607,6 +613,8 @@ def build_comparison_report(sid, limit=ROUND_LIMIT, view_limit=VIEW_ROUNDS):
             t = st['trend_pct']
             arrow = '↑' if t > 3 else ('↓' if t < -3 else '→')
             trend = f'{arrow} {t:+.1f}%'
+        elif st.get('trend_reason'):
+            trend = f"—（{st['trend_reason']}）"
         ratings = ' / '.join(x for x in (st['best_rating'], st['worst_rating']) if x) or '—'
         total = max(1, series_len.get(st['name'], st['samples']))
         success = st['samples'] / total * 100
