@@ -1,0 +1,11 @@
+# 方式 A 模板：Caddy 自动签发证书 + 反代面板
+#
+# X-Forwarded-For 优先用 CDN 写入的 CF-Connecting-IP（Cloudflare 橙云场景下它才是
+# 访问者真实 IP）；没有该头时留空，面板会退回用对端地址（直连场景即真实客户端 IP）。
+# 若这里写 {http.request.remote.host}，前置 CDN 时会把「CDN 边缘 IP」当成机器 IP，
+# 表现为面板里机器地址每几秒变一次、测试报端口不可达。
+{$PANEL_DOMAIN} {
+	reverse_proxy iperf3-fleet:8000 {
+		header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}
+	}
+}

@@ -1,0 +1,13 @@
+#!/bin/sh
+# 防呆钩子：禁止提交运行数据/密钥文件（启用: git config core.hooksPath hooks）
+if git diff --cached --name-only | grep -E '(^|/)(data(-[^/]*)?/|auth\.json$|secret_key$|\.initial_password$|panel\.db($|-))' >/dev/null; then
+  echo "❌ 提交被拒绝：包含运行数据/密钥文件（data*/auth.json/secret_key/panel.db*）"
+  echo "   如确认为误报，可用 git commit --no-verify 跳过"
+  exit 1
+fi
+# 内容级扫描：令牌/哈希/私钥特征（防止把密钥粘进改名后的文件里绕过文件名拦截）
+if git diff --cached -U0 -- . ':(exclude)hooks/pre-commit' | grep -E '^\+' | grep -inE "(token|sign_key|password|secret|api_key)['\"]?\s*[:=]\s*['\"]?[0-9a-f]{32,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|sshpass -p|[0-9]{8,12}:[A-Za-z0-9_-]{30,}" >/dev/null; then
+  echo "❌ 提交被拒绝：新增内容疑似包含密钥/令牌"
+  echo "   如确认为误报（如文档示例），可用 git commit --no-verify 跳过"
+  exit 1
+fi

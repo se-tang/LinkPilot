@@ -1,0 +1,73 @@
+services:
+  iperf3-fleet:
+    build: .
+    image: iperf3-fleet:latest
+    container_name: iperf3-fleet
+    restart: unless-stopped
+    ports:
+      # 对外端口在首次部署时随机生成并记录在 .env（PANEL_PORT=xxxx），升级/重启不变
+      # 启用 HTTPS 后建议在 .env 加 PANEL_BIND=127.0.0.1 关闭公网 HTTP 直连（Agent 走域名）
+      - "${PANEL_BIND:-0.0.0.0}:${PANEL_PORT:-8088}:8000"
+    environment:
+      TZ: Asia/Shanghai
+      DATA_DIR: /data
+      # 横幅里显示的对外端口，与上面的端口映射保持一致
+      PANEL_PORT: ${PANEL_PORT:-8088}
+      # 启用 HTTPS（tls profile / 反向代理）后设为 1，Cookie 仅经加密连接传输
+      PANEL_COOKIE_SECURE: ${PANEL_COOKIE_SECURE:-}
+    volumes:
+      - ./data:/data
+    # 容器加固：根文件系统只读、丢弃全部 Linux 能力、禁止提权
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # 可选 HTTPS 网关（自动签发证书）：
+  #   .env 追加 PANEL_DOMAIN=面板域名 与 PANEL_COOKIE_SECURE=1，然后
+  #   docker compose --profile tls up -d
+  caddy:
+    image: caddy:2-alpine
+    container_name: iperf3-fleet-caddy
+    profiles: ["tls"]
+    restart: unless-stopped
+    ports:
+      # 80/443 被其他服务占用时，在 .env 里改 CADDY_HTTP / CADDY_HTTPS
+      - "${CADDY_HTTP:-80}:80"
+      - "${CADDY_HTTPS:-443}:443"
+    environment:
+      PANEL_DOMAIN: ${PANEL_DOMAIN:-}
+    volumes:
+      - type: bind
+        source: ./Caddyfile.local
+        target: /etc/caddy/Caddyfile
+        read_only: true
+        bind:
+          create_host_path: false
+      - ./certs:/certs:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - iperf3-fleet
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  caddy_data:
+  caddy_config:

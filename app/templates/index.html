@@ -1,0 +1,2383 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>LinkPilot · 线路测试面板</title>
+<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='logo.svg') }}"/>
+<style>
+:root{
+  --bg:#f3f0e8; --card:#fffdf8; --border:#e1dac9; --text:#302c26; --muted:#776f62;
+  --accent:#0d9488; --green:#15803d; --lime:#65a30d; --orange:#ea580c; --red:#dc2626;
+  --btn-bg:#f7f2e7; --btn-border:#ddd3bf; --btn-hover:#eee7d8;
+  --primary:#f97316; --primary-hover:#ea580c;
+  --input-bg:#fffefa; --code-bg:#f5f1e7; --mask:rgba(45,41,34,.48);
+  --surface2:#faf6ed; --shadow:0 10px 28px rgba(74,63,42,.07);
+}
+body[data-theme='dark']{
+  --bg:#181713; --card:#24221d; --border:#3d382f; --text:#f1eadc; --muted:#aaa193;
+  --accent:#2dd4bf; --green:#4ade80; --lime:#a3e635; --orange:#fb923c; --red:#f87171;
+  --btn-bg:#302d26; --btn-border:#494338; --btn-hover:#3b372f;
+  --primary:#f97316; --primary-hover:#ea580c;
+  --input-bg:#1b1a16; --code-bg:#1d1c18; --mask:rgba(0,0,0,.62);
+  --surface2:#201f1a; --shadow:0 12px 32px rgba(0,0,0,.2);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+header{display:flex;align-items:center;justify-content:space-between;padding:12px 24px;border-bottom:1px solid var(--border);position:sticky;top:0;background:color-mix(in srgb,var(--bg) 92%,transparent);backdrop-filter:blur(12px);z-index:10}
+header h1{font-size:18px;margin:0;display:flex;align-items:center;gap:9px;min-width:0}
+.brand-mark{width:30px;height:30px;flex:none;display:block}
+main{max-width:1400px;margin:0 auto;padding:20px 24px 64px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:16px 18px;margin-bottom:16px;box-shadow:var(--shadow)}
+.card-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:10px}
+.card-head h2{font-size:15px;margin:0}
+h3{font-size:13px;color:var(--muted);margin:16px 0 8px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:8px 9px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top}
+tbody tr:not(.run-group):hover{background:var(--surface2)}
+th{color:var(--muted);font-weight:600;white-space:nowrap}
+button{background:var(--btn-bg);color:var(--text);border:1px solid var(--btn-border);border-radius:6px;padding:6px 12px;cursor:pointer;font-size:13px}
+button:hover{background:var(--btn-hover)}
+button.primary{background:var(--primary);border-color:var(--primary);color:#fff}
+button.primary:hover{background:var(--primary-hover)}
+button.danger{color:var(--red)}
+button.small{padding:3px 8px;font-size:12px}
+select,input,textarea{background:var(--input-bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:inherit}
+textarea{width:100%;min-height:110px;resize:vertical;font-family:ui-monospace,Consolas,monospace}
+.badge{display:inline-block;padding:1px 8px;border-radius:99px;font-size:12px;border:1px solid;white-space:nowrap}
+.badge.target{color:var(--accent);border-color:var(--accent)}
+.badge.backend{color:var(--muted);border-color:var(--muted)}
+.badge.running{color:var(--lime);border-color:var(--lime)}
+.badge.finished,.badge.done{color:var(--green);border-color:var(--green)}
+.badge.partial{color:var(--orange);border-color:var(--orange)}
+.badge.failed,.badge.stopped{color:var(--red);border-color:var(--red)}
+.hint{color:var(--muted);font-size:12px;margin:8px 0 0}
+.hint code{background:var(--code-bg);padding:1px 5px;border-radius:4px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:8px 0}
+pre{background:var(--code-bg);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:12px;overflow:auto;font-size:12px;max-height:340px;font-family:ui-monospace,Consolas,monospace}
+details{border:1px solid var(--border);border-radius:8px;padding:8px 12px;margin:8px 0}
+summary{cursor:pointer;font-weight:600}
+.modal{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:20px;width:620px;max-width:94vw;max-height:92vh;overflow:auto}
+.modal h3{margin:0 0 12px;color:var(--text);font-size:16px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.grid2 label,.field label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
+.grid2 input,.grid2 select,.field input,.field select{width:100%}
+.field{margin-bottom:10px}
+.muted{color:var(--muted)}
+/* 后端机器备注里的 IPv6 标记：两种状态必须一眼可分（绿色=有，橙色=无） */
+.v6-yes{color:var(--green);font-weight:600}
+.v6-no{color:var(--orange)}
+.rating-s{color:var(--green);font-weight:600}
+.rating-a{color:var(--lime);font-weight:600}
+.rating-b{color:var(--orange);font-weight:600}
+.rating-c{color:var(--red);font-weight:600}
+.modal-mask{position:fixed;inset:0;background:var(--mask);display:flex;align-items:center;justify-content:center;z-index:50}
+/* hidden 必须排在 modal-mask 之后并用 !important，否则 display:flex 会覆盖掉隐藏（历史 bug） */
+.hidden{display:none!important}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--primary);color:#fff;padding:10px 18px;border-radius:8px;z-index:99;max-width:80vw;box-shadow:0 6px 20px rgba(0,0,0,.4)}
+.actions{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.chk{display:flex;align-items:center;gap:6px;font-size:13px}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:middle}
+.dot.on{background:var(--green);box-shadow:0 0 6px var(--green)}
+.dot.off{background:#64748b}
+#agentCmd{user-select:all;white-space:pre-wrap;word-break:break-all;font-size:12px}
+.tbl-wrap{overflow-x:auto}
+.rb{display:inline-block;padding:1px 9px;border-radius:99px;border:1px solid;font-size:12px;font-weight:600;white-space:nowrap}
+.rb.rating-s{color:var(--green);border-color:var(--green);background:rgba(74,222,128,.12)}
+.rb.rating-a{color:var(--lime);border-color:var(--lime);background:rgba(163,230,53,.12)}
+.rb.rating-b{color:var(--orange);border-color:var(--orange);background:rgba(251,146,60,.12)}
+.rb.rating-c{color:var(--red);border-color:var(--red);background:rgba(248,113,113,.12)}
+.log-line{white-space:pre-wrap;word-break:break-all}
+.log-ok{color:var(--green)}
+.log-bad{color:var(--red)}
+.log-hl{color:var(--accent);font-weight:600}
+.md-render{background:var(--code-bg);border:1px solid var(--border);border-radius:8px;padding:16px;max-height:500px;overflow:auto;font-size:13px}
+.md-render h2{font-size:16px;margin:14px 0 8px;color:var(--text)}
+.md-render h3{font-size:14px;color:var(--text);margin:12px 0 6px}
+.md-render h4{font-size:13px;margin:10px 0 6px}
+.md-render p{margin:6px 0}
+.md-render blockquote{border-left:3px solid var(--accent);margin:8px 0;padding:2px 10px;color:var(--muted)}
+.md-render code{background:var(--card);padding:1px 5px;border-radius:4px}
+.md-render pre{max-height:none;margin:8px 0}
+.md-table{margin:10px 0}
+/* 定时任务 */
+.badge.scheduled{color:var(--accent);border-color:var(--accent)}
+.badge.waiting{color:var(--lime);border-color:var(--lime)}
+.badge.skipped,.badge.interrupted,.badge.expired{color:var(--orange);border-color:var(--orange)}
+.sched-name{font-weight:600;min-width:116px}
+.sched-actions{display:flex;gap:6px;flex-wrap:wrap}
+#sBackendList{display:grid;grid-template-columns:1fr;gap:5px}
+#sBackendList .sched-backend-option{display:grid;
+  grid-template-columns:18px minmax(120px,1fr) minmax(190px,1.4fr);
+  gap:8px;align-items:center;padding:5px 7px;border-radius:6px;cursor:pointer;
+  color:var(--text);font-size:13px;margin-bottom:0}
+.sched-backend-option:hover{background:var(--code-bg)}
+.sched-backend-option input{margin:0;width:auto}
+.sched-backend-name{font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sched-backend-meta{display:flex;gap:4px 10px;flex-wrap:wrap;color:var(--muted);font-size:12px}
+.sched-lifetime-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.sched-lifetime-row input[type=number]{width:104px}
+.sched-lifetime-row select{width:auto}
+.sched-lifetime-row.is-off input[type=number],.sched-lifetime-row.is-off select{opacity:.5}
+@media (max-width:640px){
+  #sBackendList .sched-backend-option{grid-template-columns:18px minmax(0,1fr)}
+  .sched-backend-meta{grid-column:2}
+}
+/* 机器名/间隔这类短词不该在中间断行（表格窄列下很显眼） */
+#schedulesBody td,#schedStatsBody td,#schedRoundsBody td,#machinesBody td{word-break:keep-all}
+#chartWrap{background:var(--code-bg);border:1px solid var(--border);border-radius:8px;padding:8px;overflow-x:auto}
+#chartWrap svg{display:block;min-width:640px;width:100%;height:auto}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin:8px 0 0}
+.legend i{display:inline-block;width:12px;height:3px;border-radius:2px;margin-right:5px;vertical-align:middle}
+.trend-up{color:var(--green);font-weight:600}
+.trend-down{color:var(--red);font-weight:600}
+.trend-flat{color:var(--muted)}
+kbd{background:var(--code-bg);border:1px solid var(--border);border-radius:4px;padding:0 5px;font-size:12px}
+/* 紧凑仪表盘 */
+.overview{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:16px}
+.stat{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:12px 14px;box-shadow:var(--shadow)}
+.stat b{display:block;font-size:20px;line-height:1.2}
+.stat span{color:var(--muted);font-size:12px}
+.dashboard-grid{display:grid;grid-template-columns:minmax(340px,.85fr) minmax(560px,1.5fr);gap:16px;align-items:start}
+.dashboard-grid>.card{margin-bottom:16px}
+.section-note{color:var(--muted);font-size:12px;margin:-3px 0 10px}
+.compact-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.chart-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.segmented{display:inline-flex;background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:2px}
+.segmented button{border:0;background:transparent;padding:4px 10px;border-radius:5px;color:var(--muted)}
+.segmented button.active{background:var(--card);color:var(--text);box-shadow:0 1px 4px rgba(55,45,28,.1);font-weight:600}
+.chart-picker{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 0}
+.chart-chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:6px;padding:4px 8px;background:var(--surface2);cursor:pointer;font-size:12px}
+.chart-chip.active{border-color:var(--accent);color:var(--accent);background:var(--card)}
+.chart-chip input{margin:0}
+.skeleton-chart{height:280px;border-radius:8px;background:linear-gradient(100deg,var(--surface2) 20%,var(--code-bg) 40%,var(--surface2) 60%);background-size:200% 100%;animation:shimmer 1.2s linear infinite}
+@keyframes shimmer{to{background-position:-200% 0}}
+.run-group{cursor:pointer}
+.run-group td{background:var(--surface2);border-top:1px solid var(--border)}
+.run-group-main{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.run-child{background:color-mix(in srgb,var(--card) 82%,var(--surface2))}
+.run-child td:first-child{padding-left:28px}
+.group-toggle{width:26px;height:26px;padding:0;display:inline-flex;align-items:center;justify-content:center}
+.group-toggle.open{transform:rotate(90deg)}
+.detail-grid{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr);gap:16px}
+.quiet{color:var(--muted);font-size:12px}
+.params-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:10px;align-items:end}
+.params-grid>.field{width:auto!important;margin-bottom:0!important}
+.params-grid>.chk{min-height:34px;margin:0!important}
+@media (max-width:980px){
+  .overview{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .dashboard-grid,.detail-grid{grid-template-columns:1fr}
+}
+@media (max-width:700px){
+  header{padding:10px 12px;gap:8px}
+  header h1{font-size:15px;gap:7px;line-height:1.25}
+  .brand-mark{width:26px;height:26px}
+  .brand-product{display:none}
+  #meUser{display:none}
+  header .actions{gap:4px}
+  header .actions button{padding:4px 8px;font-size:11px}
+  main{padding:12px}
+  .overview{gap:8px;margin-bottom:12px}
+  .stat{padding:9px 11px}
+  .stat b{font-size:18px}
+  .stat span{font-size:11px}
+  .card{padding:12px;margin-bottom:12px;border-radius:7px}
+  .card-head{margin-bottom:8px}
+  .card-head h2{font-size:14px}
+  #targetSelect{min-width:0!important;width:100%}
+  #backendList{min-width:0!important;width:100%}
+  .params-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .params-grid>.chk{grid-column:1/-1}
+  #runCard>.row:last-child>button{width:100%}
+  .modal-mask{padding:8px}
+  .modal{width:100%;padding:16px;max-height:calc(100vh - 16px);border-radius:8px}
+  .grid2{grid-template-columns:1fr;gap:0}
+  .modal .actions{position:sticky;bottom:-16px;background:var(--card);padding:10px 0 0;z-index:2}
+  .modal .actions button{flex:1}
+  table{font-size:12px}
+  th,td{padding:6px}
+  pre{max-height:220px;font-size:11px}
+  .chart-toolbar{align-items:stretch;flex-direction:column}
+  .segmented{display:flex;width:100%}
+  .segmented button{flex:1;white-space:nowrap}
+  .chart-picker{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px}
+  .chart-chip{flex:0 0 auto}
+  #chartWrap svg{min-width:700px}
+  .run-group-main{gap:6px}
+  .run-group-main .badge{font-size:11px}
+  .run-child td:first-child{padding-left:14px}
+  #machinesCard thead,#schedulesCard thead,#runsCard thead{display:none}
+  #machinesCard table,#machinesCard tbody,
+  #schedulesCard table,#schedulesCard tbody,
+  #runsCard table,#runsCard tbody{display:block}
+  #machinesCard tr,#schedulesCard tr,#runsCard tr:not(.run-group){display:grid;gap:5px 10px;
+    padding:10px 2px;border-bottom:1px solid var(--border)}
+  #machinesCard td,#schedulesCard td,#runsCard tr:not(.run-group) td{border:0;padding:2px}
+  #machinesCard tr{grid-template-columns:minmax(0,1fr) auto}
+  #machinesCard td:nth-child(1){grid-column:1}
+  #machinesCard td:nth-child(2){grid-column:2;text-align:right}
+  #machinesCard td:nth-child(3),#machinesCard td:nth-child(4){grid-column:1/3}
+  #schedulesCard tr{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  #schedulesCard td:nth-child(1){grid-column:1}
+  #schedulesCard td:nth-child(2){grid-column:2;text-align:right}
+  #schedulesCard td:nth-child(3),#schedulesCard td:nth-child(4),
+  #schedulesCard td:nth-child(7),#schedulesCard td:nth-child(8),
+  #schedulesCard td:nth-child(9){grid-column:1/3}
+  #schedulesCard .sched-actions button{flex:1}
+  #runsCard tr:not(.run-group){grid-template-columns:auto minmax(0,1fr)}
+  #runsCard tr:not(.run-group) td:nth-child(3),
+  #runsCard tr:not(.run-group) td:nth-child(4),
+  #runsCard tr:not(.run-group) td:nth-child(6),
+  #runsCard tr:not(.run-group) td:nth-child(7){grid-column:1/3}
+  #runsCard .run-group{display:block}
+  #runsCard .run-group td{display:block}
+  .detail-grid{grid-template-columns:1fr}
+}
+/* LinkPilot visual system */
+:root{
+  --bg:#f7f8fc; --card:#ffffff; --border:rgba(38,43,77,.13); --text:#202238; --muted:#6d7187;
+  --accent:#4f46e5; --green:#167b54; --lime:#387d5b; --orange:#96600a; --red:#b83248;
+  --btn-bg:rgba(79,70,229,.055); --btn-border:rgba(38,43,77,.16); --btn-hover:#eeedff;
+  --primary:#4f46e5; --primary-hover:#4038c7; --input-bg:rgba(255,255,255,.78);
+  --code-bg:#f4f5fb; --mask:rgba(17,16,33,.48); --surface2:#f7f8fe;
+  --shadow:0 12px 36px rgba(31,34,66,.08); --glow:rgba(123,108,246,.09);
+  --brand-gradient:linear-gradient(135deg,#4f5cff,#7b6cf6);
+}
+body[data-theme='dark']{
+  --bg:#0b0b12; --card:#131321; --border:rgba(232,227,255,.13); --text:#f7f6ff; --muted:#a4a2bd;
+  --accent:#8f9cff; --green:#7ad3a4; --lime:#9ddfb9; --orange:#ffe27a; --red:#ff929b;
+  --btn-bg:rgba(255,255,255,.045); --btn-border:rgba(232,227,255,.14); --btn-hover:#302c55;
+  --primary:#4f5cff; --primary-hover:#6873ff; --input-bg:rgba(255,255,255,.035);
+  --code-bg:#10101b; --mask:rgba(4,4,10,.68); --surface2:#10101b;
+  --shadow:0 14px 42px rgba(0,0,0,.22); --glow:rgba(123,108,246,.15);
+}
+html{color-scheme:light}
+body[data-theme='dark']{color-scheme:dark}
+body{
+  min-height:100vh;
+  background:
+    radial-gradient(900px 520px at 90% -10%,var(--glow),transparent 65%),
+    radial-gradient(700px 420px at -15% 35%,var(--glow),transparent 60%),
+    var(--bg);
+  color:var(--text);
+  font-family:Inter,"PingFang SC","Noto Sans SC","Microsoft YaHei",system-ui,sans-serif;
+}
+header{
+  min-height:56px;padding:8px 16px;gap:14px;
+  background:color-mix(in srgb,var(--bg) 86%,transparent);
+  border-bottom:1px solid var(--border);box-shadow:0 1px 0 rgba(255,255,255,.18);
+  backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+}
+header h1{font-size:15px;font-weight:800;gap:10px}
+.brand-mark{width:46px;height:32px;object-fit:contain;border-radius:0;background:transparent}
+.brand-text{display:inline-flex;align-items:center;gap:8px;min-width:0}
+.brand-product{color:var(--muted);font-size:12px;font-weight:500}
+header .actions{gap:7px}
+#meUser{font-size:12px}
+main{max-width:1200px;padding:20px 16px 64px}
+button{
+  min-height:32px;padding:0 13px;border-radius:10px;border:1px solid var(--border);
+  background:var(--btn-bg);color:var(--text);font:inherit;font-size:13px;font-weight:650;
+  transition:transform .18s,background .18s,border-color .18s,box-shadow .18s;
+}
+button:hover{transform:translateY(-1px);background:var(--btn-hover);border-color:color-mix(in srgb,var(--accent) 40%,var(--border))}
+button.primary{
+  background:var(--brand-gradient);border-color:transparent;color:#fff;
+  box-shadow:0 5px 16px rgba(79,92,255,.22);
+}
+button.primary:hover{background:var(--brand-gradient);opacity:.94;box-shadow:0 8px 20px rgba(79,92,255,.26)}
+button.danger{color:var(--red)}
+button.small{min-height:26px;padding:0 9px;font-size:12px;border-radius:8px}
+button:disabled{opacity:.5;transform:none;cursor:not-allowed}
+select,input,textarea{
+  min-height:36px;background:var(--input-bg);color:var(--text);border:1px solid var(--border);
+  border-radius:10px;padding:6px 10px;font-size:13px;font-family:inherit;
+  transition:border-color .15s,box-shadow .15s,background .15s;
+}
+select:focus,input:focus,textarea:focus{
+  outline:none;border-color:#7b6cf6;box-shadow:0 0 0 3px rgba(123,108,246,.16);
+}
+textarea{min-height:110px;padding:10px;resize:vertical}
+input[type=checkbox]{min-height:0;width:16px;height:16px;padding:0;accent-color:var(--accent)}
+.overview{
+  grid-template-columns:repeat(4,minmax(0,1fr));gap:0;margin:20px 0;
+  border:1px solid var(--border);border-radius:18px;overflow:hidden;
+  background:linear-gradient(135deg,rgba(123,108,246,.09),rgba(255,255,255,.02)),var(--card);
+  box-shadow:var(--shadow);
+}
+.stat{
+  border:0;border-right:1px solid var(--border);border-radius:0;padding:17px 18px;
+  background:transparent;box-shadow:none;
+}
+.stat:last-child{border-right:0}
+.stat b{
+  font-size:32px;font-weight:800;line-height:1.1;letter-spacing:0;
+  background:linear-gradient(120deg,var(--text),#7568cf);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+}
+.stat span{font-size:12px;color:var(--muted)}
+.dashboard-grid{grid-template-columns:minmax(0,1.2fr) minmax(390px,.9fr);gap:16px}
+.card{
+  padding:0 18px 16px;margin-bottom:18px;border:1px solid var(--border);border-radius:18px;
+  background:linear-gradient(145deg,rgba(255,255,255,.025),transparent 42%),var(--card);
+  box-shadow:var(--shadow);overflow:hidden;
+}
+.card-head{
+  min-height:54px;margin:0 -18px 12px;padding:13px 18px;
+  border-bottom:1px solid var(--border);background:rgba(123,108,246,.035);
+}
+.card-head h2{font-size:15px;font-weight:800;letter-spacing:0}
+h3{font-size:13px;color:var(--text);margin:16px 0 8px}
+.hint{color:var(--muted);font-size:12px;line-height:1.6}
+.row{gap:10px}
+.actions{gap:6px}
+.chk{color:var(--text)}
+.tbl-wrap{overflow-x:auto;scrollbar-width:thin}
+table{font-size:13px}
+th{
+  padding:10px 11px;background:rgba(123,108,246,.05);color:var(--muted);
+  font-size:11px;font-weight:750;letter-spacing:0;
+}
+th,td{padding:10px 11px;border-bottom:1px solid var(--border);vertical-align:middle}
+tbody tr:not(.run-group):hover{background:rgba(123,108,246,.05)}
+.badge{
+  padding:2px 8px;border-radius:7px;border:1px solid currentColor;background:transparent;
+  font-size:11px;font-weight:750;letter-spacing:0;
+}
+.badge.target{color:#4038a6;border-color:#c8c3ff;background:#eeedff}
+.badge.backend{color:var(--green);border-color:color-mix(in srgb,var(--green) 35%,transparent);background:color-mix(in srgb,var(--green) 9%,transparent)}
+.badge.running,.badge.waiting{color:var(--orange)}
+.badge.finished,.badge.done{color:var(--green)}
+.badge.partial,.badge.skipped,.badge.interrupted,.badge.expired{color:var(--orange)}
+.badge.failed,.badge.stopped{color:var(--red)}
+.badge.scheduled{color:var(--accent)}
+body[data-theme='dark'] .badge.target{background:#302c55;color:#e6e2ff;border-color:#514a88}
+.dot{width:8px;height:8px;margin-right:6px;box-shadow:none}
+.dot.on{background:var(--green);box-shadow:0 0 0 3px color-mix(in srgb,var(--green) 14%,transparent)}
+.dot.off{background:var(--muted)}
+.v6-yes{color:var(--green)}
+.v6-no{color:var(--orange)}
+.rating-s{color:var(--green)}.rating-a{color:#287b96}.rating-b{color:var(--orange)}.rating-c{color:var(--red)}
+.rb{padding:2px 8px;border-radius:7px;font-size:11px}
+.rb.rating-s{background:#d6f0e3;border-color:transparent;color:#11603f}
+.rb.rating-a{background:#e5f3f8;border-color:transparent;color:#17505f}
+.rb.rating-b{background:#f6e7c4;border-color:transparent;color:#7a4c06}
+.rb.rating-c{background:#fbe8eb;border-color:transparent;color:#8a2b2b}
+body[data-theme='dark'] .rb.rating-s{background:#173a32;color:#a5ebca}
+body[data-theme='dark'] .rb.rating-a{background:#1d3c4b;color:#9cdbe8}
+body[data-theme='dark'] .rb.rating-b{background:#493a18;color:#ffe27a}
+body[data-theme='dark'] .rb.rating-c{background:#452c3b;color:#ffb1bb}
+pre,.md-render{background:var(--code-bg);border:1px solid var(--border);border-radius:14px}
+pre{padding:13px 14px;font-size:12px;line-height:1.7}
+details{border-radius:10px;background:color-mix(in srgb,var(--card) 92%,var(--surface2))}
+.quiet{font-size:12px;color:var(--muted)}
+#agentCmd{background:var(--code-bg)}
+.modal-mask{padding:16px;backdrop-filter:blur(6px)}
+.modal{
+  width:660px;padding:18px;border:1px solid var(--border);border-radius:22px;
+  background:var(--card);box-shadow:0 28px 90px rgba(0,0,0,.28);
+}
+.modal h3{font-size:17px;margin-bottom:14px}
+.field{margin-bottom:12px}
+.grid2{gap:12px}
+.field label,.grid2 label{color:var(--muted);font-size:12px}
+#backendList{background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:8px 10px}
+#backendList .chk{padding:3px 0}
+#sBackendList{border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--surface2)}
+#sBackendList .sched-backend-option{padding:8px 10px;border-bottom:1px solid var(--border);border-radius:0}
+#sBackendList .sched-backend-option:last-child{border-bottom:0}
+.sched-backend-option:hover{background:rgba(123,108,246,.07)}
+.sched-lifetime-row{background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:8px 10px}
+.toast{background:#111015;border-radius:10px;padding:8px 14px;box-shadow:0 12px 34px rgba(0,0,0,.3)}
+.chart-toolbar{margin-bottom:10px}
+.segmented{border-radius:9px;background:var(--surface2);padding:3px}
+.segmented button{min-height:28px;border:0;background:transparent;box-shadow:none;color:var(--muted)}
+.segmented button:hover{transform:none;background:rgba(123,108,246,.08);border-color:transparent}
+.segmented button.active{background:var(--card);color:var(--text);box-shadow:0 2px 8px rgba(38,43,77,.09)}
+.chart-picker{gap:6px}
+.chart-chip{
+  min-height:28px;border-radius:8px;background:var(--surface2);color:var(--text);
+  padding:3px 9px;box-shadow:none;
+}
+.chart-chip:hover{transform:none;background:var(--btn-hover)}
+.chart-chip.active{border-color:transparent;background:var(--btn-hover);color:var(--accent)}
+#chartWrap{background:var(--code-bg);border-radius:14px;padding:10px}
+.legend{color:var(--muted)}
+.run-group td{background:rgba(123,108,246,.09);border-top:1px solid var(--border)}
+.run-child{background:color-mix(in srgb,var(--card) 88%,var(--surface2))}
+.group-toggle{box-shadow:none}
+.skeleton-chart{background:linear-gradient(100deg,var(--surface2) 20%,var(--code-bg) 40%,var(--surface2) 60%);background-size:200% 100%}
+@media (max-width:980px){
+  .dashboard-grid{grid-template-columns:1fr}
+  .overview{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .stat:nth-child(2){border-right:0}
+  .stat:nth-child(-n+2){border-bottom:1px solid var(--border)}
+}
+@media (max-width:720px){
+  header{min-height:56px;padding:8px 12px;gap:8px}
+  header h1{font-size:14px;gap:8px}
+  .brand-mark{width:38px;height:28px}
+  .brand-product{display:none}
+  #meUser{display:none}
+  header .actions{gap:4px}
+  header .actions button{min-height:28px;padding:0 8px;font-size:11px}
+  main{padding:12px 12px 48px}
+  .overview{margin:10px 0 12px;border-radius:14px}
+  .stat{padding:12px 13px}
+  .stat b{font-size:28px}
+  .stat span{font-size:11px}
+  .dashboard-grid{gap:12px}
+  .card{padding:0 12px 12px;margin-bottom:12px;border-radius:14px}
+  .card-head{min-height:48px;margin:0 -12px 10px;padding:11px 12px;border-radius:14px 14px 0 0;flex-wrap:wrap}
+  .card-head h2{font-size:14px}
+  .tbl-wrap{margin:0 -2px}
+  th,td{padding:7px 7px}
+  .modal-mask{padding:8px}
+  .modal{width:100%;padding:16px;border-radius:18px;max-height:calc(100vh - 16px)}
+  .modal .actions{position:sticky;bottom:-16px;background:var(--card);padding:10px 0 0}
+  .params-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #targetSelect,#backendList{min-width:0!important;width:100%}
+  #runCard>.row:last-child>button{width:100%}
+  .chart-toolbar{align-items:stretch;flex-direction:column}
+  .segmented{display:flex;width:100%}
+  .segmented button{flex:1}
+  .chart-picker{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px}
+  .chart-chip{flex:0 0 auto}
+  #chartWrap svg{min-width:700px}
+  .sched-lifetime-row{align-items:flex-start}
+  .sched-lifetime-row input[type=number]{width:92px}
+  .run-group-main{gap:6px}
+  .run-group-main .badge{font-size:10px}
+  .run-child td:first-child{padding-left:14px}
+}
+@media (max-width:420px){
+  .brand-mark{width:34px;height:26px}
+  .stat{padding:11px 12px}
+  .stat b{font-size:26px}
+  .card-head{padding:10px}
+  .card{padding:0 10px 10px}
+  .card-head{margin-left:-10px;margin-right:-10px}
+  .params-grid{grid-template-columns:1fr}
+}
+@media (prefers-reduced-motion:reduce){
+  *{transition:none!important;scroll-behavior:auto!important}
+}
+</style>
+</head>
+<body>
+<header>
+  <h1><img class="brand-mark" src="{{ url_for('static', filename='logo.svg') }}" alt="LinkPilot"/>
+    <span class="brand-text">LinkPilot <span class="brand-product">线路测试面板</span>
+      <span class="muted" style="font-size:12px;font-weight:400">v{{ version }}</span></span></h1>
+  <div class="actions">
+    <span id="meUser" class="muted" style="font-size:12px"></span>
+    <button class="small" data-action="toggleTheme" id="themeBtn">🌙 深色</button>
+    <button class="small" data-action="logout">退出登录</button>
+  </div>
+</header>
+<main>
+  <section class="overview">
+    <div class="stat"><b id="statOnline">—</b><span>在线机器</span></div>
+    <div class="stat"><b id="statBackends">—</b><span>可用后端</span></div>
+    <div class="stat"><b id="statSchedules">—</b><span>启用中的定时任务</span></div>
+    <div class="stat"><b id="statRuns">—</b><span>最近测试记录</span></div>
+  </section>
+  <div class="dashboard-grid">
+  <section class="card" id="machinesCard">
+    <div class="card-head">
+      <h2>机器管理</h2>
+      <button data-action="openMachineForm">＋ 添加机器</button>
+    </div>
+    <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>机器</th><th>角色 / 地址</th><th>标签</th><th>操作</th></tr></thead>
+      <tbody id="machinesBody"></tbody>
+    </table>
+    </div>
+  </section>
+
+  <section class="card" id="runCard">
+    <div class="card-head"><h2>发起测试</h2></div>
+    <div class="row"><b>目标机器：</b><select id="targetSelect" style="min-width:360px"></select></div>
+    <div class="row" style="align-items:flex-start">
+      <b>后端机器：</b>
+      <div id="backendList" style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:280px"></div>
+    </div>
+    <div class="row">
+      <label class="chk"><input type="checkbox" id="useIpv6"> 🌐 使用 IPv6 测试（需双端均支持 IPv6）</label>
+      <span class="muted" id="ipv6Hint" style="font-size:12px"></span>
+    </div>
+    <div class="row params-grid">
+      <div class="field" style="width:92px;margin-bottom:0"><label>线程数 -P</label>
+        <input type="number" id="cfgStreams" value="1" min="1" max="32" step="1"></div>
+      <div class="field" style="width:104px;margin-bottom:0"><label>单向时长 -t</label>
+        <input type="number" id="cfgDuration" value="10" min="1" max="300" step="1"></div>
+      <div class="field" style="width:124px;margin-bottom:0"><label>目标机端口 -p</label>
+        <input type="number" id="cfgPort" value="5201" min="1" max="65535" step="1" data-prev="5201"
+               title="目标机 iperf3 -s 的端口；后端机默认也连这个端口（NAT 端口映射一般是同号映射，只改这里即可）"></div>
+      <div class="field" style="width:110px;margin-bottom:0"><label>ping 次数 -c</label>
+        <input type="number" id="cfgPing" value="200" min="1" max="2000" step="1"></div>
+      <label class="chk" style="margin-bottom:6px"><input type="checkbox" id="cfgUdp"> 📦 UDP 测试 -u</label>
+      <div class="field" style="width:132px;margin-bottom:0"><label>UDP 带宽/流 -b</label>
+        <input id="cfgUdpBw" value="100M" placeholder="100M" disabled></div>
+      <label class="chk" style="margin-bottom:6px" title="一般不需要：后端机默认就用目标机端口，只有个别机器要走不同端口时才勾">
+        <input type="checkbox" id="cfgAdvPorts"> 每台机器单独指定端口</label>
+    </div>
+    <div class="row"><button class="primary" data-action="startRun">🚀 开始测试</button></div>
+  </section>
+  </div>
+
+  <section class="card" id="schedulesCard">
+    <div class="card-head">
+      <h2>定时任务（长期对比）</h2>
+      <button class="primary" data-action="openScheduleForm">＋ 新建定时任务</button>
+    </div>
+    <div class="tbl-wrap">
+    <table>
+      <thead><tr>
+        <th>状态</th><th>名称</th><th>目标 ← 后端</th><th>参数</th><th>间隔</th>
+        <th>下次执行</th><th>累计（成功/失败/未跑）</th><th>最近一轮</th><th>操作</th>
+      </tr></thead>
+      <tbody id="schedulesBody"></tbody>
+    </table>
+    </div>
+  </section>
+
+  <!-- 定时任务：跨轮对比视图 -->
+  <section class="card hidden" id="schedDetail">
+    <div class="card-head">
+      <h2 id="schedDetailTitle">长期对比</h2>
+      <div class="actions">
+        <button class="small" data-action="copySchedReport">复制报告（含图）</button>
+        <button class="small" data-action="copySchedTable">📊 复制逐轮数据</button>
+        <button class="small" data-action="downloadSchedReport">⬇ 下载 .md</button>
+        <button class="small" data-action="closeSchedDetail">收起</button>
+      </div>
+    </div>
+    <p class="muted" id="schedDetailMeta" style="margin:4px 0"></p>
+    <div class="chart-toolbar">
+      <div class="segmented" id="chartModeButtons">
+        <button data-action="setChartMode" data-mode="single">单线</button>
+        <button data-action="setChartMode" data-mode="multi">自定义多线</button>
+      </div>
+      <div class="segmented" id="chartDirButtons">
+        <button data-action="setChartDirection" data-direction="up">上行</button>
+        <button data-action="setChartDirection" data-direction="down">下行</button>
+        <button data-action="setChartDirection" data-direction="both">双向</button>
+      </div>
+    </div>
+    <div class="chart-picker" id="chartPicker"></div>
+    <h3>吞吐趋势（Mbit/s）</h3>
+    <div id="chartWrap"></div>
+    <div class="legend" id="chartLegend"></div>
+    <h3>跨轮汇总（全部轮次的均值 / 极值）</h3>
+    <div class="tbl-wrap">
+    <table>
+      <thead><tr>
+        <th>后端机器</th><th>地区</th><th>样本</th><th>上行均值</th><th>下行均值</th>
+        <th>丢包均值</th><th>RTT 均值</th><th>抖动均值</th><th>重传均值</th>
+        <th>趋势（后半段 vs 前半段）</th><th>评价（最好 / 最差）</th>
+      </tr></thead>
+      <tbody id="schedStatsBody"></tbody>
+    </table>
+    </div>
+    <h3>每轮明细 <span class="muted" style="font-weight:400;font-size:12px">（点「查看」跳到该轮完整报告）</span></h3>
+    <div class="tbl-wrap">
+    <table>
+      <thead><tr>
+        <th>轮次</th><th>时间</th><th>后端机器</th><th>上行</th><th>下行</th>
+        <th>丢包</th><th>RTT avg</th><th>评价</th><th>操作</th>
+      </tr></thead>
+      <tbody id="schedRoundsBody"></tbody>
+    </table>
+    </div>
+  </section>
+
+  <section class="card" id="runsCard">
+    <div class="card-head">
+      <h2>测试记录</h2>
+      <div class="actions">
+        <label class="chk" title="只显示定时任务触发的测试"><input type="checkbox" id="onlyScheduled"> 只看定时任务</label>
+        <button data-action="loadRuns">刷新</button>
+      </div>
+    </div>
+    <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>ID</th><th>来源</th><th>目标机器</th><th>进度</th><th>状态</th><th>开始时间</th><th>操作</th></tr></thead>
+      <tbody id="runsBody"></tbody>
+    </table>
+    </div>
+  </section>
+
+  <section class="card hidden" id="runDetail">
+    <div class="card-head">
+      <h2 id="runDetailTitle">测试</h2>
+      <div class="actions">
+        <button class="small" data-action="copyReport">📋 复制 Markdown 报告</button>
+        <button class="small" data-action="downloadReport">⬇ 下载 .md</button>
+        <button class="small danger" data-action="stopCurrentRun">⏹ 停止</button>
+      </div>
+    </div>
+    <p class="muted" id="runDetailMeta" style="margin:4px 0"></p>
+    <h3>实时日志 <label class="chk" style="display:inline-flex;margin-left:10px;font-weight:400"><input type="checkbox" id="autoScroll" checked> 自动滚动</label></h3>
+    <pre id="logPre"></pre>
+    <h3>结果汇总</h3>
+    <div class="tbl-wrap">
+    <table>
+      <thead><tr>
+        <th>后端机器</th><th>地区</th><th>带宽</th><th>丢包率</th><th>RTT avg</th><th>抖动 mdev</th>
+        <th>上行 (sender)</th><th>下行 (receiver)</th><th id="thRetr">重传</th><th>线路质量评价</th>
+      </tr></thead>
+      <tbody id="detailTableBody"></tbody>
+    </table>
+    </div>
+    <h3>原始数据</h3>
+    <div id="rawWrap"></div>
+    <h3>Markdown 报告 <button class="small" style="margin-left:10px" data-action="toggleReportView" id="reportToggleBtn">👁 渲染视图</button></h3>
+    <pre id="reportPre" style="max-height:500px"></pre>
+    <div id="reportRender" class="md-render hidden"></div>
+  </section>
+</main>
+
+<div id="modal" class="modal-mask hidden">
+  <div class="modal">
+    <!-- 第一步：机器信息 -->
+    <div id="mStepForm">
+      <h3 id="mFormTitle">添加机器</h3>
+      <input type="hidden" id="mId"/>
+      <div class="grid2">
+        <div class="field"><label>名称 *</label><input id="mName" placeholder="如：香港-01"/></div>
+        <div class="field"><label>角色 *</label>
+          <select id="mRole">
+            <option value="backend">后端机器（发起测试）</option>
+            <option value="target">目标机器（被测端 iperf3 -s）</option>
+          </select>
+        </div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>地区标记（如 香港 / 洛杉矶）</label><input id="mRegion" placeholder="香港"/></div>
+        <div class="field"><label>带宽标记（如 500M / 1G / 不限）</label><input id="mBandwidth" placeholder="500M"/></div>
+      </div>
+      <div class="field"><label>手动测试地址（可选，留空 = 自动探测）</label>
+        <input id="mAddr" placeholder="如 203.0.113.10（示例地址，请填该机器的真实 IP）"
+               title="留空即自动：面板按心跳来源与本机探测结果确定测试地址。只有在 NAT / CDN 反代后面板观测到的地址不对时，才需要在这里填死真实 IP。"/>
+        <span class="muted" style="font-size:11px">留空即自动识别；只有自动识别到的地址不对时才需要手填。</span>
+      </div>
+      <p class="hint" id="mRoleHint"></p>
+      <p class="hint">保存后复制接入命令到机器执行，Agent 会自动上线并探测地址。</p>
+      <div class="actions" style="justify-content:flex-end;margin-top:10px">
+        <button data-action="closeModal">取消</button>
+        <button class="primary" data-action="saveMachine">保存并生成接入命令</button>
+      </div>
+    </div>
+    <!-- 第二步：Agent 接入 -->
+    <div id="mStepAgent" class="hidden">
+      <h3>接入 Agent：<span id="agentStepName" style="color:var(--text)"></span></h3>
+      <div class="field">
+        <label>面板地址（Agent 需能访问，按需修改）</label>
+        <input id="agentPanelUrl"/>
+      </div>
+      <p class="hint">在机器上以 root 执行：</p>
+      <pre id="agentCmd"></pre>
+      <div class="actions">
+        <button data-action="copyAgentCmd">📋 复制命令</button>
+        <button data-action="regenToken" id="regenBtn">♻ 重置密钥</button>
+        <button class="primary hidden" data-action="closeModal" id="agentDoneBtn">✅ 已上线，完成</button>
+        <button data-action="closeModal" id="agentSkipBtn">稍后接入</button>
+      </div>
+      <p id="agentWait" class="hint">⏳ 等待 Agent 接入...</p>
+    </div>
+  </div>
+</div>
+
+<!-- 定时任务弹窗 -->
+<div id="schedModal" class="modal-mask hidden">
+  <div class="modal">
+    <h3 id="sFormTitle">新建定时任务</h3>
+    <input type="hidden" id="sId"/>
+    <div class="grid2">
+      <div class="field"><label>任务名称 *</label>
+        <input id="sName" placeholder="如：香港→东京 每日对比" maxlength="64"/></div>
+      <div class="field"><label>间隔时间 *</label>
+        <div class="row" style="margin:0;gap:6px;align-items:center">
+          <input type="number" id="sInterval" value="60" min="1" max="43200" step="1" style="width:104px"/>
+          <select id="sIntervalUnit" style="width:auto">
+            <option value="60">分钟</option>
+            <option value="3600" selected>小时</option>
+            <option value="86400">天</option>
+          </select>
+        </div>
+        <span class="muted" style="font-size:11px">最短 5 分钟，最长 30 天</span>
+      </div>
+    </div>
+    <div class="field">
+      <label>任务运行时长 *</label>
+      <div class="sched-lifetime-row" id="sLifetimeRow">
+        <label class="chk"><input type="checkbox" id="sLifetimeEnabled" checked/> 到时自动停止</label>
+        <input type="number" id="sLifetimeValue" value="7" min="1" max="525600" step="1"/>
+        <select id="sLifetimeUnit">
+          <option value="60">分钟</option>
+          <option value="3600">小时</option>
+          <option value="86400" selected>天</option>
+        </select>
+        <span class="muted" style="font-size:11px">从保存时开始计时，最长 365 天；不勾选则不限时</span>
+      </div>
+    </div>
+    <div class="field"><label>目标机器 *（被测端，iperf3 -s）</label>
+      <select id="sTarget"></select></div>
+    <div class="field">
+      <label>后端机器 *（发起端，可多选）</label>
+      <div id="sBackendList"></div>
+    </div>
+    <div class="row" style="align-items:center">
+      <label class="chk"><input type="checkbox" id="sShowAdv"> 自定义测试参数（默认与「发起测试」区域的当前值一致）</label>
+    </div>
+    <div id="sAdvBox" class="hidden">
+      <div class="row params-grid">
+        <div class="field" style="width:96px;margin-bottom:0"><label>线程数 -P</label>
+          <input type="number" id="sStreams" value="1" min="1" max="32" step="1"></div>
+        <div class="field" style="width:108px;margin-bottom:0"><label>单向时长 -t</label>
+          <input type="number" id="sDuration" value="10" min="1" max="300" step="1"></div>
+        <div class="field" style="width:120px;margin-bottom:0"><label>目标机端口 -p</label>
+          <input type="number" id="sPort" value="5201" min="1" max="65535" step="1"></div>
+        <div class="field" style="width:110px;margin-bottom:0"><label>ping 次数 -c</label>
+          <input type="number" id="sPing" value="200" min="1" max="2000" step="1"></div>
+        <label class="chk" style="margin-bottom:6px"><input type="checkbox" id="sUdp"> 📦 UDP</label>
+        <div class="field" style="width:120px;margin-bottom:0"><label>UDP 带宽/流</label>
+          <input id="sUdpBw" value="100M" placeholder="100M" disabled></div>
+      </div>
+    </div>
+    <div class="row" style="align-items:center">
+      <label class="chk"><input type="checkbox" id="sIpv6"> 🌐 使用 IPv6 测试</label>
+      <span class="muted" style="font-size:12px">|</span>
+      <label class="chk" title="面板正好有测试在跑时：跳过本轮（默认，保证对比曲线时间轴规整）还是等它跑完再跑">
+        <input type="checkbox" id="sWait"> 与手动测试冲突时等待（默认跳过本轮）
+      </label>
+    </div>
+    <div class="actions" style="justify-content:flex-end;margin-top:10px">
+      <button data-action="closeSchedModal">取消</button>
+      <button class="primary" data-action="saveSchedule">保存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let MACHINES = [];
+let RUN_PORTS = {};          // 机器ID -> 本次测试单独指定的 iperf3 端口（未改过的机器不在此表）
+let CURRENT_RUN = null;
+let pollTimer = null;
+let agentTimer = null;
+let agentMachine = null;
+let runFormInit = false;
+let EXPANDED_RUN_GROUPS = new Set();
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, {headers: {'Content-Type': 'application/json'}, ...opts});
+  if (res.status === 401 && !path.startsWith('/api/login')) {
+    location.href = '/login';
+    throw new Error('未登录');
+  }
+  let data = null;
+  try { data = await res.json(); } catch (e) {}
+  if (!res.ok) throw new Error((data && data.error) || res.statusText);
+  return data;
+}
+
+function toast(msg, ms = 3500) {
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), ms);
+}
+
+function statusText(s) {
+  return {running: '进行中', finished: '已完成', partial: '部分失败', failed: '失败', stopped: '已停止'}[s] || s;
+}
+
+function fmt(v, suffix) {
+  if (v === null || v === undefined) return '—';
+  return Number(v).toFixed(1).replace(/\.0$/, '') + (suffix || '');
+}
+
+function ratingClass(r) {
+  return {'优秀': 'rating-s', '良好': 'rating-a', '一般': 'rating-b', '较差': 'rating-c'}[r] || '';
+}
+
+function copyText(text, tip) {
+  const done = () => toast(tip || '已复制');
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(done).catch(() => copyFallback(text, done));
+  } else {
+    copyFallback(text, done);
+  }
+}
+
+async function copyRichText(text, html, tip) {
+  if (navigator.clipboard && navigator.clipboard.write && window.ClipboardItem) {
+    try {
+      await navigator.clipboard.write([new ClipboardItem({
+        'text/plain': new Blob([text], {type: 'text/plain'}),
+        'text/html': new Blob([html], {type: 'text/html'}),
+      })]);
+      toast(tip || '已复制');
+      return;
+    } catch (e) {}
+  }
+  if (copyHtmlFallback(html)) {
+    toast(tip || '已复制');
+    return;
+  }
+  copyText(text, tip + '（当前浏览器不支持富文本，仅复制文字）');
+}
+
+function copyHtmlFallback(html) {
+  const holder = document.createElement('div');
+  holder.contentEditable = 'true';
+  holder.innerHTML = html;
+  holder.style.cssText = 'position:fixed;left:-10000px;top:0;width:900px;background:#fff';
+  document.body.appendChild(holder);
+  const range = document.createRange();
+  range.selectNodeContents(holder);
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch (e) {}
+  selection.removeAllRanges();
+  holder.remove();
+  return ok;
+}
+
+function copyFallback(text, done) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  document.body.appendChild(ta);
+  ta.select();
+  document.execCommand('copy');
+  ta.remove();
+  done();
+}
+
+/* ---------------- 机器管理 ---------------- */
+
+async function loadMachines() {
+  // 时间戳参数防缓存：即使浏览器忽略 no-cache 头，也不会用到升级前的旧数据
+  MACHINES = await api('/api/machines?_=' + Date.now());
+  renderMachines();
+  renderRunForm();
+  renderScheduleForm();
+}
+
+function renderMachines() {
+  const tb = $('machinesBody');
+  if ($('statOnline')) $('statOnline').textContent = MACHINES.filter(m => m.online).length;
+  if ($('statBackends')) $('statBackends').textContent = MACHINES.filter(m => m.role === 'backend' && m.online).length;
+  if (!MACHINES.length) {
+    tb.innerHTML = '<tr><td colspan="4" class="muted">暂无机器，点击右上角「添加机器」开始</td></tr>';
+    return;
+  }
+  tb.innerHTML = MACHINES.map(m => `
+    <tr>
+      <td><span class="dot ${m.online ? 'on' : 'off'}"></span><b>${esc(m.name)}</b>
+        <div class="quiet">${m.active_job ? '执行中' : (m.online ? '在线' : '离线')}</div></td>
+      <td><span class="badge ${m.role}">${m.role === 'target' ? '目标' : '后端'}</span>
+        <div class="quiet">${addrCell(m)}</div></td>
+      <td>${esc(m.region) || '—'} · ${esc(m.bandwidth) || '—'}
+        <div class="quiet">${esc(m.hostname) || '—'}</div></td>
+      <td class="actions">
+        <button class="small" data-action="showAgentCmd" data-id="${m.id}">接入</button>
+        <button class="small" data-action="discoverMachine" data-id="${m.id}" title="重新探测本机 IPv4 / IPv6 地址">探测</button>
+        <button class="small" data-action="editMachine" data-id="${m.id}">编辑</button>
+        <button class="small danger" data-action="deleteMachine" data-id="${m.id}">删除</button>
+      </td>
+    </tr>`).join('');
+}
+
+function testAddr(m, ver) {
+  // 与后端 db.machine_test_ip 同一套规则：手动指定优先，其次自动探测到的该协议族地址
+  const ov = String(m.addr_override || '').trim();
+  if (ov && (ver === 6) === ov.includes(':')) return ov;
+  return (ver === 6 ? m.ip6 : m.ip4) || '';
+}
+
+function hasV6(m) { return !!testAddr(m, 6); }
+
+function addrCell(m) {
+  const manual = String(m.addr_override || '').trim()
+    ? ' <span class="muted" title="机器资料里手动指定的测试地址（自动探测结果被忽略）">手动</span>' : '';
+  const a4 = testAddr(m, 4);
+  const a6 = testAddr(m, 6);
+  // 关键区分：有可用地址时（NAT 机用面板观测到的出口 IP）探测提示只是说明，不是故障；
+  // 一个地址都没有时才用 ⚠️ 提示需要处理
+  const note = m.probe_error
+    ? (a4 || a6
+        ? ` <span style="cursor:help;font-size:11px" class="muted" title="${esc(m.probe_error)}">ℹ️</span>`
+        : ` <span style="cursor:help" title="${esc(m.probe_error)}">⚠️</span>`)
+    : '';
+  if (!a4 && !a6) {
+    return (m.agent_ip
+      ? `<span class="muted">探测中…（接入 IP ${esc(m.agent_ip)}）</span>`
+      : '<span class="muted">未接入</span>') + manual + note;
+  }
+  // 双栈机器只显示 IPv4（IPv6 是否存在在后端机器备注里标出，不占地址列空间）；
+  // 只有 IPv6 的机器才把 IPv6 当测试地址显示
+  if (a4) return `<span class="muted">v4</span> ${esc(a4)}${manual}${note}`;
+  return `<span class="muted">v6</span> ${esc(a6)}${manual}${note}`;
+}
+
+function updateRoleHint() {
+  $('mRoleHint').textContent = $('mRole').value === 'target'
+    ? '⚠️ 改为目标机：测试时运行 iperf3 -s（端口在「发起测试」里可自定义，默认 5201），需放行该端口与 ICMP。修改即时生效。'
+    : '发起测试端。修改即时生效。';
+}
+
+function openMachineForm(m) {
+  $('mFormTitle').textContent = m ? '编辑机器' : '添加机器';
+  $('mId').value = m ? m.id : '';
+  $('mName').value = m ? m.name : '';
+  $('mRole').value = m ? m.role : 'backend';
+  $('mRegion').value = m ? m.region : '';
+  $('mBandwidth').value = m ? m.bandwidth : '';
+  $('mAddr').value = m ? (m.addr_override || '') : '';
+  updateRoleHint();
+  $('mStepForm').classList.remove('hidden');
+  $('mStepAgent').classList.add('hidden');
+  stopAgentPoll();
+  agentMachine = null;
+  $('modal').classList.remove('hidden');
+  $('mName').focus();
+}
+
+function buildAgentCmd() {
+  if (!agentMachine) return '';
+  let url = $('agentPanelUrl').value.trim().replace(/\/+$/, '');
+  if (url && !/^https?:\/\//.test(url)) url = 'http://' + url;
+  // 全新机器可能只装了 curl 或只装了 wget：两种下载器自适应，避免接入命令跑不起来
+  const fetchCmd = `command -v curl >/dev/null 2>&1 && curl -fsSL ${url}/agent/install.sh || wget -qO- ${url}/agent/install.sh`;
+  return `( ${fetchCmd} ) | bash -s -- ${url} ${agentMachine.token} ${agentMachine.sign_key}`;
+}
+
+function showAgentStep(m) {
+  agentMachine = m;
+  $('agentStepName').textContent = m.name;
+  $('mStepForm').classList.add('hidden');
+  $('mStepAgent').classList.remove('hidden');
+  $('agentDoneBtn').classList.add('hidden');
+  $('regenBtn').classList.remove('hidden');
+  $('agentWait').textContent = '⏳ 等待 Agent 接入...（在机器上执行上方命令后约 3 秒上线）';
+  if (!$('agentPanelUrl').value.trim()) $('agentPanelUrl').value = location.origin;
+  $('agentCmd').textContent = buildAgentCmd();
+  stopAgentPoll();
+  agentTimer = setInterval(pollAgent, 2000);
+  pollAgent();
+}
+
+function stopAgentPoll() {
+  clearInterval(agentTimer);
+  agentTimer = null;
+}
+
+async function pollAgent() {
+  if (!agentMachine) return;
+  let m;
+  try { m = await api(`/api/machines/${agentMachine.id}?_=${Date.now()}`); } catch (e) { return; }
+  if (m.online) {
+    $('agentWait').innerHTML = `<span style="color:var(--green)">✅ Agent 已上线（${esc(m.agent_ip || '')} ${esc(m.hostname || '')}）</span>`;
+    $('agentDoneBtn').classList.remove('hidden');
+    stopAgentPollKeepMachine();
+    loadMachines();
+  }
+}
+function stopAgentPollKeepMachine() {
+  clearInterval(agentTimer);
+  agentTimer = null;
+}
+
+function editMachine(id) { openMachineForm(MACHINES.find(x => x.id === Number(id))); }
+
+function showAgentCmd(id) {
+  const m = MACHINES.find(x => x.id === Number(id));
+  if (!m) return;
+  $('mStepForm').classList.add('hidden');
+  $('mStepAgent').classList.remove('hidden');
+  $('modal').classList.remove('hidden');
+  showAgentStep(m);
+}
+
+function closeModal() {
+  $('modal').classList.add('hidden');
+  stopAgentPoll();
+  agentMachine = null;
+}
+
+async function saveMachine() {
+  const body = {
+    name: $('mName').value, role: $('mRole').value,
+    region: $('mRegion').value, bandwidth: $('mBandwidth').value,
+    addr_override: $('mAddr').value.trim(),
+  };
+  const id = $('mId').value;
+  try {
+    if (id) {
+      await api(`/api/machines/${id}`, {method: 'PUT', body: JSON.stringify(body)});
+      closeModal();
+      await loadMachines();
+      toast('已保存');
+    } else {
+      const m = await api('/api/machines', {method: 'POST', body: JSON.stringify(body)});
+      await loadMachines();
+      showAgentStep(m);
+    }
+  } catch (e) {
+    alert('保存失败: ' + e.message);
+  }
+}
+
+async function regenToken() {
+  if (!agentMachine) return;
+  if (!confirm('重置令牌后，旧的接入命令立即失效，需要重新复制新命令。确定？')) return;
+  try {
+    agentMachine = await api(`/api/machines/${agentMachine.id}/regen-token`, {method: 'POST'});
+    $('agentCmd').textContent = buildAgentCmd();
+    $('agentWait').textContent = '⏳ 密钥已重置，请复制新命令在机器上重新执行。';
+    toast('令牌已重置');
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+async function deleteMachine(id) {
+  const m = MACHINES.find(x => x.id === Number(id));
+  if (!m) return;
+  if (!confirm(`确定删除机器「${m.name}」？\n面板会自动向它下发 Agent 卸载指令（在线机器下次心跳时执行）。`)) return;
+  try {
+    await api(`/api/machines/${id}`, {method: 'DELETE'});
+    await loadMachines();
+    toast('已删除；卸载指令将在 Agent 下次心跳时自动执行');
+  } catch (e) {
+    alert('删除失败: ' + e.message);
+  }
+}
+
+async function discoverMachine(id) {
+  const m = MACHINES.find(x => x.id === Number(id));
+  if (!m) return;
+  try {
+    await api(`/api/machines/${id}/discover`, {method: 'POST'});
+    toast(`已向「${m.name}」派发地址探测，几秒后自动刷新`);
+    setTimeout(() => loadMachines().catch(() => {}), 4000);
+  } catch (e) {
+    alert('探测失败: ' + e.message);
+  }
+}
+
+async function logout() {
+  try { await api('/api/logout', {method: 'POST'}); } catch (e) {}
+  location.href = '/login';
+}
+
+/* ---------------- 发起测试 ---------------- */
+
+function runPort(m) {
+  // 该机器本次使用的端口：单独改过就用改的值，否则跟随上面的「默认端口」
+  const v = RUN_PORTS[m.id];
+  return (v === undefined || v === null || v === '') ? ($('cfgPort').value || '5201') : v;
+}
+
+function renderRunForm() {
+  // 正在「发起测试」区域里输入时不要重建 DOM：每 8 秒一次的机器列表刷新
+  // 会把节点换掉，导致光标丢失、输入被打断（值本身存在 RUN_PORTS 里不会丢）
+  const ae = document.activeElement;
+  if (ae && ae.classList && (ae.classList.contains('item-port')
+      || ['cfgStreams', 'cfgDuration', 'cfgPort', 'cfgPing', 'cfgUdpBw'].includes(ae.id))) {
+    return;
+  }
+  const targets = MACHINES.filter(m => m.role === 'target');
+  const backends = MACHINES.filter(m => m.role === 'backend');
+  const prevTarget = $('targetSelect').value;
+  const prevChecked = runFormInit
+    ? new Set([...document.querySelectorAll('#backendList input:checked')].map(x => x.value))
+    : null;
+  $('targetSelect').innerHTML = targets.length
+    ? targets.map(m => {
+        // 测试地址同样只显示 IPv4（没有 IPv4 的机器才显示 IPv6），手动指定优先
+        const a4 = testAddr(m, 4);
+        const a6 = testAddr(m, 6);
+        const addr = a4 ? esc(a4) : (a6 ? `${esc(a6)}（仅 IPv6）` : '地址未探测');
+        return `<option value="${m.id}">${esc(m.name)}（${addr} · ${esc(m.region) || '未标记'} · ${esc(m.bandwidth) || '未标记'}）</option>`;
+      }).join('')
+    : '<option value="">— 请先添加一台角色为「目标」的机器 —</option>';
+  $('backendList').innerHTML = backends.length
+    ? backends.map(m => {
+        // 备注里标出 IPv6 情况（地址列不重复展示；两种状态颜色区分开）；
+        // 端口默认跟目标机端口一致，只有勾了「每台机器单独指定端口」才显示输入框
+        const meta = `${esc(m.region) || '未标记'} · ${esc(m.bandwidth) || '未标记'}`;
+        const v6 = hasV6(m)
+          ? '<span class="v6-yes">有 V6</span>'
+          : `<span class="v6-no" style="cursor:help" title="${esc(m.probe_error || '本机未探测到全局 IPv6（NAT 机属正常，测试用面板观测到的出口 IP）')}">无 IPv6</span>`;
+        const adv = $('cfgAdvPorts').checked
+          ? `<label class="muted" style="display:flex;align-items:center;gap:4px;font-size:12px"
+                    title="该机器本次连接目标机用的端口（目标机会为它额外起 server）">连接端口
+               <input type="number" class="item-port" data-id="${m.id}" value="${esc(runPort(m))}"
+                      min="1" max="65535" step="1" style="width:76px;padding:2px 6px">
+             </label>`
+          : '';
+        return `<div class="chk" style="gap:8px;flex-wrap:wrap">
+          <label class="chk" style="gap:6px"><input type="checkbox" value="${m.id}"> ${esc(m.name)}</label>
+          <span class="muted">(${meta} · ${v6})</span>
+          ${adv}
+        </div>`;
+      }).join('')
+    : '<span class="muted">暂无后端机器</span>';
+  if (runFormInit) {
+    if ([...$('targetSelect').options].some(o => o.value === prevTarget)) $('targetSelect').value = prevTarget;
+    document.querySelectorAll('#backendList input[type=checkbox]').forEach(cb => { cb.checked = prevChecked.has(cb.value); });
+  } else {
+    document.querySelectorAll('#backendList input[type=checkbox]').forEach(cb => { cb.checked = true; });
+  }
+  runFormInit = true;
+  updateIpv6Ui();
+}
+
+function updateIpv6Ui() {
+  const cb = $('useIpv6');
+  const target = MACHINES.find(m => String(m.id) === $('targetSelect').value);
+  const t6 = target ? testAddr(target, 6) : '';
+  const t4 = target ? testAddr(target, 4) : '';
+  const hints = [];
+  if (!target || !t6) {
+    // 目标机没有 IPv6：禁用选项并说明原因（不再静默失败）
+    cb.disabled = true;
+    cb.checked = false;
+    hints.push(target
+      ? '目标机未探测到 IPv6 地址，只能做 IPv4 测试（可点「探测地址」重试，或在机器资料里手动指定）'
+      : '请先选择目标机器');
+  } else {
+    cb.disabled = false;
+    // 目标机只有 IPv6（没有 IPv4）时自动选中，否则默认 IPv4 会直接报错
+    if (!t4 && !cb.checked) {
+      cb.checked = true;
+      hints.push('该目标机只有 IPv6 地址，已自动选择 IPv6 测试');
+    }
+    hints.push(`目标机 IPv6：${t6}`);
+    const checked = [...document.querySelectorAll('#backendList input[type=checkbox]')].map(x => Number(x.value));
+    const no6 = MACHINES.filter(m => checked.includes(m.id) && !hasV6(m)).map(m => m.name);
+    if (no6.length) hints.push(`⚠️ 以下后端机器未探测到 IPv6，IPv6 测试可能失败：${no6.join('、')}`);
+  }
+  $('ipv6Hint').textContent = hints.join(' · ');
+}
+
+async function startRun() {
+  const target_id = parseInt($('targetSelect').value, 10);
+  const backend_ids = [...document.querySelectorAll('#backendList input[type=checkbox]:checked')].map(x => parseInt(x.value, 10));
+  const ip_version = $('useIpv6').disabled ? 4 : ($('useIpv6').checked ? 6 : 4);
+  if (!target_id) return alert('请先添加一台角色为「目标」的机器并接入 Agent');
+  if (!backend_ids.length) return alert('请至少勾选一台后端机器');
+  // 参数校验（服务端还会再校验一次，这里只为了少跑一趟）
+  const readNum = (id, lo, hi, label) => {
+    const v = parseInt($(id).value, 10);
+    if (!Number.isFinite(v) || v < lo || v > hi) { alert(`${label} 需在 ${lo}–${hi} 之间`); return null; }
+    return v;
+  };
+  const streams = readNum('cfgStreams', 1, 32, '线程数');
+  const duration = readNum('cfgDuration', 1, 300, '单向时长（秒）');
+  const port = readNum('cfgPort', 1, 65535, 'iperf3 端口');
+  const ping_count = readNum('cfgPing', 1, 2000, 'ping 次数');
+  if (streams === null || duration === null || port === null || ping_count === null) return;
+  const udp = $('cfgUdp').checked;
+  const udp_bandwidth = ($('cfgUdpBw').value || '').trim().toUpperCase() || '100M';
+  if (udp && !/^\d{1,5}(\.\d{1,3})?[KMG]$/.test(udp_bandwidth)) {
+    return alert('UDP 目标带宽必须带单位（示例：100M、1G、500K）');
+  }
+  // 每台后端机的端口：没单独改过的用默认端口（不提交，后端按目标机端口落库）
+  const advPorts = $('cfgAdvPorts').checked;
+  const ports = {};
+  let perMachinePorts = false;
+  if (advPorts) {
+    for (const id of backend_ids) {
+      const raw = RUN_PORTS[id];
+      if (raw === undefined || raw === null || raw === '') continue;
+      const p = parseInt(raw, 10);
+      if (!Number.isFinite(p) || p < 1 || p > 65535) {
+        return alert(`机器端口需在 1–65535 之间（收到 ${raw}）`);
+      }
+      if (p !== port) perMachinePorts = true;
+      ports[id] = p;
+    }
+  }
+  const proto = ip_version === 6 ? 'IPv6' : 'IPv4';
+  if (ip_version === 6 && !confirm(
+      '确认所选后端机器都支持 IPv6？\n\n' +
+      'IPv6 测试要求每台后端机器与目标机之间都有 IPv6 连通性，\n' +
+      '任一机器没有 IPv6 出口都会导致该台测试失败。\n\n' +
+      '继续开始 IPv6 测试？')) return;
+  // 把实际要用的目标地址与端口显式写进确认框：地址取错/端口对不上能立刻看出来
+  const tgt = MACHINES.find(m => String(m.id) === String(target_id)) || {};
+  const tgtAddr = testAddr(tgt, ip_version) || '地址未探测';
+  const portTxt = perMachinePorts ? '连接端口逐台指定' : `端口 ${port}`;
+  const params = `${streams} 线程 · 上/下行各 ${duration} 秒 · ${portTxt} · `
+    + `${udp ? `UDP（-b ${udp_bandwidth}/流，总目标约 ${streams}×）` : 'TCP'} · ping ${ping_count} 次`;
+  const mins = Math.ceil((Math.max(backend_ids.length * (duration * 2 + 5), ping_count) + 30) / 60);
+  if (!confirm(`目标机：${tgt.name || target_id} → ${tgtAddr}:${port}\n`
+      + `后端机 ${backend_ids.length} 台，逐台执行：iperf3 -c <目标机> ${perMachinePorts ? '(各自端口)' : `-p ${port}`} `
+      + `-t ${duration} -P ${streams}${udp ? ` -u -b ${udp_bandwidth}` : ''}（+ 下行 -R）\n`
+      + `测试协议：${proto}；预计总时长约 ${mins} 分钟。\n确认开始？`)) return;
+  try {
+    const r = await api('/api/runs', {method: 'POST', body: JSON.stringify({
+      target_id, backend_ids, ip_version, streams, duration, port,
+      udp, udp_bandwidth, ping_count, ports,
+    })});
+    await loadRuns();
+    openRun(r.run_id);
+  } catch (e) {
+    alert('启动失败: ' + e.message);
+  }
+}
+
+/* ---------------- 测试记录 ---------------- */
+
+async function loadRuns() {
+  let runs = [];
+  try { runs = await api('/api/runs'); } catch (e) { return; }
+  if ($('statRuns')) $('statRuns').textContent = runs.length;
+  const onlySched = $('onlyScheduled') && $('onlyScheduled').checked;
+  if (onlySched) runs = runs.filter(r => r.source === 'schedule' || r.schedule_id);
+  const tb = $('runsBody');
+  if (!runs.length) {
+    tb.innerHTML = `<tr><td colspan="7" class="muted">${onlySched ? '暂无定时任务触发的测试记录' : '暂无测试记录'}</td></tr>`;
+    return;
+  }
+  const groups = new Map();
+  const entries = [];
+  for (const r of runs) {
+    if (r.source === 'schedule' || r.schedule_id) {
+      const sid = Number(r.schedule_id || 0);
+      if (!groups.has(sid)) groups.set(sid, []);
+      groups.get(sid).push(r);
+    } else {
+      entries.push({kind: 'run', at: r.created_at, rid: r.id, run: r});
+    }
+  }
+  for (const [sid, groupRuns] of groups) {
+    entries.push({kind: 'group', at: groupRuns[0].created_at, rid: groupRuns[0].id,
+                  sid, runs: groupRuns});
+  }
+  entries.sort((a, b) => String(b.at).localeCompare(String(a.at)) || b.rid - a.rid);
+
+  const runRow = (r, child) => {
+    const src = `<span class="badge scheduled">定时</span>`;
+    return `<tr class="${child ? 'run-child' : ''}">
+      <td>#${r.id}</td>
+      <td>${child ? src : '<span class="badge backend">手动</span>'}</td>
+      <td>${esc(r.target_name)} <span class="muted">${r.ip_version === 6 ? 'IPv6' : 'IPv4'} · `
+        + `${r.udp ? 'UDP' : 'TCP'} · ${r.streams}线程/${r.duration}s · :${r.port}</span></td>
+      <td>${r.done_count}/${r.backend_total}${r.fail_count ? ` · <span style="color:var(--red)">${r.fail_count} 失败</span>` : ''}</td>
+      <td><span class="badge ${r.status}">${statusText(r.status)}</span></td>
+      <td class="muted">${r.created_at}</td>
+      <td class="actions">
+        <button class="small" data-action="openRun" data-id="${r.id}">查看</button>
+        <button class="small danger" data-action="removeRun" data-id="${r.id}">删除</button>
+      </td>
+    </tr>`;
+  };
+
+  tb.innerHTML = entries.map(entry => {
+    if (entry.kind === 'run') return runRow(entry.run, false);
+    const open = EXPANDED_RUN_GROUPS.has(entry.sid);
+    const latest = entry.runs[0];
+    const running = entry.runs.find(r => r.status === 'running' || r.status === 'pending');
+    const status = running ? running.status : latest.status;
+    const failed = entry.runs.filter(r => ['failed', 'partial', 'interrupted'].includes(r.status)).length;
+    const name = latest.schedule_name || `定时任务 #${entry.sid || '?'}`;
+    const group = `<tr class="run-group" data-action="toggleRunGroup" data-id="${entry.sid}">
+      <td colspan="7"><div class="run-group-main">
+        <button class="small group-toggle ${open ? 'open' : ''}" data-action="toggleRunGroup" data-id="${entry.sid}" title="${open ? '收起' : '展开'}">›</button>
+        <span class="badge scheduled">定时任务</span>
+        <b>${esc(name)}</b>
+        <span class="muted">${entry.runs.length} 次记录${failed ? ` · ${failed} 次失败` : ''}</span>
+        <span class="badge ${status}">${statusText(status)}</span>
+        <span class="muted">最近 ${latest.created_at}</span>
+        <span style="flex:1"></span>
+        <button class="small" data-action="compareSchedule" data-id="${entry.sid}">长期对比</button>
+      </div></td>
+    </tr>`;
+    const children = open ? entry.runs.map(r => runRow(r, true)).join('') : '';
+    return group + children;
+  }).join('');
+}
+
+function toggleRunGroup(sid) {
+  sid = Number(sid);
+  if (EXPANDED_RUN_GROUPS.has(sid)) EXPANDED_RUN_GROUPS.delete(sid);
+  else EXPANDED_RUN_GROUPS.add(sid);
+  loadRuns();
+}
+
+function openRun(id) {
+  CURRENT_RUN = Number(id);
+  $('runDetail').classList.remove('hidden');
+  $('runDetail').scrollIntoView({behavior: 'smooth'});
+  $('runDetailTitle').textContent = `测试 #${CURRENT_RUN}`;
+  $('runDetailMeta').textContent = '正在加载测试记录…';
+  $('logPre').textContent = '';
+  $('detailTableBody').innerHTML = '<tr><td colspan="10" class="muted">加载中…</td></tr>';
+  $('rawWrap').innerHTML = '';
+  $('reportPre').textContent = '';
+  clearTimeout(pollTimer);
+  pollRun();
+  schedulePoll();
+}
+
+function schedulePoll() {
+  clearTimeout(pollTimer);
+  pollTimer = setTimeout(async () => {
+    if (!CURRENT_RUN) return;
+    const d = await pollRun();
+    if (d && (d.run.status === 'running' || d.run.status === 'pending')) {
+      schedulePoll();
+    } else {
+      loadRuns();
+    }
+  }, 2000);
+}
+
+async function pollRun() {
+  if (!CURRENT_RUN) return null;
+  let d;
+  try { d = await api(`/api/runs/${CURRENT_RUN}`); } catch (e) {
+    $('runDetailMeta').textContent = '加载失败: ' + e.message;
+    toast('测试记录加载失败: ' + e.message);
+    return null;
+  }
+  const run = d.run;
+  $('runDetailTitle').innerHTML = `测试 #${run.id} <span class="badge ${run.status}">${statusText(run.status)}</span>`;
+  $('runDetailMeta').textContent =
+    `目标: ${run.target_name} (${run.target_host}) · 协议: ${run.ip_version === 6 ? 'IPv6' : 'IPv4'}`
+    + ` · ${run.udp ? `UDP -b ${run.udp_bandwidth}/流` : 'TCP'} ${run.streams} 线程`
+    + ` · 上/下行各 ${run.duration} 秒 · 端口 ${run.port}`
+    + ((d.items || []).some(it => it.port && it.port !== run.port) ? '（部分机器连接端口不同，见下表）' : '')
+    + ` · ping ${run.ping_count} 次`
+    + ((run.source === 'schedule' || run.schedule_id) ? ` · 来源: 定时任务 #${run.schedule_id || '?'}` : ' · 来源: 手动')
+    + ` · 开始: ${run.created_at}`
+    + (run.finished_at ? ` · 结束: ${run.finished_at}` : '');
+  const pre = $('logPre');
+  const autoScroll = $('autoScroll') && $('autoScroll').checked;
+  const lines = d.log || [];
+  pre.innerHTML = lines.length
+    ? lines.map(l => {
+        const e = esc(l);
+        if (l.includes('✅')) return `<div class="log-line log-ok">${e}</div>`;
+        if (l.includes('❌') || l.includes('[致命错误]')) return `<div class="log-line log-bad">${e}</div>`;
+        if (l.includes('===')) return `<div class="log-line log-hl">${e}</div>`;
+        return `<div class="log-line">${e}</div>`;
+      }).join('')
+    : '（暂无日志）';
+  if (autoScroll) pre.scrollTop = pre.scrollHeight;
+  renderRunDetail(d);
+  return d;
+}
+
+function renderRunDetail(d) {
+  const udp = !!d.run.udp;
+  // UDP 没有重传，那一列改成 UDP 丢包（上/下）
+  if ($('thRetr')) $('thRetr').textContent = udp ? 'UDP 丢包 上/下' : '重传';
+  const rows = d.items.map((it, i) => {
+    const region = esc(it.machine_region) || '—';
+    const bw = esc(it.machine_bandwidth) || '—';
+    const port = it.port && d.run.port && it.port !== d.run.port
+      ? ` <span class="muted">:${it.port}</span>` : '';
+    const name = `后端机器${i + 1}：${esc(it.machine_name)}${port}`;
+    if (it.status === 'done' && it.metrics_obj) {
+      const mt = it.metrics_obj;
+      const last = udp
+        ? `${fmt(mt.up_udp_loss_pct, '%')} / ${fmt(mt.down_udp_loss_pct, '%')}`
+        : (mt.retr_total ?? '—');
+      return `<tr>
+        <td>${name}</td><td>${region}</td><td>${bw}</td>
+        <td>${fmt(mt.loss_pct, '%')}</td>
+        <td>${fmt(mt.rtt_avg, ' ms')}</td>
+        <td>${mt.mdev_ms === null || mt.mdev_ms === undefined ? '—' : mt.mdev_ms + ' ms'}</td>
+        <td>${fmt(mt.up_mbits, ' Mbit/s')}</td>
+        <td>${fmt(mt.down_mbits, ' Mbit/s')}</td>
+        <td>${last}</td>
+        <td><span class="rb ${ratingClass(mt.rating)}">${mt.rating}</span> <span class="muted">${esc(mt.rating_detail || '')}</span></td>
+      </tr>`;
+    }
+    if (it.status === 'running') {
+      return `<tr>
+        <td>${name}</td><td>${region}</td><td>${bw}</td>
+        <td colspan="6"><span class="badge running">⏳ ${esc(it.phase || '执行中')}…</span></td>
+        <td class="muted">等待完成</td>
+      </tr>`;
+    }
+    return `<tr>
+      <td>${name}</td><td>${region}</td><td>${bw}</td>
+      <td colspan="6" class="muted">—</td>
+      <td style="color:var(--red)">❌ ${esc(it.error || it.status)}</td>
+    </tr>`;
+  }).join('');
+  $('detailTableBody').innerHTML = rows || '<tr><td colspan="10" class="muted">等待执行...</td></tr>';
+
+  $('rawWrap').innerHTML = d.items.map((it, i) => {
+    const mt = it.metrics_obj || {};
+    let content;
+    if (it.status === 'done') {
+      content = [mt.ping_block, mt.up_block, mt.down_block].filter(Boolean).join('\n\n') || '（无输出）';
+    } else {
+      content = ['测试失败: ' + (it.error || it.status), it.up_raw, it.down_raw]
+        .filter(Boolean).join('\n\n');
+    }
+    return `<details>
+      <summary>后端机器${i + 1}：${esc(it.machine_name)}（${esc(it.machine_region) || '未标记'} · ${esc(it.machine_bandwidth) || '未标记'} · ${esc(it.machine_host)}）</summary>
+      <pre>${esc(content)}</pre>
+    </details>`;
+  }).join('');
+
+  $('reportPre').textContent = d.run.report ||
+    (d.run.status === 'running' ? '（测试结束后自动生成）' : '（无报告）');
+  $('reportRender').classList.add('hidden');
+  $('reportRender').innerHTML = '';
+  $('reportToggleBtn').textContent = '👁 渲染视图';
+}
+
+function copyReport() {
+  const text = $('reportPre').textContent;
+  if (!text || text.startsWith('（')) return alert('报告还未生成');
+  copyText(text, '已复制 Markdown 报告');
+}
+
+/* --- 轻量 Markdown 渲染（先转义再转换，杜绝注入） --- */
+function mdInline(s) {
+  return esc(s)
+    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>');
+}
+
+function mdFlushTable(rows) {
+  const parsed = rows
+    .map(r => r.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim()))
+    .filter(cells => !cells.every(c => /^:?-{2,}:?$/.test(c) || c === ''));
+  if (!parsed.length) return '';
+  const head = parsed[0];
+  let h = '<table class="md-table"><thead><tr>' + head.map(c => '<th>' + mdInline(c) + '</th>').join('') + '</tr></thead><tbody>';
+  for (const row of parsed.slice(1)) h += '<tr>' + row.map(c => '<td>' + mdInline(c) + '</td>').join('') + '</tr>';
+  return h + '</tbody></table>';
+}
+
+function renderMarkdown(src) {
+  const parts = src.split('```');
+  let html = '';
+  let tableRows = [];
+  const flush = () => { const t = mdFlushTable(tableRows); tableRows = []; return t; };
+  for (let i = 0; i < parts.length; i++) {
+    if (i % 2 === 1) {
+      html += '<pre>' + esc(parts[i].replace(/^\n/, '')) + '</pre>';
+      continue;
+    }
+    for (const line of parts[i].split('\n')) {
+      if (/^\s*\|.*\|\s*$/.test(line)) { tableRows.push(line); continue; }
+      if (tableRows.length) html += flush();
+      if (/^### /.test(line)) html += `<h4>${mdInline(line.slice(4))}</h4>`;
+      else if (/^## /.test(line)) html += `<h3>${mdInline(line.slice(3))}</h3>`;
+      else if (/^# /.test(line)) html += `<h2>${mdInline(line.slice(2))}</h2>`;
+      else if (/^- /.test(line)) html += `<p>• ${mdInline(line.slice(2))}</p>`;
+      else if (/^> /.test(line)) html += `<blockquote>${mdInline(line.replace(/^>\s?/, ''))}</blockquote>`;
+      else if (line.trim() === '') continue;
+      else html += `<p>${mdInline(line)}</p>`;
+    }
+  }
+  if (tableRows.length) html += flush();
+  return html;
+}
+
+function applyTheme(t) {
+  document.body.dataset.theme = t;
+  try { localStorage.setItem('fleet-theme', t); } catch (e) {}
+  $('themeBtn').textContent = t === 'light' ? '🌙 深色' : '☀️ 浅色';
+}
+
+function toggleTheme() {
+  applyTheme(document.body.dataset.theme === 'dark' ? 'light' : 'dark');
+}
+
+function toggleReportView() {
+  const pre = $('reportPre'), div = $('reportRender'), btn = $('reportToggleBtn');
+  if (pre.classList.contains('hidden')) {
+    div.classList.add('hidden');
+    pre.classList.remove('hidden');
+    btn.textContent = '👁 渲染视图';
+    return;
+  }
+  div.innerHTML = renderMarkdown(pre.textContent);
+  div.classList.remove('hidden');
+  pre.classList.add('hidden');
+  btn.textContent = '📄 源码';
+}
+
+function downloadReport() {
+  if (CURRENT_RUN) window.open(`/api/runs/${CURRENT_RUN}/report`);
+}
+
+async function stopCurrentRun() {
+  if (!CURRENT_RUN) return;
+  if (!confirm('确定停止当前测试？')) return;
+  try {
+    await api(`/api/runs/${CURRENT_RUN}/stop`, {method: 'POST'});
+    toast('停止指令已发送，正在收尾...');
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+async function removeRun(id) {
+  if (!confirm('确定删除该测试记录？')) return;
+  try {
+    await api(`/api/runs/${id}`, {method: 'DELETE'});
+    if (CURRENT_RUN === Number(id)) {
+      CURRENT_RUN = null;
+      $('runDetail').classList.add('hidden');
+    }
+    loadRuns();
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+/* ---------------- 定时任务（长期对比） ---------------- */
+
+let SCHEDULES = [];
+let CURRENT_SCHED = null;
+let CURRENT_COMPARISON = null;
+let CHART_STATE = {mode: 'multi', direction: 'both', selected: new Set(), scheduleId: null};
+let COMPARE_ABORT = null;
+
+function intervalSeconds() {
+  const v = parseInt($('sInterval').value, 10);
+  const unit = parseInt($('sIntervalUnit').value, 10) || 3600;
+  if (!Number.isFinite(v) || v < 1) return null;
+  return v * unit;
+}
+
+function lifetimeSeconds() {
+  if (!$('sLifetimeEnabled').checked) return 0;
+  const v = parseInt($('sLifetimeValue').value, 10);
+  const unit = parseInt($('sLifetimeUnit').value, 10) || 86400;
+  if (!Number.isFinite(v) || v < 1) return null;
+  return v * unit;
+}
+
+function syncUdpControls(checkId, bandwidthId) {
+  const on = $(checkId).checked;
+  const bandwidth = $(bandwidthId);
+  bandwidth.disabled = !on;
+  bandwidth.style.opacity = on ? '1' : '.55';
+}
+
+function syncLifetimeControls() {
+  const on = $('sLifetimeEnabled').checked;
+  $('sLifetimeRow').classList.toggle('is-off', !on);
+  $('sLifetimeValue').disabled = !on;
+  $('sLifetimeUnit').disabled = !on;
+}
+
+function humanDuration(sec) {
+  sec = Number(sec) || 0;
+  // 用不换行空格：表格窄列里「5 分钟」不该被拆成两行
+  if (sec % 86400 === 0) return `${sec / 86400}\u00a0天`;
+  if (sec % 3600 === 0) return `${sec / 3600}\u00a0小时`;
+  if (sec % 60 === 0) return `${sec / 60}\u00a0分钟`;
+  return `${sec}\u00a0秒`;
+}
+
+function schedStatusText(s) {
+  return {
+    running: '执行中', finished: '正常', failed: '失败', partial: '部分失败',
+    stopped: '已停止', skipped: '本轮跳过', interrupted: '已中断', waiting: '等待空档',
+    expired: '已到期',
+  }[s] || s || '待执行';
+}
+
+async function loadSchedules() {
+  try { SCHEDULES = await api('/api/schedules?_=' + Date.now()); } catch (e) { return; }
+  if ($('statSchedules')) $('statSchedules').textContent = SCHEDULES.filter(s => s.enabled).length;
+  renderSchedules();
+  renderScheduleForm();
+}
+
+function renderSchedules() {
+  const tb = $('schedulesBody');
+  if (!tb) return;
+  if (!SCHEDULES.length) {
+    tb.innerHTML = '<tr><td colspan="9" class="muted">暂无定时任务，点右上角「新建定时任务」挂一个长期对比</td></tr>';
+    return;
+  }
+  tb.innerHTML = SCHEDULES.map(s => {
+    const expired = !!s.expired || s.last_status === 'expired';
+    const st = expired ? 'expired' : (s.enabled ? (s.last_status || '') : 'stopped');
+    const badge = expired
+      ? '<span class="badge expired">已到期</span>'
+      : s.enabled
+      ? `<span class="badge ${st === 'finished' ? 'done' : st}">${schedStatusText(st)}</span>`
+      : '<span class="badge stopped">已停用</span>';
+    const okCount = Math.max(0, s.run_count - s.fail_count);
+    const params = `${s.ip_version === 6 ? 'IPv6' : 'IPv4'} · ${s.udp ? `UDP -b ${esc(s.udp_bandwidth)}` : 'TCP'}`
+      + ` -P ${s.streams} -t ${s.duration}s · 端口 ${s.port} · ping ${s.ping_count}`;
+    const next = expired
+      ? '<span class="muted">运行时长已结束</span>'
+      : s.enabled
+      ? (s.next_run_in ? `${esc(s.next_run_in)}` : '—') + `<br><span class="muted" style="font-size:11px">${esc(s.next_run_at || '')}</span>`
+      : '<span class="muted">已停用</span>';
+    const lifetime = `运行 ${esc(s.lifetime_text || '不限')}`
+      + (s.ends_at ? `<br><span class="muted" style="font-size:11px">至 ${esc(s.ends_at)}</span>` : '');
+    const last = s.last_error
+      ? `<span style="color:var(--orange)" title="${esc(s.last_error)}">${esc(s.last_error.slice(0, 28))}${s.last_error.length > 28 ? '…' : ''}</span>`
+      : (s.last_run_at ? `<span class="muted">${esc(s.last_run_at)}</span>` : '<span class="muted">尚未执行</span>');
+    return `<tr>
+      <td>${badge}</td>
+      <td class="sched-name">${esc(s.name)}<br><span class="muted" style="font-size:11px">#${s.id}</span></td>
+      <td>${esc(s.target_name)} <span class="muted">←</span> ${s.backend_names.map(esc).join('、') || '—'}
+        <br><span class="muted" style="font-size:11px">${s.backend_count} 台后端</span></td>
+      <td class="muted" style="font-size:12px">${params}</td>
+      <td>${esc(s.interval_text)}<br><span class="muted" style="font-size:11px">${lifetime}</span></td>
+      <td>${next}</td>
+      <td>${okCount} / ${s.fail_count} / ${s.skip_count}
+        <br><span class="muted" style="font-size:11px">共 ${s.run_count} 轮完成</span></td>
+      <td style="font-size:12px">${last}</td>
+      <td class="sched-actions">
+        <button class="small" data-action="compareSchedule" data-id="${s.id}">汇总对比</button>
+        <button class="small" data-action="runScheduleNow" data-id="${s.id}"
+          ${expired ? 'disabled title="请先延长运行时长"' : ''}>立即跑一轮</button>
+        ${expired ? '' : `<button class="small" data-action="toggleSchedule" data-id="${s.id}">${s.enabled ? '停用' : '启用'}</button>`}
+        <button class="small" data-action="editSchedule" data-id="${s.id}">${expired ? '延长时间' : '编辑'}</button>
+        <button class="small danger" data-action="deleteSchedule" data-id="${s.id}">删除</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function renderScheduleForm() {
+  const sel = $('sTarget');
+  if (!sel) return;
+  const targets = MACHINES.filter(m => m.role === 'target');
+  const prev = sel.value;
+  sel.innerHTML = targets.length
+    ? targets.map(m => {
+        const a4 = testAddr(m, 4);
+        const a6 = testAddr(m, 6);
+        const addr = a4 ? esc(a4) : (a6 ? `${esc(a6)}（仅 IPv6）` : '地址未探测');
+        return `<option value="${m.id}">${esc(m.name)}（${addr}）</option>`;
+      }).join('')
+    : '<option value="">— 请先添加一台角色为「目标」的机器 —</option>';
+  if ([...sel.options].some(o => o.value === prev)) sel.value = prev;
+
+  const box = $('sBackendList');
+  const prevChecked = new Set([...box.querySelectorAll('input:checked')].map(x => x.value));
+  const backends = MACHINES.filter(m => m.role === 'backend');
+  box.innerHTML = backends.length
+    ? backends.map(m => {
+        const v6 = hasV6(m) ? '<span class="v6-yes">有 V6</span>' : '<span class="v6-no">无 IPv6</span>';
+        return `<label class="sched-backend-option">
+          <input type="checkbox" value="${m.id}">
+          <span class="sched-backend-name" title="${esc(m.name)}">${esc(m.name)}</span>
+          <span class="sched-backend-meta">
+            <span>${esc(m.region) || '未标记地区'}</span>
+            <span>${esc(m.bandwidth) || '未标记带宽'}</span>
+            ${v6}
+          </span>
+        </label>`;
+      }).join('')
+    : '<span class="muted">暂无后端机器</span>';
+  box.querySelectorAll('input').forEach(cb => {
+    cb.checked = prevChecked.size ? prevChecked.has(cb.value) : true;
+  });
+}
+
+function seedScheduleForm(s) {
+  const cur = {
+    streams: parseInt($('cfgStreams').value, 10) || 1,
+    duration: parseInt($('cfgDuration').value, 10) || 10,
+    port: parseInt($('cfgPort').value, 10) || 5201,
+    ping_count: parseInt($('cfgPing').value, 10) || 200,
+    udp: $('cfgUdp').checked,
+    udp_bandwidth: ($('cfgUdpBw').value || '100M').trim().toUpperCase(),
+  };
+  const src = s || cur;
+  $('sStreams').value = src.streams;
+  $('sDuration').value = src.duration;
+  $('sPort').value = src.port;
+  $('sPing').value = src.ping_count;
+  $('sUdp').checked = !!src.udp;
+  $('sUdpBw').value = src.udp_bandwidth || '100M';
+  syncUdpControls('sUdp', 'sUdpBw');
+  $('sIpv6').checked = !!(s ? s.ip_version === 6 : ($('useIpv6').checked && !$('useIpv6').disabled));
+  $('sWait').checked = !!(s && s.on_busy === 'wait');
+  // 定时任务的默认参数直接跟随「发起测试」区域的当前设置，避免两处不一致
+  $('sShowAdv').checked = !!s;
+  $('sAdvBox').classList.toggle('hidden', !s);
+}
+
+function openScheduleForm(s) {
+  CURRENT_SCHED = s ? s.id : null;
+  $('sFormTitle').textContent = s ? `编辑定时任务 #${s.id}` : '新建定时任务';
+  $('sId').value = s ? s.id : '';
+  $('sName').value = s ? s.name : '';
+  const unit = s
+    ? (s.interval_seconds % 86400 === 0 ? 86400 : (s.interval_seconds % 3600 === 0 ? 3600 : 60))
+    : 3600;
+  $('sIntervalUnit').value = String(unit);
+  $('sInterval').value = s ? Math.max(1, Math.round(s.interval_seconds / unit)) : 1;
+  const lifetime = s ? parseInt(s.lifetime_seconds || 0, 10) : 7 * 86400;
+  $('sLifetimeEnabled').checked = lifetime > 0;
+  const lifeUnit = lifetime > 0 && lifetime % 86400 === 0
+    ? 86400 : (lifetime > 0 && lifetime % 3600 === 0 ? 3600 : 60);
+  $('sLifetimeUnit').value = String(lifeUnit);
+  $('sLifetimeValue').value = lifetime > 0
+    ? Math.max(1, Math.round(lifetime / lifeUnit))
+    : 7;
+  syncLifetimeControls();
+  renderScheduleForm();
+  if (s) {
+    $('sTarget').value = String(s.target_id);
+    const box = $('sBackendList');
+    const want = new Set((s.backend_ids || []).map(String));
+    box.querySelectorAll('input').forEach(cb => { cb.checked = want.has(cb.value); });
+  }
+  seedScheduleForm(s);
+  $('schedModal').classList.remove('hidden');
+  $('sName').focus();
+}
+
+function closeSchedModal() {
+  $('schedModal').classList.add('hidden');
+  CURRENT_SCHED = null;
+}
+
+async function saveSchedule() {
+  const interval = intervalSeconds();
+  if (!interval) return alert('请填写间隔时间（≥ 1）');
+  if (interval < 300 || interval > 30 * 86400) {
+    return alert('间隔需在 5 分钟 ~ 30 天之间（当前 ' + humanDuration(interval) + '）');
+  }
+  const lifetime = lifetimeSeconds();
+  if (lifetime === null) return alert('请填写有效的任务运行时长（≥ 1）');
+  if (lifetime > 365 * 86400) {
+    return alert('任务运行时长最长 365 天（当前 ' + humanDuration(lifetime) + '）');
+  }
+  const target_id = parseInt($('sTarget').value, 10);
+  if (!target_id) return alert('请先添加一台角色为「目标」的机器');
+  const backend_ids = [...$('sBackendList').querySelectorAll('input:checked')]
+    .map(x => parseInt(x.value, 10));
+  if (!backend_ids.length) return alert('请至少勾选一台后端机器');
+  const readNum = (id, lo, hi, label) => {
+    const v = parseInt($(id).value, 10);
+    if (!Number.isFinite(v) || v < lo || v > hi) { alert(`${label} 需在 ${lo}–${hi} 之间`); return null; }
+    return v;
+  };
+  const streams = readNum('sStreams', 1, 32, '线程数');
+  const duration = readNum('sDuration', 1, 300, '单向时长（秒）');
+  const port = readNum('sPort', 1, 65535, 'iperf3 端口');
+  const ping_count = readNum('sPing', 1, 2000, 'ping 次数');
+  if (streams === null || duration === null || port === null || ping_count === null) return;
+  const udp = $('sUdp').checked;
+  const udp_bandwidth = ($('sUdpBw').value || '100M').trim().toUpperCase() || '100M';
+  if (udp && !/^\d{1,5}(\.\d{1,3})?[KMG]$/.test(udp_bandwidth)) {
+    return alert('UDP 目标带宽必须带单位（示例：100M、1G、500K）');
+  }
+  const ip_version = $('sIpv6').checked ? 6 : 4;
+  const ports = {};
+  const body = {
+    name: $('sName').value.trim() || '定时任务', target_id, backend_ids, ip_version,
+    streams, duration, port, ping_count, udp, udp_bandwidth, ports,
+    interval_seconds: interval, lifetime_seconds: lifetime,
+    on_busy: $('sWait').checked ? 'wait' : 'skip',
+  };
+  const per = `每 ${humanDuration(interval)}跑一轮，单轮约 ${Math.ceil((backend_ids.length * (duration * 2 + 5) + ping_count + 30) / 60)} 分钟`;
+  const lifeText = lifetime ? `连续运行 ${humanDuration(lifetime)}` : '不限时运行';
+  if (!CURRENT_SCHED && !confirm(
+      `${body.name}\n目标机 + ${backend_ids.length} 台后端机，${per}，${lifeText}。\n`
+      + '保存后会立即开始首轮测试。确认创建？')) return;
+  try {
+    if (CURRENT_SCHED) {
+      await api(`/api/schedules/${CURRENT_SCHED}`, {method: 'PUT', body: JSON.stringify(body)});
+      toast('已保存（下一轮按新设置执行）');
+    } else {
+      const created = await api('/api/schedules', {method: 'POST', body: JSON.stringify(body)});
+      toast(created.started
+        ? `定时任务已创建，首轮 ${created.start_note || '已开始'}`
+        : `定时任务已创建，首轮未启动：${created.start_note || '请稍后重试'}`,
+        created.started ? 5000 : 8000);
+      if (created.started && created.last_run_id) {
+        await loadRuns();
+        openRun(created.last_run_id);
+      }
+    }
+    closeSchedModal();
+    await loadSchedules();
+  } catch (e) {
+    alert('保存失败: ' + e.message);
+  }
+}
+
+function editSchedule(id) {
+  const s = SCHEDULES.find(x => x.id === Number(id));
+  if (s) openScheduleForm(s);
+}
+
+async function toggleSchedule(id) {
+  const s = SCHEDULES.find(x => x.id === Number(id));
+  if (!s) return;
+  if (s.enabled && !confirm(`停用「${s.name}」？停用后不再自动执行，已有记录与对比数据都保留。`)) return;
+  try {
+    await api(`/api/schedules/${id}/toggle`, {method: 'POST'});
+    await loadSchedules();
+    toast(s.enabled ? '已停用' : '已启用');
+  } catch (e) { alert(e.message); }
+}
+
+async function deleteSchedule(id) {
+  const s = SCHEDULES.find(x => x.id === Number(id));
+  if (!s) return;
+  if (!confirm(`删除定时任务「${s.name}」？\n\n它的测试记录（每一轮的完整报告）会保留在「测试记录」里，只删除这个定时任务本身。`)) return;
+  try {
+    await api(`/api/schedules/${id}`, {method: 'DELETE'});
+    if (CURRENT_SCHED === Number(id)) closeSchedDetail();
+    await loadSchedules();
+    toast('已删除');
+  } catch (e) { alert(e.message); }
+}
+
+async function runScheduleNow(id) {
+  const s = SCHEDULES.find(x => x.id === Number(id));
+  if (!s) return;
+  if (!confirm(`立即为「${s.name}」跑一轮？\n（不会改变原有的间隔排期；若面板已有测试在跑，会按该任务的冲突策略处理）`)) return;
+  try {
+    const r = await api(`/api/schedules/${id}/run-now`, {method: 'POST'});
+    toast(r.note || '已开始');
+    await loadSchedules();
+    await loadRuns();
+    const st = await api('/api/status');
+    if (st.active_run_id) openRun(st.active_run_id);
+  } catch (e) {
+    alert('启动失败: ' + e.message);
+  }
+}
+
+/* --- 对比视图 --- */
+
+async function compareSchedule(id) {
+  const s = SCHEDULES.find(x => x.id === Number(id)) || {};
+  if (COMPARE_ABORT) COMPARE_ABORT.abort();
+  COMPARE_ABORT = new AbortController();
+  const request = COMPARE_ABORT;
+  $('schedDetailTitle').textContent = `长期对比：${s.name || ('#' + id)}`;
+  $('schedDetail').classList.remove('hidden');
+  $('schedDetail').scrollIntoView({behavior: 'smooth'});
+  $('schedDetailMeta').textContent = '正在加载趋势数据…';
+  $('chartWrap').innerHTML = '<div class="skeleton-chart"></div>';
+  $('chartLegend').innerHTML = '';
+  $('schedStatsBody').innerHTML = '';
+  $('schedRoundsBody').innerHTML = '';
+  let d;
+  try { d = await api(`/api/schedules/${id}/comparison`, {signal: request.signal}); } catch (e) {
+    if (e.name === 'AbortError') return;
+    $('schedDetailMeta').textContent = '加载失败: ' + e.message;
+    return;
+  } finally {
+    if (COMPARE_ABORT === request) COMPARE_ABORT = null;
+  }
+  CURRENT_SCHED = Number(id);
+  renderScheduleComparison(d);
+}
+
+function closeSchedDetail() {
+  $('schedDetail').classList.add('hidden');
+  CURRENT_SCHED = null;
+  CURRENT_COMPARISON = null;
+  CHART_STATE.scheduleId = null;
+}
+
+async function copySchedReport() {
+  if (!CURRENT_SCHED) return;
+  const btn = document.querySelector('[data-action="copySchedReport"]');
+  const old = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = '生成报告中…'; }
+  try {
+    const res = await fetch(`/api/schedules/${CURRENT_SCHED}/report`);
+    if (!res.ok) throw new Error(res.statusText);
+    const text = await res.text();
+    const built = CURRENT_COMPARISON ? buildTrendChartSvg(CURRENT_COMPARISON, true) : {svg: '', legend: ''};
+    const html = `<div style="font-family:-apple-system,'Segoe UI','Microsoft YaHei',sans-serif;color:#302c26;line-height:1.65">
+      <style>
+        table{border-collapse:collapse;width:100%;font-size:13px;margin:10px 0}
+        th,td{border:1px solid #e1dac9;padding:7px 8px;text-align:left}
+        th{background:#f5f1e7;color:#776f62}
+        h1{font-size:22px}h2{font-size:17px;margin-top:20px}h3{font-size:15px}
+        blockquote{border-left:3px solid #0d9488;margin:10px 0;padding:2px 12px;color:#776f62}
+        svg{max-width:100%;height:auto;border:1px solid #e1dac9;border-radius:8px;background:#fffdf8}
+      </style>
+      ${renderMarkdown(text)}
+      ${built.svg ? `<h2>吞吐趋势</h2>${built.svg}<p style="color:#776f62;font-size:12px">${built.legend}</p>` : ''}
+    </div>`;
+    await copyRichText(text, html, '长期报告与吞吐图已复制');
+  } catch (e) {
+    alert('复制失败: ' + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = old; }
+  }
+}
+
+function downloadSchedReport() {
+  if (CURRENT_SCHED) window.open(`/api/schedules/${CURRENT_SCHED}/report`);
+}
+
+function comparisonRows(d) {
+  const headers = [
+    '轮次', '开始时间', '结束时间', '轮次状态', '目标机', '后端机器', '地区', '带宽',
+    '上行 Mbit/s', '下行 Mbit/s', '丢包 %', 'RTT ms', '抖动 ms', '重传',
+    'UDP 丢包 %', '评价', '错误',
+  ];
+  const clean = v => String(v ?? '').replace(/[\t\r\n]+/g, ' ');
+  const value = v => v === null || v === undefined ? '' : v;
+  const byRound = {};
+  (d.machines || []).forEach(m => (m.series || []).forEach(pt => {
+    (byRound[pt.run_id] = byRound[pt.run_id] || []).push({name: m.name, region: m.region,
+      bandwidth: m.bandwidth, pt});
+  }));
+  const rows = [];
+  (d.rounds || []).forEach(r => {
+    const pts = byRound[r.run_id] || [{}];
+    pts.forEach(x => {
+      const pt = x.pt || {};
+      rows.push([
+        r.run_id, r.created_at, r.finished_at, r.status, d.schedule.target_name,
+        x.name, x.region, x.bandwidth, value(pt.up), value(pt.down), value(pt.loss),
+        value(pt.rtt), value(pt.mdev), value(pt.retr), value(pt.udp_loss),
+        pt.rating, pt.error,
+      ].map(clean));
+    });
+  });
+  return {headers, rows};
+}
+
+function comparisonTsv(d) {
+  const {headers, rows} = comparisonRows(d);
+  return [headers.join('\t'), ...rows.map(row => row.join('\t'))].join('\n');
+}
+
+function comparisonTableHtml(d) {
+  const {headers, rows} = comparisonRows(d);
+  const th = headers.map(h => `<th>${esc(h)}</th>`).join('');
+  const body = rows.map(row => `<tr>${row.map(v => `<td>${esc(v)}</td>`).join('')}</tr>`).join('');
+  return `<table style="border-collapse:collapse;width:100%;font-size:12px">
+    <thead><tr style="background:#f5f1e7">${th}</tr></thead><tbody>${body}</tbody></table>`;
+}
+
+function copySchedTable() {
+  if (!CURRENT_COMPARISON) return alert('对比数据还没有加载完成');
+  const d = CURRENT_COMPARISON;
+  const note = `最近 ${d.view_rounds || d.rounds.length}/${d.total_rounds || d.rounds.length} 轮`;
+  const html = `<div style="font-family:-apple-system,'Segoe UI','Microsoft YaHei',sans-serif;color:#302c26">
+    <h3>LinkPilot 逐轮对比数据</h3><p style="color:#776f62">${esc(note)}</p>${comparisonTableHtml(d)}</div>`;
+  copyRichText(comparisonTsv(d), html, '逐轮对比表格已复制');
+}
+
+function renderScheduleComparison(d) {
+  CURRENT_COMPARISON = d;
+  const s = d.schedule || {};
+  const rounds = d.rounds || [];
+  const totalRounds = Number(d.total_rounds ?? rounds.length);
+  const viewRounds = Number(d.view_rounds ?? rounds.length);
+  $('schedDetailMeta').textContent =
+    `${s.name} · 每 ${s.interval_text} · 运行 ${s.lifetime_text}`
+    + ` · 已完成 ${s.run_count} 轮`
+    + `（成功 ${Math.max(0, s.run_count - s.fail_count)} / 失败 ${s.fail_count} / 未跑成 ${s.skip_count}）`
+    + ` · 目标机: ${s.target_name} ← ${s.backend_count} 台后端`
+    + (rounds.length ? ` · 展示最近 ${viewRounds}/${totalRounds} 轮: ${rounds[0].created_at} ~ ${rounds[rounds.length - 1].created_at}` : '')
+    + (s.expired ? ` · 已到期${s.ends_at ? '（' + s.ends_at + '）' : ''}`
+      : (s.enabled ? ` · 下次: ${s.next_run_in || '—'}` : ' · 已停用'))
+    + (rounds.length > 500 ? ' · 页面明细显示最近 500 轮，复制/下载包含全部数据' : '');
+
+  drawTrendChart(d);
+
+  const stats = d.stats || [];
+  $('schedStatsBody').innerHTML = stats.length ? stats.map(st => {
+    const trend = st.trend_pct === null || st.trend_pct === undefined
+      ? '<span class="trend-flat">—</span>'
+      : (st.trend_pct > 3 ? `<span class="trend-up">↑ +${fmt(st.trend_pct)}%</span>`
+        : (st.trend_pct < -3 ? `<span class="trend-down">↓ ${fmt(st.trend_pct)}%</span>`
+          : `<span class="trend-flat">→ ${fmt(st.trend_pct)}%</span>`));
+    const cell = (agg, nd, suffix) => agg
+      ? `${fmt(agg.avg, suffix || '')}<br><span class="muted" style="font-size:11px">最低 ${fmt(agg.min, suffix || '')} / 最高 ${fmt(agg.max, suffix || '')}</span>`
+      : '<span class="muted">—</span>';
+    const ratings = [st.best_rating, st.worst_rating].filter(Boolean);
+    return `<tr>
+      <td>${esc(st.name)}</td><td>${esc(st.region) || '—'}</td><td>${st.samples}</td>
+      <td>${cell(st.up, 1, ' Mbit/s')}</td><td>${cell(st.down, 1, ' Mbit/s')}</td>
+      <td>${cell(st.loss, 2, '%')}</td><td>${cell(st.rtt, 1, ' ms')}</td>
+      <td>${cell(st.mdev, 2, ' ms')}</td><td>${cell(st.retr, 0, '')}</td>
+      <td>${trend}</td>
+      <td>${ratings.length ? ratings.map(r => `<span class="rb ${ratingClass(r)}">${r}</span>`).join(' / ') : '—'}</td>
+    </tr>`;
+  }).join('') : '<tr><td colspan="11" class="muted">还没有完成任何一轮测试</td></tr>';
+
+  const byRound = {};
+  (d.machines || []).forEach(m => (m.series || []).forEach(pt => {
+    (byRound[pt.run_id] = byRound[pt.run_id] || []).push({name: m.name, pt});
+  }));
+  const rows = [];
+  rounds.slice(-500).forEach(r => {
+    const pts = byRound[r.run_id] || [];
+    if (!pts.length) {
+      rows.push(`<tr><td>#${r.run_id}</td><td class="muted">${r.created_at}</td>
+        <td colspan="6" class="muted">—</td>
+        <td><button class="small" data-action="openRun" data-id="${r.run_id}">查看</button></td></tr>`);
+      return;
+    }
+    pts.forEach((x, i) => {
+      const pt = x.pt;
+      const first = i === 0;
+      const body = pt.status === 'done'
+        ? `<td>${fmt(pt.up, ' Mbit/s')}</td><td>${fmt(pt.down, ' Mbit/s')}</td>
+           <td>${fmt(pt.loss, '%')}</td><td>${fmt(pt.rtt, ' ms')}</td>
+           <td><span class="rb ${ratingClass(pt.rating)}">${pt.rating || '—'}</span></td>`
+        : `<td colspan="4" style="color:var(--red)">❌ ${esc(pt.error || pt.status)}</td><td>—</td>`;
+      rows.push(`<tr>
+        <td>${first ? '#' + r.run_id : ''}</td>
+        <td class="muted">${first ? r.created_at : ''}</td>
+        <td>${esc(x.name)}</td>${body}
+        <td>${first ? `<button class="small" data-action="openRun" data-id="${r.run_id}">查看</button>` : ''}</td>
+      </tr>`);
+    });
+  });
+  $('schedRoundsBody').innerHTML = rows.length
+    ? rows.join('') : '<tr><td colspan="9" class="muted">暂无数据</td></tr>';
+}
+
+const CHART_COLORS = ['#f97316', '#0d9488', '#eab308', '#e11d48', '#65a30d', '#c2410c',
+                      '#7c3aed', '#0891b2', '#be123c', '#4d7c0f'];
+
+function renderChartControls(d) {
+  const machines = (d.machines || []).filter(m => (m.series || []).length);
+  const valid = new Set(machines.map(m => String(m.key)));
+  if (CHART_STATE.scheduleId !== Number(CURRENT_SCHED)) {
+    CHART_STATE.scheduleId = Number(CURRENT_SCHED);
+    CHART_STATE.selected = new Set(valid);
+  }
+  for (const key of [...CHART_STATE.selected]) {
+    if (!valid.has(key)) CHART_STATE.selected.delete(key);
+  }
+  if (CHART_STATE.mode === 'single' && CHART_STATE.selected.size !== 1 && machines.length) {
+    CHART_STATE.selected = new Set([String(machines[0].key)]);
+  }
+  document.querySelectorAll('#chartModeButtons button').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.mode === CHART_STATE.mode);
+  });
+  document.querySelectorAll('#chartDirButtons button').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.direction === CHART_STATE.direction);
+  });
+  const picker = $('chartPicker');
+  if (picker) {
+    picker.innerHTML = machines.map(m => {
+      const key = String(m.key);
+      const on = CHART_STATE.selected.has(key);
+      return `<button class="chart-chip ${on ? 'active' : ''}" data-action="toggleChartMachine"
+        data-key="${esc(key)}">${on ? '✓' : '＋'} ${esc(m.name)}</button>`;
+    }).join('') || '<span class="muted">暂无可绘制线路</span>';
+  }
+}
+
+function setChartMode(mode) {
+  CHART_STATE.mode = mode === 'single' ? 'single' : 'multi';
+  if (CHART_STATE.mode === 'single' && CHART_STATE.selected.size > 1) {
+    CHART_STATE.selected = new Set([[...CHART_STATE.selected][0]]);
+  }
+  if (CURRENT_COMPARISON) drawTrendChart(CURRENT_COMPARISON);
+}
+
+function setChartDirection(direction) {
+  CHART_STATE.direction = ['up', 'down', 'both'].includes(direction) ? direction : 'both';
+  if (CURRENT_COMPARISON) drawTrendChart(CURRENT_COMPARISON);
+}
+
+function toggleChartMachine(key) {
+  key = String(key);
+  if (CHART_STATE.mode === 'single') {
+    CHART_STATE.selected = new Set([key]);
+  } else if (CHART_STATE.selected.has(key)) {
+    CHART_STATE.selected.delete(key);
+  } else {
+    CHART_STATE.selected.add(key);
+  }
+  if (CURRENT_COMPARISON) drawTrendChart(CURRENT_COMPARISON);
+}
+
+function buildTrendChartSvg(d, forClipboard = false) {
+  const allMachines = d.machines || [];
+  const selected = allMachines.filter(m => CHART_STATE.selected.has(String(m.key)));
+  const roundIds = (d.rounds || []).map(r => r.run_id);
+  const roundAt = Object.fromEntries((d.rounds || []).map(r => [r.run_id, r.created_at]));
+  if (!selected.length || !roundIds.length) return {svg: '', legend: ''};
+  const dirs = CHART_STATE.direction === 'both' ? ['up', 'down'] : [CHART_STATE.direction];
+  const values = [];
+  selected.forEach(m => m.series.forEach(p => dirs.forEach(k => {
+    if (p.status === 'done' && p[k] !== null && p[k] !== undefined) values.push(p[k]);
+  })));
+  if (!values.length) return {svg: '', legend: ''};
+  const W = 980, H = 300, PL = 58, PR = 18, PT = 18, PB = 42;
+  let max = Math.max(...values), min = Math.min(...values);
+  max = max * 1.08;
+  min = Math.max(0, min * 0.9);
+  if (max - min < 1) max = min + 1;
+  const x = i => roundIds.length === 1
+    ? PL + (W - PL - PR) / 2
+    : PL + (W - PL - PR) * (i / (roundIds.length - 1));
+  const y = v => PT + (H - PT - PB) * (1 - (v - min) / (max - min));
+  const roundIndex = new Map(roundIds.map((rid, i) => [rid, i]));
+  const idxOf = rid => roundIndex.has(rid) ? roundIndex.get(rid) : -1;
+  const grid = forClipboard ? '#ddd5bd' : 'var(--border)';
+  const text = forClipboard ? '#776f62' : 'var(--muted)';
+  let g = '';
+  for (let k = 0; k <= 4; k++) {
+    const v = min + (max - min) * k / 4;
+    const yy = y(v).toFixed(1);
+    g += `<line x1="${PL}" y1="${yy}" x2="${W - PR}" y2="${yy}" stroke="${grid}" stroke-width="1"/>`
+      + `<text x="${PL - 8}" y="${(+yy + 4).toFixed(1)}" font-size="11" text-anchor="end" fill="${text}">${v.toFixed(v >= 100 ? 0 : 1)}</text>`;
+  }
+  const step = Math.max(1, Math.ceil(roundIds.length / 8));
+  roundIds.forEach((rid, i) => {
+    if (i % step !== 0 && i !== roundIds.length - 1) return;
+    const label = String(roundAt[rid] || ('#' + rid)).slice(5, 16);
+    g += `<text x="${x(i).toFixed(1)}" y="${H - PB + 18}" font-size="11" text-anchor="middle" fill="${text}">${esc(label)}</text>`;
+  });
+
+  selected.forEach(m => {
+    const color = CHART_COLORS[allMachines.findIndex(x => String(x.key) === String(m.key)) % CHART_COLORS.length];
+    const pts = m.series.map(p => ({i: idxOf(p.run_id), pt: p})).filter(p => p.i >= 0);
+    dirs.forEach(dir => {
+      const dash = dir === 'down' && CHART_STATE.direction === 'both' ? ' stroke-dasharray="6 4"' : '';
+      let cur = [];
+      const flush = () => {
+        if (cur.length > 1) {
+          g += `<polyline points="${cur.join(' ')}" fill="none" stroke="${color}" stroke-width="2.2"${dash}/>`;
+        }
+        cur = [];
+      };
+      pts.forEach(({i, pt}) => {
+        const v = pt.status === 'done' ? pt[dir] : null;
+        if (v === null || v === undefined) { flush(); return; }
+        cur.push(`${x(i).toFixed(1)},${y(v).toFixed(1)}`);
+        g += `<circle cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="2.7" fill="${color}">`
+          + `<title>${esc(m.name)} · ${dir === 'up' ? '上行' : '下行'} ${fmt(v)} Mbit/s · ${esc(pt.at || '')}</title></circle>`;
+      });
+      flush();
+    });
+  });
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="吞吐趋势折线图">`
+    + `<rect width="${W}" height="${H}" fill="${forClipboard ? '#fffdf8' : 'transparent'}"/>${g}</svg>`;
+  const legend = selected.map(m => {
+    const color = CHART_COLORS[allMachines.findIndex(x => String(x.key) === String(m.key)) % CHART_COLORS.length];
+    return `<span><i style="background:${color}"></i>${esc(m.name)}</span>`;
+  }).join('') + (CHART_STATE.direction === 'both'
+    ? '<span class="quiet">实线=上行 · 虚线=下行</span>' : '');
+  return {svg, legend};
+}
+
+function drawTrendChart(d) {
+  renderChartControls(d);
+  const built = buildTrendChartSvg(d, false);
+  const wrap = $('chartWrap'), legend = $('chartLegend');
+  if (!built.svg) {
+    wrap.innerHTML = '<p class="muted" style="padding:14px;margin:0">当前选择没有可绘制的数据</p>';
+    legend.innerHTML = '';
+    return;
+  }
+  wrap.innerHTML = built.svg;
+  legend.innerHTML = built.legend;
+}
+
+
+
+/* ---------------- 事件委托（所有按钮统一走这里，弹窗取消/关闭稳定可用） ---------------- */
+
+const ACTIONS = {
+  openMachineForm: () => openMachineForm(),
+  closeModal,
+  saveMachine,
+  showAgentCmd: (d) => showAgentCmd(d.id),
+  editMachine: (d) => editMachine(d.id),
+  deleteMachine: (d) => deleteMachine(d.id),
+  discoverMachine: (d) => discoverMachine(d.id),
+  regenToken,
+  copyAgentCmd: () => copyText($('agentCmd').textContent, '已复制接入命令'),
+  logout,
+  startRun,
+  loadRuns: () => loadRuns(),
+  openRun: (d) => openRun(d.id),
+  removeRun: (d) => removeRun(d.id),
+  toggleRunGroup: (d) => toggleRunGroup(d.id),
+  copyReport,
+  toggleReportView,
+  toggleTheme,
+  downloadReport,
+  stopCurrentRun,
+  openScheduleForm: () => openScheduleForm(null),
+  closeSchedModal,
+  saveSchedule,
+  editSchedule: (d) => editSchedule(d.id),
+  toggleSchedule: (d) => toggleSchedule(d.id),
+  deleteSchedule: (d) => deleteSchedule(d.id),
+  runScheduleNow: (d) => runScheduleNow(d.id),
+  compareSchedule: (d) => compareSchedule(d.id),
+  setChartMode: (d) => setChartMode(d.mode),
+  setChartDirection: (d) => setChartDirection(d.direction),
+  toggleChartMachine: (d) => toggleChartMachine(d.key),
+  closeSchedDetail,
+  copySchedReport,
+  copySchedTable,
+  downloadSchedReport,
+};
+
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-action]');
+  if (!el) return;
+  const fn = ACTIONS[el.dataset.action];
+  if (fn) {
+    e.preventDefault();
+    fn(el.dataset);
+  }
+});
+
+// 点击遮罩空白处或按 ESC 也可关闭弹窗
+$('modal').addEventListener('click', e => {
+  if (e.target === $('modal')) closeModal();
+});
+$('schedModal').addEventListener('click', e => {
+  if (e.target === $('schedModal')) closeSchedModal();
+});
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if (!$('schedModal').classList.contains('hidden')) closeSchedModal();
+  else if (!$('modal').classList.contains('hidden')) closeModal();
+});
+
+$('agentPanelUrl').addEventListener('input', () => {
+  if (agentMachine) $('agentCmd').textContent = buildAgentCmd();
+});
+
+$('mRole').addEventListener('change', updateRoleHint);
+
+$('targetSelect').addEventListener('change', updateIpv6Ui);
+$('backendList').addEventListener('change', updateIpv6Ui);
+$('useIpv6').addEventListener('change', () => {
+  // 勾选 IPv6 时给出一次显式确认，避免误选后整轮失败
+  const cb = $('useIpv6');
+  if (cb.checked && !confirm('IPv6 测试将使用目标机的 IPv6 地址：\n确认所有选中的后端机器都支持 IPv6？')) {
+    cb.checked = false;
+  }
+});
+
+$('cfgUdp').addEventListener('change', () => {
+  // 只有 UDP 需要 -b（TCP 无限速）；关掉时保留填写的值，下次勾选还在
+  syncUdpControls('cfgUdp', 'cfgUdpBw');
+});
+
+$('cfgAdvPorts').addEventListener('change', () => {
+  // 关掉「每台机器单独指定端口」就全部回归目标机端口，避免残留旧值造成对不上
+  if (!$('cfgAdvPorts').checked) RUN_PORTS = {};
+  renderRunForm();
+});
+
+$('backendList').addEventListener('input', e => {
+  // 记录每台机器单独改过的端口；列表每 8 秒会重绘，值存在 RUN_PORTS 里不会丢
+  const t = e.target;
+  if (t && t.classList && t.classList.contains('item-port')) RUN_PORTS[t.dataset.id] = t.value;
+});
+
+$('cfgPort').addEventListener('input', () => {
+  // 改「默认端口」时，把还没单独改过的机器一起带过去
+  const nv = $('cfgPort').value;
+  const ov = $('cfgPort').dataset.prev || '5201';
+  document.querySelectorAll('#backendList .item-port').forEach(inp => {
+    if (inp.value === ov) {
+      inp.value = nv;
+      delete RUN_PORTS[inp.dataset.id];
+    }
+  });
+  $('cfgPort').dataset.prev = nv;
+});
+
+/* ---------------- 定时任务表单交互 ---------------- */
+
+$('sShowAdv').addEventListener('change', () => {
+  // 关掉自定义参数就回到「跟随发起测试区域」，避免留下看不出来的旧值
+  $('sAdvBox').classList.toggle('hidden', !$('sShowAdv').checked);
+  if (!$('sShowAdv').checked) seedScheduleForm(null);
+});
+
+$('sUdp').addEventListener('change', () => {
+  syncUdpControls('sUdp', 'sUdpBw');
+});
+
+$('sLifetimeEnabled').addEventListener('change', () => {
+  syncLifetimeControls();
+});
+
+$('onlyScheduled').addEventListener('change', () => loadRuns());
+
+/* ---------------- 初始化 ---------------- */
+
+async function init() {
+  try {
+    applyTheme(localStorage.getItem('fleet-theme') || 'light');
+    syncUdpControls('cfgUdp', 'cfgUdpBw');
+    syncUdpControls('sUdp', 'sUdpBw');
+    const me = await api('/api/me');
+    $('meUser').textContent = me.user ? `👤 ${me.user}` : '';
+    await loadMachines();
+    await loadRuns();
+    await loadSchedules();
+    const st = await api('/api/status');
+    if (st.active_run_id) openRun(st.active_run_id);
+    // 定时任务状态（下次执行倒计时、最近一轮结果）比机器在线状态变得快，单独 10 秒刷一次
+    setInterval(async () => {
+      if ($('modal').classList.contains('hidden') && $('schedModal').classList.contains('hidden')) {
+        try { await loadSchedules(); } catch (e) {}
+      }
+    }, 10000);
+    // 定时任务在后台自动开跑后，测试记录与对比数据要能自己冒出来
+    setInterval(async () => {
+      if ($('modal').classList.contains('hidden') && $('schedModal').classList.contains('hidden')) {
+        if (SCHEDULES.some(s => s.last_status === 'running')) {
+          try { await loadRuns(); } catch (e) {}
+        }
+      }
+    }, 15000);
+    setInterval(async () => {
+      if (CURRENT_SCHED && !$('schedDetail').classList.contains('hidden')) {
+        const active = SCHEDULES.find(s => s.id === CURRENT_SCHED);
+        if (active && ['running', 'waiting'].includes(active.last_status)) {
+          try {
+            CURRENT_COMPARISON = await api(`/api/schedules/${CURRENT_SCHED}/comparison`);
+            renderScheduleComparison(CURRENT_COMPARISON);
+          } catch (e) {}
+        }
+      }
+    }, 60000);
+    // 定时刷新机器在线状态（弹窗打开时暂停，避免打断接入流程）
+    setInterval(async () => {
+      if ($('modal').classList.contains('hidden')) {
+        try { await loadMachines(); } catch (e) {}
+      }
+    }, 8000);
+  } catch (e) {
+    if (e.message !== '未登录') alert('面板初始化失败: ' + e.message);
+  }
+}
+init();
+</script>
+</body>
+</html>
