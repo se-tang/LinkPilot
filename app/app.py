@@ -19,7 +19,7 @@ from . import db, quality, runner, scheduler
 
 # 版本号：这是唯一权威（面板页面、部署横幅、install.sh 都从/沿用它取）。
 # 还在测试阶段，因此用 0.x 版本号。
-APP_VERSION = '0.6.0'
+APP_VERSION = '0.7.0'
 
 app = Flask(__name__)
 app.json.ensure_ascii = False
@@ -415,7 +415,7 @@ def api_run_create():
 @app.get('/api/runs')
 def api_runs():
     runs = db.get_runs()
-    schedule_names = {s['id']: s['name'] for s in db.get_schedules()}
+    schedule_names = {s['id']: s['name'] for s in db.get_schedules(include_archived=True)}
     for r in runs:
         total, done, failed = db.run_counts(r['id'])
         r['backend_total'] = total
@@ -437,7 +437,14 @@ def api_run_detail(rid):
         it['metrics_obj'] = json.loads(it['metrics']) if it['metrics'] else None
     # 报告文本统一脱敏（覆盖历史报告）
     run['report'] = quality.mask_report_text(run['report'])
-    return jsonify({'run': run, 'items': items, 'log': runner.get_log(rid)})
+    log_data = runner.get_log_data(rid)
+    return jsonify({
+        'run': run,
+        'items': items,
+        'summary': quality.run_summary(run, items),
+        'events': log_data['events'],
+        'log': log_data['raw_lines'],
+    })
 
 
 @app.post('/api/runs/<int:rid>/stop')
@@ -482,7 +489,8 @@ _REPORT_CACHE = {}
 
 def _schedule_version(s):
     return (s['id'], s.get('last_run_id'), s.get('run_count'), s.get('last_status'),
-            s.get('enabled'), s.get('name'), s.get('interval_seconds'))
+            s.get('enabled'), s.get('name'), s.get('interval_seconds'),
+            s.get('archived_at'))
 
 
 def _cache_get(cache, key):
@@ -616,31 +624,31 @@ def api_schedule_run_now(sid):
 
 @app.get('/api/schedules/<int:sid>/comparison')
 def api_schedule_comparison(sid):
-    s = db.get_schedule(sid)
-    if not s:
-        return jsonify({'error': '定时任务不存在'}), 404
+    s = db.get_schedule(sid, include_archived=True)
     limit = request.args.get('limit', scheduler.ROUND_LIMIT, type=int) or scheduler.ROUND_LIMIT
     limit = max(1, min(limit, scheduler.ROUND_LIMIT))
     raw_view_limit = request.args.get('view_limit', type=int)
     view_limit = raw_view_limit if raw_view_limit is not None else scheduler.VIEW_ROUNDS
     view_limit = max(1, min(view_limit, scheduler.ROUND_LIMIT))
-    key = (_schedule_version(s), limit, view_limit)
+    key = (_schedule_version(s), limit, view_limit) if s else ('history', sid, limit, view_limit)
     data = _cache_get(_COMPARISON_CACHE, key)
     if data is None:
         data = scheduler.comparison_data(sid, limit=limit, view_limit=view_limit)
+        if not data:
+            return jsonify({'error': '该定时任务没有可查看的历史记录'}), 404
         _cache_put(_COMPARISON_CACHE, key, data)
     return jsonify(data)
 
 
 @app.get('/api/schedules/<int:sid>/report')
 def api_schedule_report(sid):
-    s = db.get_schedule(sid)
-    if not s:
-        return jsonify({'error': '定时任务不存在'}), 404
-    key = _schedule_version(s)
+    s = db.get_schedule(sid, include_archived=True)
+    key = _schedule_version(s) if s else ('history', sid)
     report = _cache_get(_REPORT_CACHE, key)
     if report is None:
         report = scheduler.build_comparison_report(sid)
+        if not report:
+            return jsonify({'error': '该定时任务没有可导出的历史记录'}), 404
         _cache_put(_REPORT_CACHE, key, report, max_items=16)
     return Response(
         report,

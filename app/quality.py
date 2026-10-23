@@ -14,6 +14,29 @@ SUM_RE = re.compile(
 # 汇总区表头，如: [ ID] Interval           Transfer     Bitrate         Retr
 HEADER_RE = re.compile(r'^\[\s*ID\s*\]')
 
+# 项目自定义的初始经验阈值，不是行业标准。后续应根据真实线路样本校准。
+RATING_THRESHOLDS = {
+    'loss_pct': {'warn': 0.1, 'bad': 1.0, 'critical': 3.0},
+    'rtt_ms': {'warn': 80.0, 'bad': 180.0, 'critical': 350.0},
+    'mdev_ms': {'warn': 2.0, 'bad': 5.0, 'critical': 15.0},
+    'throughput_pct': {'warn': 85.0, 'bad': 65.0, 'critical': 40.0},
+    'retr_per_gib': {'warn': 2.0, 'bad': 10.0, 'critical': 30.0},
+    'retr_per_min': {'warn': 1.0, 'bad': 6.0, 'critical': 20.0},
+    'udp_loss_pct': {'warn': 0.1, 'bad': 1.0, 'critical': 3.0},
+    'udp_jitter_ms': {'warn': 1.0, 'bad': 5.0, 'critical': 15.0},
+    'receiver_ratio': {'warn': 0.9, 'bad': 0.7, 'critical': 0.4},
+}
+RATING_SEVERITY_SCORE = {'ok': 0, 'warn': 1, 'bad': 3, 'critical': 6}
+RATING_CODE_INFO = {
+    'S': '优秀',
+    'A': '良好',
+    'B': '一般',
+    'C': '较差',
+    'F': '失败',
+    '?': '数据不足',
+}
+RATING_CONFIG_NOTE = '评级采用项目自定义初始经验阈值，不是行业标准，应结合真实线路样本持续校准。'
+
 
 def _to_mbits(val, unit):
     v = float(val)
@@ -120,6 +143,13 @@ def parse_metrics(ping_raw, up_raw, down_raw):
     mt['up_receiver_mbits'] = ur['mbits'] if ur else None
     mt['down_sender_mbits'] = ds['mbits'] if ds else None
     mt['down_receiver_mbits'] = dr['mbits'] if dr else None
+    mt['up_sender_transfer_mb'] = us['transfer_mb'] if us else None
+    mt['up_receiver_transfer_mb'] = ur['transfer_mb'] if ur else None
+    mt['down_sender_transfer_mb'] = ds['transfer_mb'] if ds else None
+    mt['down_receiver_transfer_mb'] = dr['transfer_mb'] if dr else None
+    transfers = [mt.get('up_sender_transfer_mb'), mt.get('down_sender_transfer_mb')]
+    transfers = [float(v) for v in transfers if v is not None]
+    mt['transfer_total_mb'] = sum(transfers) if transfers else None
     # 上行取正向测试的 sender，下行取 -R 测试的 receiver
     mt['up_mbits'] = mt['up_sender_mbits']
     mt['down_mbits'] = mt['down_receiver_mbits']
@@ -159,109 +189,285 @@ def parse_bw(label):
     return v * 1000.0 if u == 'g' else v
 
 
-def evaluate(mt, machine):
-    """按丢包/抖动/重传/收发比/标称带宽达成率给线路打分并写回 mt。"""
-    notes = []
-    pen = 0
+def _lower_better_severity(value, thresholds):
+    if value is None:
+        return 'unknown'
+    if value <= thresholds['warn']:
+        return 'ok'
+    if value <= thresholds['bad']:
+        return 'warn'
+    if value <= thresholds['critical']:
+        return 'bad'
+    return 'critical'
+
+
+def _higher_better_severity(value, thresholds):
+    if value is None:
+        return 'unknown'
+    if value >= thresholds['warn']:
+        return 'ok'
+    if value >= thresholds['bad']:
+        return 'warn'
+    if value >= thresholds['critical']:
+        return 'bad'
+    return 'critical'
+
+
+def _grade_for_score(score):
+    if score == 0:
+        return 'S'
+    if score <= 3:
+        return 'A'
+    if score <= 8:
+        return 'B'
+    return 'C'
+
+
+def _issue_text(tag):
+    return {
+        '存在丢包': '先检查链路拥塞、目标机防火墙和端口限速。',
+        'RTT 偏高': '核对跨区路由、目标机负载和中间网络延迟。',
+        '抖动偏高': '重点检查拥塞、队列和 NAT 设备稳定性。',
+        '重传偏高': '结合丢包与拥塞情况排查链路质量和限速。',
+        '上行吞吐偏低': '核对上行标称带宽、限速和发送端负载。',
+        '下行吞吐偏低': '核对下行标称带宽、限速和接收端负载。',
+        '传输损耗': '检查接收端是否存在丢包、拥塞或链路异常。',
+        'UDP 丢包偏高': '检查 UDP 限速、防火墙和链路拥塞。',
+        'UDP 抖动偏高': '检查实时队列和中间网络稳定性。',
+        '吞吐基线缺失': '请为机器填写带宽标记，才能判断标称吞吐达成率。',
+        '关键指标缺失': '查看原始输出并复测，避免用不完整数据判断线路质量。',
+        '测试失败': '查看原始错误和阶段事件，优先恢复测试链路。',
+    }.get(tag, '查看诊断详情和原始输出进一步定位。')
+
+
+def evaluate(mt, machine, run=None):
+    """按初始经验阈值计算 S/A/B/C/F 评级和结构化诊断。
+
+    所有阈值集中在 RATING_THRESHOLDS，仅用于项目内部比较，不代表行业标准。
+    缺失关键指标时返回“数据不足”，不会按 0 或优秀处理。
+    """
+    run = run or {}
+    diagnostics = []
+    tags = []
+    issues = []
+    score = 0
+    missing = []
+
+    def add(name, status, text, tag=None, value=None):
+        nonlocal score
+        diagnostics.append({'name': name, 'status': status, 'text': text, 'value': value})
+        score += RATING_SEVERITY_SCORE.get(status, 0)
+        if tag and tag not in tags:
+            tags.append(tag)
+        if tag and status in ('warn', 'bad', 'critical'):
+            issues.append({'tag': tag, 'severity': status,
+                           'score': RATING_SEVERITY_SCORE[status]})
 
     loss = mt.get('loss_pct')
-    if loss is not None:
-        if loss == 0:
-            notes.append('0%丢包')
-        elif loss <= 1:
-            pen += 1
-            notes.append(f'{fmt_num(loss)}%轻微丢包')
-        elif loss <= 3:
-            pen += 2
-            notes.append(f'{fmt_num(loss)}%丢包偏多')
-        else:
-            pen += 3
-            notes.append(f'{fmt_num(loss)}%严重丢包')
+    if loss is None:
+        missing.append('ping 丢包率')
+    else:
+        sev = _lower_better_severity(loss, RATING_THRESHOLDS['loss_pct'])
+        add('丢包率', sev, f'ping 丢包 {fmt_num(loss, 2)}%', '存在丢包' if sev != 'ok' else None, loss)
+
+    rtt = mt.get('rtt_avg')
+    if rtt is None:
+        missing.append('RTT')
+    else:
+        sev = _lower_better_severity(rtt, RATING_THRESHOLDS['rtt_ms'])
+        add('RTT', sev, f'RTT 平均 {fmt_num(rtt)} ms', 'RTT 偏高' if sev != 'ok' else None, rtt)
 
     mdev = mt.get('mdev_ms')
-    if mdev is not None:
-        if mdev <= 2:
-            notes.append(f'抖动{fmt_num(mdev, 2)}ms极小')
-        elif mdev <= 5:
-            pen += 1
-            notes.append(f'抖动{fmt_num(mdev, 2)}ms略大')
-        elif mdev <= 15:
-            pen += 2
-            notes.append(f'抖动{fmt_num(mdev, 2)}ms偏大')
-        else:
-            pen += 3
-            notes.append(f'抖动{fmt_num(mdev, 2)}ms很大')
+    if mdev is None:
+        missing.append('抖动 mdev')
+    else:
+        sev = _lower_better_severity(mdev, RATING_THRESHOLDS['mdev_ms'])
+        add('抖动', sev, f'ping 抖动 {fmt_num(mdev, 2)} ms',
+            '抖动偏高' if sev != 'ok' else None, mdev)
+
+    up = mt.get('up_mbits')
+    down = mt.get('down_mbits')
+    if up is None or float(up or 0) <= 0:
+        missing.append('上行吞吐')
+    if down is None or float(down or 0) <= 0:
+        missing.append('下行吞吐')
+
+    labeled = parse_bw(machine.get('bandwidth') or machine.get('machine_bandwidth'))
+    if not labeled:
+        tags.append('吞吐基线缺失')
+        diagnostics.append({
+            'name': '吞吐达成率', 'status': 'unknown', 'value': None,
+            'text': '机器未填写带宽标记，无法计算标称吞吐达成率',
+        })
+    else:
+        for direction, val in (('上行', up), ('下行', down)):
+            if val is None or float(val) <= 0:
+                continue
+            pct = float(val) / labeled * 100.0
+            sev = _higher_better_severity(pct, RATING_THRESHOLDS['throughput_pct'])
+            tag = f'{direction}吞吐偏低' if sev != 'ok' else None
+            add(f'{direction}吞吐', sev,
+                f'{direction} {fmt_num(val)} Mbit/s，约为标称 {labeled:g}M 的 {pct:.0f}%',
+                tag, pct)
 
     retr = mt.get('retr_total')
-    if retr is not None:
-        if retr == 0:
-            notes.append('全程无重传')
-        elif retr <= 10:
-            pen += 1
-            notes.append(f'{retr}次重传')
-        elif retr <= 50:
-            pen += 2
-            notes.append(f'重传{retr}次较多')
+    transfer_mb = mt.get('transfer_total_mb')
+    if not mt.get('udp'):
+        if retr is None or transfer_mb is None or float(transfer_mb or 0) <= 0:
+            missing.append('TCP 重传/传输量')
         else:
-            pen += 3
-            notes.append(f'重传{retr}次严重')
+            duration = max(1.0, float(run.get('duration') or 10))
+            per_gib = float(retr) / (float(transfer_mb) / 1024.0)
+            per_min = float(retr) / (duration / 60.0)
+            sev_gib = _lower_better_severity(per_gib, RATING_THRESHOLDS['retr_per_gib'])
+            sev_min = _lower_better_severity(per_min, RATING_THRESHOLDS['retr_per_min'])
+            rank = {'ok': 0, 'warn': 1, 'bad': 2, 'critical': 3}
+            sev = max((sev_gib, sev_min), key=lambda x: rank.get(x, 0))
+            add('重传', sev,
+                f'重传 {int(retr)} 次，约 {fmt_num(per_gib, 2)} 次/GiB、'
+                f'{fmt_num(per_min, 2)} 次/分钟',
+                '重传偏高' if sev != 'ok' else None, per_gib)
 
-    # UDP：以 iperf3 接收端统计的丢包与抖动为准（ping 的 mdev 仍单独参与评价）
-    udp_losses = [v for v in (mt.get('up_udp_loss_pct'), mt.get('down_udp_loss_pct')) if v is not None]
-    if udp_losses:
-        worst = max(udp_losses)
-        if worst == 0:
-            notes.append('UDP 0%丢包')
-        elif worst <= 0.5:
-            notes.append(f'UDP 丢包{fmt_num(worst, 2)}%轻微')
-        elif worst <= 2:
-            pen += 1
-            notes.append(f'UDP 丢包{fmt_num(worst, 2)}%偏多')
+        us_, ur_ = mt.get('up_sender_mbits'), mt.get('up_receiver_mbits')
+        ds_, dr_ = mt.get('down_sender_mbits'), mt.get('down_receiver_mbits')
+        if us_ and ur_:
+            ratio = float(ur_) / float(us_)
+            sev = _higher_better_severity(ratio, RATING_THRESHOLDS['receiver_ratio'])
+            add('上行接收率', sev, f'上行接收率 {ratio * 100:.1f}%',
+                '传输损耗' if sev != 'ok' else None, ratio)
+        if ds_ and dr_:
+            ratio = float(dr_) / float(ds_)
+            sev = _higher_better_severity(ratio, RATING_THRESHOLDS['receiver_ratio'])
+            add('下行接收率', sev, f'下行接收率 {ratio * 100:.1f}%',
+                '传输损耗' if sev != 'ok' else None, ratio)
+    else:
+        udp_losses = [v for v in (mt.get('up_udp_loss_pct'), mt.get('down_udp_loss_pct'))
+                      if v is not None]
+        udp_jitters = [v for v in (mt.get('up_jitter_ms'), mt.get('down_jitter_ms'))
+                       if v is not None]
+        if not udp_losses:
+            missing.append('UDP 丢包')
         else:
-            pen += 2
-            notes.append(f'UDP 丢包{fmt_num(worst, 2)}%严重')
-
-    jitters = [v for v in (mt.get('up_jitter_ms'), mt.get('down_jitter_ms')) if v is not None]
-    if jitters:
-        worst_j = max(jitters)
-        if worst_j <= 1:
-            notes.append(f'iperf3 抖动{fmt_num(worst_j, 2)}ms极小')
-        elif worst_j <= 5:
-            pen += 1
-            notes.append(f'iperf3 抖动{fmt_num(worst_j, 2)}ms略大')
+            worst = max(udp_losses)
+            sev = _lower_better_severity(worst, RATING_THRESHOLDS['udp_loss_pct'])
+            add('UDP 丢包', sev, f'UDP 最大丢包 {fmt_num(worst, 2)}%',
+                'UDP 丢包偏高' if sev != 'ok' else None, worst)
+        if not udp_jitters:
+            missing.append('UDP 抖动')
         else:
-            pen += 2
-            notes.append(f'iperf3 抖动{fmt_num(worst_j, 2)}ms偏大')
+            worst = max(udp_jitters)
+            sev = _lower_better_severity(worst, RATING_THRESHOLDS['udp_jitter_ms'])
+            add('UDP 抖动', sev, f'UDP 最大抖动 {fmt_num(worst, 2)} ms',
+                'UDP 抖动偏高' if sev != 'ok' else None, worst)
 
-    us_, ur_ = mt.get('up_sender_mbits'), mt.get('up_receiver_mbits')
-    if us_ and ur_ and ur_ / us_ < 0.9:
-        pen += 1 if ur_ / us_ >= 0.7 else 2
-        notes.append('上行接收率偏低，传输中有损耗')
-    ds_, dr_ = mt.get('down_sender_mbits'), mt.get('down_receiver_mbits')
-    if ds_ and dr_ and dr_ / ds_ < 0.9:
-        pen += 1 if dr_ / ds_ >= 0.7 else 2
-        notes.append('下行接收率偏低，传输中有损耗')
+    missing = list(dict.fromkeys(missing))
+    if missing:
+        if '关键指标缺失' not in tags:
+            tags.append('关键指标缺失')
+        diagnostics.append({
+            'name': '数据完整性', 'status': 'critical',
+            'text': '缺少关键指标：' + '、'.join(missing), 'value': missing,
+        })
 
-    labeled = parse_bw(machine.get('bandwidth'))
-    if labeled:
-        for direction, val in (('上行', mt.get('up_mbits')), ('下行', mt.get('down_mbits'))):
-            if not val:
-                continue
-            pct = val / labeled * 100
-            if pct < 50:
-                pen += 1
-                notes.append(f'{direction}仅约标称{labeled:g}M的{pct:.0f}%')
-            elif pct < 80:
-                pen += 1
-                notes.append(f'{direction}低于标称带宽（{fmt_num(val)}/{labeled:g}M）')
-            elif pct > 110:
-                notes.append(f'{direction}超出标称带宽（{fmt_num(val)}/{labeled:g}M）')
-
-    rating = '优秀' if pen == 0 else '良好' if pen <= 2 else '一般' if pen <= 4 else '较差'
-    mt['rating'] = rating
-    mt['rating_detail'] = '，'.join(notes) if notes else '—'
-    mt['rating_penalty'] = pen
+    if missing or not labeled:
+        code = '?'
+    else:
+        code = _grade_for_score(score)
+    label = RATING_CODE_INFO[code]
+    needs_attention = code in ('B', 'C', 'F', '?') or bool(issues)
+    if code == '?':
+        summary = '关键指标或吞吐基线不完整，暂不能给出可靠等级，请查看诊断并复测。'
+    elif code == 'S':
+        summary = '关键指标均处于当前经验阈值内，未发现明显异常。'
+    else:
+        primary = max(issues, key=lambda x: x['score']) if issues else None
+        summary = _issue_text(primary['tag']) if primary else '存在质量波动，建议查看诊断详情。'
+    detail = '；'.join(d['text'] for d in diagnostics)
+    mt.update({
+        'rating_code': code,
+        'rating': label,
+        'rating_label': label,
+        'rating_tags': tags,
+        'rating_summary': summary,
+        'rating_detail': detail or '—',
+        'rating_diagnostics': diagnostics,
+        'rating_penalty': score,
+        'needs_attention': needs_attention,
+        'rating_threshold_note': RATING_CONFIG_NOTE,
+    })
     return mt
+
+
+def failure_metrics(machine, error, run=None):
+    """失败或中止时仍生成统一评级结构，供汇总表和报告使用。"""
+    message = str(error or '测试失败')
+    machines = machine.get('machine_name') or machine.get('name') or '后端机器'
+    diagnostics = [
+        {'name': '测试状态', 'status': 'critical', 'value': None,
+         'text': f'{machines}：{message}'},
+    ]
+    return {
+        'ping_block': '', 'up_block': '', 'down_block': '',
+        'rating_code': 'F',
+        'rating': '失败',
+        'rating_label': '失败',
+        'rating_tags': ['测试失败'],
+        'rating_summary': '测试失败，未获得可用于线路质量判断的完整结果。',
+        'rating_detail': message,
+        'rating_diagnostics': diagnostics,
+        'rating_penalty': None,
+        'needs_attention': True,
+        'rating_threshold_note': RATING_CONFIG_NOTE,
+        'duration': int((run or {}).get('duration') or 0),
+    }
+
+
+def run_summary(run, items):
+    """根据实际 run_items 汇总成功、失败和“成功但需关注”的机器数。"""
+    total = len(items)
+    success = failure = attention = 0
+    for item in items:
+        metrics = item.get('metrics_obj')
+        if isinstance(metrics, str):
+            try:
+                metrics = json.loads(metrics)
+            except (TypeError, ValueError):
+                metrics = None
+        up = (metrics or {}).get('up_mbits')
+        down = (metrics or {}).get('down_mbits')
+        valid = (item.get('status') == 'done' and up is not None and down is not None
+                 and float(up or 0) > 0 and float(down or 0) > 0)
+        if not valid:
+            failure += 1
+            continue
+        success += 1
+        code = (metrics or {}).get('rating_code') or {
+            '优秀': 'S', '良好': 'A', '一般': 'B', '较差': 'C',
+            '失败': 'F', '数据不足': '?',
+        }.get((metrics or {}).get('rating'))
+        if code in ('B', 'C', 'F', '?') or (metrics or {}).get('needs_attention'):
+            attention += 1
+
+    run_status = (run or {}).get('status') or 'pending'
+    if run_status in ('running', 'pending'):
+        code, label = 'running', '测试进行中'
+    elif total and failure == total:
+        code, label = 'failed', '测试失败'
+    elif failure:
+        code, label = 'partial', '部分失败'
+    elif attention:
+        code, label = 'attention', '完成，需关注'
+    else:
+        code, label = 'finished', '全部正常'
+    return {
+        'target_name': (run or {}).get('target_name') or '—',
+        'backend_total': total,
+        'success_count': success,
+        'failure_count': failure,
+        'attention_count': attention,
+        'overall_code': code,
+        'overall_label': label,
+    }
 
 
 def mask_ip(ip):
@@ -346,12 +552,37 @@ def build_report(run, target, items):
                         f"{fmt_num(mt.get('down_jitter_ms'), 3)} ms ")
             else:
                 row += f"| {fmt_num(mt.get('retr_total'), 0)} "
-            lines.append(row + f"| **{mt.get('rating', '—')}**：{mt.get('rating_detail', '—')} |")
+            code = mt.get('rating_code') or '?'
+            label = mt.get('rating_label') or mt.get('rating') or RATING_CODE_INFO.get(code, '—')
+            lines.append(row + f"| **{code} · {label}**：{mt.get('rating_summary', '—')} |")
         else:
             err = (it['error'] or it['status']).replace('|', '\\|').replace('\n', ' ')
             lines.append(f"| {name} | {region} | {bw} | "
                          + ' | '.join(['—'] * (ncols - 4))
-                         + f" | ❌ 失败：{err} |")
+                         + f" | **F · 失败**：{err} |")
+
+    lines.append('')
+    lines.append('## 诊断详情')
+    lines.append('')
+    lines.append(f'> {RATING_CONFIG_NOTE}')
+    lines.append('')
+    for it in items:
+        lines.append(f"### {it['machine_name']}")
+        lines.append('')
+        if it['status'] == 'done' and it['metrics']:
+            mt = json.loads(it['metrics'])
+            code = mt.get('rating_code') or '?'
+            label = mt.get('rating_label') or mt.get('rating') or RATING_CODE_INFO.get(code, '—')
+            tags = mt.get('rating_tags') or []
+            lines.append(f"- **评级**：{code} · {label}")
+            lines.append(f"- **异常标签**：{'、'.join(tags) if tags else '无'}")
+            lines.append(f"- **结论**：{mt.get('rating_summary') or '—'}")
+            for d in mt.get('rating_diagnostics') or []:
+                lines.append(f"- **{d.get('name', '指标')}**（{d.get('status', 'unknown')}）：{d.get('text', '')}")
+        else:
+            lines.append(f"- **评级**：F · 失败")
+            lines.append(f"- **原因**：{it['error'] or it['status']}")
+        lines.append('')
 
     lines.append('')
     lines.append('## 原始数据')

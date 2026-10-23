@@ -151,26 +151,35 @@ def schedule_summary(s):
     """面板列表用：定时任务 + 人类可读的下次时间与参数摘要。"""
     out = dict(s)
     expired = is_expired(s)
-    out['expired'] = expired
+    archived = bool(s.get('archived'))
+    out['expired'] = expired and not archived
+    out['archived'] = archived
     nxt = s.get('next_run_at')
     out['next_run_in'] = ''
     ts = parse_time(nxt)
-    if s.get('enabled') and not expired and ts:
+    if s.get('enabled') and not expired and not archived and ts:
         delta = int(ts - time.time())
         out['next_run_in'] = _human_delta(delta)
     out['interval_text'] = _human_duration(int(s.get('interval_seconds') or 0))
     lifetime = int(s.get('lifetime_seconds') or 0)
     out['lifetime_text'] = _human_duration(lifetime) if lifetime else '不限'
+    if archived:
+        out['interval_text'] = '历史归档'
+        out['lifetime_text'] = '不再执行'
     end_ts = parse_time(s.get('ends_at'))
     out['end_in'] = _human_delta(int(end_ts - time.time())) if end_ts and not expired else ''
     out['backend_count'] = len(s.get('backend_ids') or [])
     tgt = db.get_machine(s['target_id'])
-    out['target_name'] = (tgt or {}).get('name') or '（已删除）'
-    out['target_host'] = (tgt or {}).get('agent_ip') or ''
+    out['target_name'] = ((tgt or {}).get('name') or s.get('target_name')
+                          or '（已删除）')
+    out['target_host'] = (tgt or {}).get('agent_ip') or s.get('target_host') or ''
     names = []
-    for bid in (s.get('backend_ids') or []):
+    for idx, bid in enumerate(s.get('backend_ids') or []):
         m = db.get_machine(bid)
-        names.append((m or {}).get('name') or f'#{bid}(已删除)')
+        names.append((m or {}).get('name') or (
+            (s.get('backend_names') or [None] * len(s.get('backend_ids') or []))[idx]
+            if idx < len(s.get('backend_ids') or []) else None
+        ) or f'#{bid}(已删除)')
     out['backend_names'] = names
     return out
 
@@ -376,12 +385,70 @@ def _throughput_failure(mt):
     return ''
 
 
+RATING_RANK = {
+    'S': 5, 'A': 4, 'B': 3, 'C': 2, 'F': 1, '?': 0,
+    '优秀': 5, '良好': 4, '一般': 3, '较差': 2, '失败': 1, '数据不足': 0,
+}
+
+
+def _rating_code(value):
+    return {
+        '优秀': 'S', '良好': 'A', '一般': 'B', '较差': 'C',
+        '失败': 'F', '数据不足': '?',
+    }.get(value, value)
+
+
+def _snapshot_schedule(sid, window):
+    if not window:
+        return None
+    latest = window[-1]
+    run = latest['run']
+    items = latest['items']
+    backend_ids, backend_names = [], []
+    for item in items:
+        if item.get('machine_id') not in backend_ids:
+            backend_ids.append(item.get('machine_id'))
+            backend_names.append(item.get('machine_name') or f"#{item.get('machine_id')}")
+    return {
+        'id': sid,
+        'name': f'已删除的定时任务 #{sid}',
+        'enabled': False,
+        'archived': True,
+        'archived_at': run.get('finished_at') or run.get('created_at'),
+        'target_id': run.get('target_id'),
+        'target_name': run.get('target_name') or '（已删除）',
+        'target_host': run.get('target_host') or '',
+        'backend_ids': backend_ids,
+        'backend_names': backend_names,
+        'ip_version': int(run.get('ip_version') or 4),
+        'streams': int(run.get('streams') or 1),
+        'duration': int(run.get('duration') or 10),
+        'port': int(run.get('port') or 5201),
+        'udp': int(run.get('udp') or 0),
+        'udp_bandwidth': run.get('udp_bandwidth') or '100M',
+        'ping_count': int(run.get('ping_count') or 200),
+        'interval_seconds': 0,
+        'lifetime_seconds': 0,
+        'ends_at': None,
+        'run_count': len(window),
+        'fail_count': sum(1 for entry in window
+                          if entry['run'].get('status') in ('failed', 'partial', 'interrupted')),
+        'skip_count': 0,
+        'last_status': latest['run'].get('status') or '',
+        'last_error': '',
+        'last_run_at': run.get('created_at') or '',
+        'next_run_at': None,
+    }
+
+
 def comparison_data(sid, limit=ROUND_LIMIT, view_limit=None):
     """把该定时任务的历史轮次整理成「按机器 × 按轮次」的对比数据。"""
-    s = db.get_schedule(sid)
+    s = db.get_schedule(sid, include_archived=True)
+    window = db.schedule_run_window(sid, limit=limit)
+    if not s:
+        s = _snapshot_schedule(sid, window)
     if not s:
         return None
-    window = db.schedule_run_window(sid, limit=limit)
     machines = []
     index = {}
     rounds = []
@@ -418,7 +485,10 @@ def comparison_data(sid, limit=ROUND_LIMIT, view_limit=None):
                 'up': mt.get('up_mbits'), 'down': mt.get('down_mbits'),
                 'loss': mt.get('loss_pct'), 'rtt': mt.get('rtt_avg'),
                 'mdev': mt.get('mdev_ms'), 'retr': mt.get('retr_total'),
-                'udp_loss': mt.get('up_udp_loss_pct'), 'rating': mt.get('rating'),
+                'udp_loss': mt.get('up_udp_loss_pct'),
+                'rating': _rating_code(mt.get('rating_code') or mt.get('rating')),
+                'rating_tags': mt.get('rating_tags') or [],
+                'rating_summary': mt.get('rating_summary') or '',
                 'error': it.get('error') or failure,
             })
             if effective_status != 'done':
@@ -430,8 +500,9 @@ def comparison_data(sid, limit=ROUND_LIMIT, view_limit=None):
             m['mdev'].append(mt.get('mdev_ms'))
             m['retr'].append(mt.get('retr_total'))
             m['udp_loss'].append(mt.get('up_udp_loss_pct'))
-            if mt.get('rating'):
-                m['rating'].append(mt['rating'])
+            rating = _rating_code(mt.get('rating_code') or mt.get('rating'))
+            if rating:
+                m['rating'].append(rating)
 
     stats = []
     for m in machines:
@@ -443,7 +514,6 @@ def comparison_data(sid, limit=ROUND_LIMIT, view_limit=None):
             a, b = _agg(ups[:half]), _agg(ups[half:])
             if a and b and a['avg']:
                 trend = (b['avg'] - a['avg']) / a['avg'] * 100.0
-        common = {'优秀': 4, '良好': 3, '一般': 2, '较差': 1}
         stats.append({
             'name': m['name'], 'region': m['region'], 'bandwidth': m['bandwidth'],
             'samples': len(ups),
@@ -452,8 +522,8 @@ def comparison_data(sid, limit=ROUND_LIMIT, view_limit=None):
             'mdev': _agg(m['mdev']), 'retr': _agg(m['retr']),
             'udp_loss': _agg(m['udp_loss']),
             'trend_pct': trend,
-            'best_rating': max(m['rating'], key=lambda r: common.get(r, 0)) if m['rating'] else None,
-            'worst_rating': min(m['rating'], key=lambda r: common.get(r, 0)) if m['rating'] else None,
+            'best_rating': max(m['rating'], key=lambda r: RATING_RANK.get(r, -1)) if m['rating'] else None,
+            'worst_rating': min(m['rating'], key=lambda r: RATING_RANK.get(r, -1)) if m['rating'] else None,
         })
 
     total_rounds = len(rounds)
@@ -486,7 +556,9 @@ def build_comparison_report(sid, limit=ROUND_LIMIT, view_limit=VIEW_ROUNDS):
     s = data['schedule']
     rounds = data['rounds']
     lines = ['# iperf3 长期对比报告', '']
-    state = '已到期' if s.get('expired') else ('启用中' if s['enabled'] else '已停用')
+    state = ('历史归档' if s.get('archived') else
+             '已到期' if s.get('expired') else
+             '启用中' if s['enabled'] else '已停用')
     proto = 'IPv6' if int(s['ip_version']) == 6 else 'IPv4'
     kind = f"UDP（-b {s['udp_bandwidth']}/流）" if s['udp'] else 'TCP'
     finished = max(0, int(s['run_count']) - int(s['fail_count']))

@@ -69,10 +69,55 @@ def test_units():
 
 def test_evaluate():
     mt = quality.parse_metrics(PING_RAW, UP_RAW, DOWN_RAW)
-    quality.evaluate(mt, {'bandwidth': '500M'})
+    quality.evaluate(mt, {'bandwidth': '500M'}, {'duration': 10})
+    assert mt['rating_code'] in ('S', 'A', 'B', 'C'), mt
     assert mt['rating'] in ('优秀', '良好', '一般', '较差'), mt
+    assert mt['rating_tags'] and mt['rating_diagnostics'], mt
     assert '标称' in mt['rating_detail'], mt
     print('evaluate OK:', mt['rating'], '|', mt['rating_detail'])
+
+
+def test_rating_system():
+    """五级评级、失败/数据不足、异常标签和运行摘要必须来自真实指标。"""
+    from app import quality
+
+    good = quality.parse_metrics(PING_RAW, UP_RAW, DOWN_RAW)
+    good.update({'loss_pct': 0.0, 'rtt_avg': 30.0, 'mdev_ms': 0.5,
+                 'up_mbits': 460.0, 'up_sender_mbits': 470.0,
+                 'up_receiver_mbits': 460.0, 'down_mbits': 455.0,
+                 'down_sender_mbits': 465.0, 'down_receiver_mbits': 455.0,
+                 'retr_total': 0, 'transfer_total_mb': 1200.0})
+    quality.evaluate(good, {'bandwidth': '500M'}, {'duration': 10})
+    assert good['rating_code'] == 'S', good
+    actual_shape = dict(good)
+    quality.evaluate(actual_shape, {'machine_bandwidth': '500M'}, {'duration': 10})
+    assert '吞吐基线缺失' not in actual_shape['rating_tags'], actual_shape
+
+    poor = dict(good, loss_pct=2.5, rtt_avg=240.0, mdev_ms=18.0,
+                up_mbits=120.0, down_mbits=90.0, retr_total=40,
+                transfer_total_mb=120.0)
+    quality.evaluate(poor, {'bandwidth': '500M'}, {'duration': 10})
+    assert poor['rating_code'] in ('B', 'C'), poor
+    assert any(t in poor['rating_tags'] for t in ('存在丢包', '重传偏高', '上行吞吐偏低')), poor
+    assert poor['rating_summary'] and poor['rating_diagnostics'], poor
+
+    incomplete = dict(good, down_mbits=None)
+    quality.evaluate(incomplete, {'bandwidth': '500M'}, {'duration': 10})
+    assert incomplete['rating_code'] == '?' and incomplete['rating'] == '数据不足', incomplete
+
+    failed = quality.failure_metrics({'machine_name': 'bad'}, '连接超时', {'duration': 10})
+    assert failed['rating_code'] == 'F' and '测试失败' in failed['rating_tags'], failed
+
+    summary = quality.run_summary({'target_name': 'T', 'status': 'finished'}, [
+        {'status': 'done', 'metrics_obj': good},
+        {'status': 'done', 'metrics_obj': poor},
+        {'status': 'failed', 'metrics_obj': failed, 'error': '连接超时'},
+    ])
+    assert summary['success_count'] == 2 and summary['failure_count'] == 1, summary
+    assert summary['attention_count'] == 1, summary
+    assert summary['overall_code'] == 'partial', summary
+    assert quality.RATING_CONFIG_NOTE.startswith('评级采用项目自定义'), quality.RATING_CONFIG_NOTE
+    print('五级评级 / 数据不足 / 摘要统计 OK')
 
 
 def test_report():
@@ -92,7 +137,7 @@ def test_report():
     ]
     report = quality.build_report(run, {'name': '目标VPS', 'host': '1.2.3.4', 'region': '洛杉矶', 'bandwidth': '1G'}, items)
     assert '| HK-01 | 香港 | 500M | 0% | 144.4 ms | 0.26 ms | 137 Mbit/s | 108 Mbit/s | 0 |' in report
-    assert '❌ 失败：SSH 连接失败' in report
+    assert '**F · 失败**：SSH 连接失败' in report
     assert '### 后端机器1：HK-01' in report
     assert 'rtt min/avg/max/mdev = 144.239/144.402/146.898/0.255 ms' in report
     # IP 脱敏：C/D 段打码
@@ -599,8 +644,9 @@ def test_multistream_and_udp_parse():
     assert mt['up_jitter_ms'] == 0.019 and mt['down_jitter_ms'] == 0.031, mt
     assert mt['retr_total'] is None, mt          # UDP 没有重传概念
     assert mt['up_mbits'] == 96.4 and mt['down_mbits'] == 91.6, mt
-    quality.evaluate(mt, {'bandwidth': ''})
-    assert 'UDP 丢包' in mt['rating_detail'] and 'iperf3 抖动' in mt['rating_detail'], mt
+    quality.evaluate(mt, {'bandwidth': ''}, {'duration': 10})
+    assert 'UDP 最大丢包' in mt['rating_detail'] and 'UDP 最大抖动' in mt['rating_detail'], mt
+    assert mt['rating_code'] == '?', mt
     print('多线程 / UDP 解析 OK:', mt['rating'], '|', mt['rating_detail'])
 
 
@@ -1287,6 +1333,22 @@ def test_schedule_comparison_report():
     assert scheduler._md_cell('a|b\nc') == 'a\\|b c'
     assert scheduler.ROUND_LIMIT >= 10000, scheduler.ROUND_LIMIT
 
+    # 删除定时任务后，历史轮次与对比图仍必须可访问
+    db.delete_schedule(sch['id'])
+    assert db.get_schedule(sch['id']) is None
+    assert all(x['id'] != sch['id'] for x in db.get_schedules())
+    assert any(x['id'] == sch['id'] and x['archived'] for x in db.get_schedules(include_archived=True))
+    archived = scheduler.comparison_data(sch['id'])
+    assert archived and archived['schedule']['archived'] is True, archived
+    assert len(archived['rounds']) == 6, archived
+    from app.app import app as flask_app
+    c = flask_app.test_client()
+    _login(c)
+    r = c.get(f"/api/schedules/{sch['id']}/comparison")
+    assert r.status_code == 200 and len(r.get_json()['rounds']) == 6, r.get_json()
+    r = c.get(f"/api/schedules/{sch['id']}/report")
+    assert r.status_code == 200 and '历史归档' in r.get_data(as_text=True), r.status_code
+
     # 空数据不能炸
     empty = db.create_schedule(dict(
         scheduler.normalize_schedule({'target_id': t['id'], 'backend_ids': [b['id']],
@@ -1351,12 +1413,42 @@ def test_dashboard_interactions_present():
     for key in ('setChartMode', 'toggleChartMachine', 'setChartDirection',
                 'buildTrendChartSvg', 'copyRichText', 'toggleRunGroup', 'run-group',
                 'AbortController', 'skeleton-chart', 'comparisonTableHtml', '生成报告中',
-                '@media (max-width:700px)', 'params-grid', '保存后会立即开始首轮测试'):
+                '@media (max-width:700px)', 'params-grid', '保存后会立即开始首轮测试',
+                'showPopconfirm', 'eventStream', 'runSummary', 'qualityCellHtml',
+                'renderRunEvents', 'rating_diagnostics'):
         assert key in html, f'缺少面板交互：{key}'
+    assert "confirm('确定删除该测试记录？')" not in html, '测试记录删除不应使用原生确认框'
+    assert 'data-pop="confirm"' in html, 'Popconfirm 缺少确认按钮'
     for removed in ('默认 IPv4：iperf3 与 ping 都使用目标机的 IPv4 地址',
                     '参数即 iperf3 原生命令'):
         assert removed not in html, f'冗长说明未移除：{removed}'
     print('图表控制 / 记录折叠 / 报告富文本复制 / 精简说明 OK')
+
+
+def test_event_stream_log_contract():
+    """事件流与原始日志分离，原始输出不能被丢弃。"""
+    from app import runner
+    rid = 987654321
+    runner._active[rid] = {
+        'stop': False,
+        'log': [
+            '[12:00:00] raw ping output',
+            '@@EVENT@@' + __import__('json').dumps({
+                'time': '12:00:01', 'stage': 'ping', 'status': 'done',
+                'title': 'Ping 完成', 'summary': '丢包 0%', 'machine': 'b1',
+            }, ensure_ascii=False),
+            '[12:00:02] raw iperf output',
+        ],
+    }
+    try:
+        data = runner.get_log_data(rid)
+        assert data['events'][0]['stage'] == 'ping', data
+        assert data['raw_lines'] == ['[12:00:00] raw ping output',
+                                     '[12:00:02] raw iperf output'], data
+        assert runner.get_log(rid) == data['raw_lines'], data
+    finally:
+        runner._active.pop(rid, None)
+    print('结构化事件 / 原始日志分离 OK')
 
 
 def test_run_list_returns_summary_only():
@@ -1489,6 +1581,7 @@ if __name__ == '__main__':
     test_parse()
     test_units()
     test_evaluate()
+    test_rating_system()
     test_report()
     test_xff_and_limiter()
     test_test_protocol()
@@ -1512,6 +1605,7 @@ if __name__ == '__main__':
     test_incomplete_direction_is_failure()
     test_active_job_keeps_machine_online()
     test_dashboard_interactions_present()
+    test_event_stream_log_contract()
     test_run_list_returns_summary_only()
     test_version_sync()
     test_install_dirty_update()

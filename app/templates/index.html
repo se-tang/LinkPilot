@@ -358,6 +358,7 @@ body[data-theme='dark'] .badge.target{background:#302c55;color:#e6e2ff;border-co
 .v6-yes{color:var(--green)}
 .v6-no{color:var(--orange)}
 .rating-s{color:var(--green)}.rating-a{color:#287b96}.rating-b{color:var(--orange)}.rating-c{color:var(--red)}
+.rating-f{color:var(--red);font-weight:700}.rating-unknown{color:var(--muted)}
 .rb{padding:2px 8px;border-radius:7px;font-size:11px}
 .rb.rating-s{background:#d6f0e3;border-color:transparent;color:#11603f}
 .rb.rating-a{background:#e5f3f8;border-color:transparent;color:#17505f}
@@ -367,6 +368,44 @@ body[data-theme='dark'] .rb.rating-s{background:#173a32;color:#a5ebca}
 body[data-theme='dark'] .rb.rating-a{background:#1d3c4b;color:#9cdbe8}
 body[data-theme='dark'] .rb.rating-b{background:#493a18;color:#ffe27a}
 body[data-theme='dark'] .rb.rating-c{background:#452c3b;color:#ffb1bb}
+.rb.rating-f{background:#fbe8eb;border-color:transparent;color:#8a2b2b}
+.rb.rating-unknown{background:var(--surface2);border-color:var(--border);color:var(--muted)}
+.run-summary{
+  display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;
+  margin:10px 0 14px;padding:12px;border:1px solid var(--border);border-radius:12px;
+  background:var(--surface2);
+}
+.run-summary>div{min-width:0}.run-summary b{display:block;font-size:18px}.run-summary span{font-size:11px;color:var(--muted)}
+.run-summary .summary-status{grid-column:auto}
+.quality-cell{min-width:210px;display:flex;flex-direction:column;gap:5px}
+#detailResultTable{min-width:1080px}
+.quality-tags{display:flex;gap:4px;flex-wrap:wrap}
+.quality-tag{display:inline-block;padding:1px 6px;border-radius:5px;background:var(--surface2);border:1px solid var(--border);font-size:11px;color:var(--orange)}
+.quality-tag.info{color:var(--muted)}
+.quality-summary{font-size:12px;color:var(--muted);line-height:1.5}
+.quality-details{margin-top:2px}.quality-details summary{font-size:11px;color:var(--accent);font-weight:600}
+.diagnostic-list{display:grid;gap:4px;margin-top:6px}
+.diagnostic-item{display:grid;grid-template-columns:74px minmax(0,1fr);gap:6px;font-size:11px;line-height:1.45}
+.diagnostic-item b{font-weight:650}.diagnostic-item.warn b{color:var(--orange)}
+.diagnostic-item.bad b,.diagnostic-item.critical b{color:var(--red)}
+.diagnostic-item.ok b{color:var(--green)}.diagnostic-item.unknown b{color:var(--muted)}
+.event-stream{display:grid;gap:8px;margin:8px 0 12px}
+.event-group{border:1px solid var(--border);border-radius:11px;background:var(--surface2);overflow:hidden}
+.event-head{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--border);font-size:12px;font-weight:700}
+.event-head .event-state{margin-left:auto;font-size:11px;font-weight:600;color:var(--muted)}
+.event-row{display:grid;grid-template-columns:58px minmax(180px,.75fr) minmax(0,1.25fr);gap:8px;padding:7px 10px;border-bottom:1px solid var(--border);font-size:12px;line-height:1.5}
+.event-row:last-child{border-bottom:0}.event-row .event-time{color:var(--muted);font-family:ui-monospace,Consolas,monospace}
+.event-row .event-title{font-weight:600}.event-row .event-summary{color:var(--muted);min-width:0;word-break:break-word}
+.event-row.done .event-title{color:var(--green)}.event-row.warning .event-title{color:var(--orange)}
+.event-row.failed .event-title,.event-row.stopped .event-title{color:var(--red)}
+.raw-log-box{margin:6px 0 12px}.raw-log-box summary{color:var(--muted);font-size:12px}
+.popconfirm{
+  position:fixed;z-index:120;width:min(280px,calc(100vw - 20px));padding:12px;
+  border:1px solid var(--border);border-radius:12px;background:var(--card);
+  color:var(--text);box-shadow:0 18px 50px rgba(0,0,0,.28);
+}
+.popconfirm h4{margin:0 0 4px;font-size:13px}.popconfirm p{margin:0 0 10px;color:var(--muted);font-size:12px;line-height:1.55}
+.popconfirm .actions{justify-content:flex-end}
 pre,.md-render{background:var(--code-bg);border:1px solid var(--border);border-radius:14px}
 pre{padding:13px 14px;font-size:12px;line-height:1.7}
 details{border-radius:10px;background:color-mix(in srgb,var(--card) 92%,var(--surface2))}
@@ -449,6 +488,11 @@ details{border-radius:10px;background:color-mix(in srgb,var(--card) 92%,var(--su
   .run-group-main{gap:6px}
   .run-group-main .badge{font-size:10px}
   .run-child td:first-child{padding-left:14px}
+  .run-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .run-summary .summary-status{grid-column:span 2}
+  .event-row{grid-template-columns:50px minmax(0,1fr)}
+  .event-row .event-summary{grid-column:2}
+  .quality-cell{min-width:210px}
 }
 @media (max-width:420px){
   .brand-mark{width:34px;height:26px}
@@ -619,11 +663,16 @@ details{border-radius:10px;background:color-mix(in srgb,var(--card) 92%,var(--su
       </div>
     </div>
     <p class="muted" id="runDetailMeta" style="margin:4px 0"></p>
-    <h3>实时日志 <label class="chk" style="display:inline-flex;margin-left:10px;font-weight:400"><input type="checkbox" id="autoScroll" checked> 自动滚动</label></h3>
-    <pre id="logPre"></pre>
+    <div id="runSummary" class="run-summary hidden"></div>
+    <h3>测试事件 <label class="chk" style="display:inline-flex;margin-left:10px;font-weight:400"><input type="checkbox" id="autoScroll" checked> 自动滚动</label></h3>
+    <div id="eventStream" class="event-stream"></div>
+    <details class="raw-log-box">
+      <summary>查看原始日志</summary>
+      <pre id="logPre"></pre>
+    </details>
     <h3>结果汇总</h3>
     <div class="tbl-wrap">
-    <table>
+    <table id="detailResultTable">
       <thead><tr>
         <th>后端机器</th><th>地区</th><th>带宽</th><th>丢包率</th><th>RTT avg</th><th>抖动 mdev</th>
         <th>上行 (sender)</th><th>下行 (receiver)</th><th id="thRetr">重传</th><th>线路质量评价</th>
@@ -804,7 +853,56 @@ function fmt(v, suffix) {
 }
 
 function ratingClass(r) {
-  return {'优秀': 'rating-s', '良好': 'rating-a', '一般': 'rating-b', '较差': 'rating-c'}[r] || '';
+  const code = {'优秀': 'S', '良好': 'A', '一般': 'B', '较差': 'C',
+                '失败': 'F', '数据不足': '?'}[r] || r;
+  return {'S': 'rating-s', 'A': 'rating-a', 'B': 'rating-b',
+          'C': 'rating-c', 'F': 'rating-f', '?': 'rating-unknown'}[code] || 'rating-unknown';
+}
+
+function ratingInfo(metrics, status, error) {
+  const mt = metrics || {};
+  const code = mt.rating_code || ({'优秀':'S','良好':'A','一般':'B','较差':'C','失败':'F','数据不足':'?'}[mt.rating]) || '';
+  const label = mt.rating_label || ({'S':'优秀','A':'良好','B':'一般','C':'较差','F':'失败','?':'数据不足'}[code]) || mt.rating || '';
+  if (code) {
+    return {
+      code, label,
+      tags: Array.isArray(mt.rating_tags) ? mt.rating_tags : [],
+      summary: mt.rating_summary || mt.rating_detail || '',
+      diagnostics: Array.isArray(mt.rating_diagnostics) ? mt.rating_diagnostics : [],
+    };
+  }
+  if (status === 'failed' || status === 'stopped') {
+    return {
+      code: 'F', label: '失败', tags: ['测试失败'],
+      summary: error || '测试未完成，无法评估线路质量。',
+      diagnostics: [{name:'测试状态', status:'critical', text:error || '测试未完成'}],
+    };
+  }
+  return {
+    code: '?', label: '数据不足', tags: ['关键指标缺失'],
+    summary: '当前记录缺少完整评级数据，请查看原始输出。',
+    diagnostics: [{name:'数据完整性', status:'critical', text:'缺少结构化评级数据'}],
+  };
+}
+
+function ratingBadgeHtml(info) {
+  return `<span class="rb ${ratingClass(info.code)}">${esc(info.code)} · ${esc(info.label)}</span>`;
+}
+
+function qualityCellHtml(metrics, status, error) {
+  const info = ratingInfo(metrics, status, error);
+  const tags = info.tags.length
+    ? `<div class="quality-tags">${info.tags.map(t => `<span class="quality-tag">${esc(t)}</span>`).join('')}</div>`
+    : '';
+  const diagnostics = info.diagnostics.length
+    ? `<details class="quality-details"><summary>查看诊断详情</summary><div class="diagnostic-list">${
+        info.diagnostics.map(d => `<div class="diagnostic-item ${esc(d.status || 'unknown')}">
+          <b>${esc(d.name || '指标')}</b><span>${esc(d.text || '')}</span>
+        </div>`).join('')
+      }</div></details>`
+    : '';
+  return `<div class="quality-cell">${ratingBadgeHtml(info)}${tags}
+    <div class="quality-summary">${esc(info.summary || '—')}</div>${diagnostics}</div>`;
 }
 
 function copyText(text, tip) {
@@ -1317,6 +1415,69 @@ function toggleRunGroup(sid) {
   loadRuns();
 }
 
+const EVENT_STAGE_LABELS = {
+  precheck: '预检', ping: 'Ping 测试', uplink: '上行测试',
+  downlink: '下行测试', analysis: '结果分析', complete: '测试完成',
+};
+const EVENT_STATUS_LABELS = {
+  running: '进行中', done: '完成', warning: '需关注',
+  failed: '失败', stopped: '已停止', partial: '部分失败',
+};
+
+function renderRunSummary(summary) {
+  const box = $('runSummary');
+  if (!box) return;
+  if (!summary) {
+    box.classList.add('hidden');
+    return;
+  }
+  box.innerHTML = `
+    <div><b>${esc(summary.target_name || '—')}</b><span>目标机</span></div>
+    <div><b>${summary.backend_total || 0}</b><span>后端总数</span></div>
+    <div><b>${summary.success_count || 0}</b><span>成功</span></div>
+    <div><b>${summary.failure_count || 0}</b><span>失败</span></div>
+    <div><b>${summary.attention_count || 0}</b><span>需关注</span></div>
+    <div class="summary-status"><b>${esc(summary.overall_label || '—')}</b><span>整体状态</span></div>`;
+  box.classList.remove('hidden');
+}
+
+function renderRunEvents(events) {
+  const box = $('eventStream');
+  if (!box) return;
+  if (!events || !events.length) {
+    box.innerHTML = '<div class="muted" style="font-size:12px;padding:8px 0">暂无结构化事件，可展开下方原始日志查看完整过程。</div>';
+    return;
+  }
+  const groups = new Map();
+  for (const event of events) {
+    const stage = event.stage || 'complete';
+    if (!groups.has(stage)) groups.set(stage, []);
+    groups.get(stage).push(event);
+  }
+  const order = ['precheck', 'ping', 'uplink', 'downlink', 'analysis', 'complete'];
+  const stages = [...groups.keys()].sort((a, b) => {
+    const ai = order.indexOf(a), bi = order.indexOf(b);
+    return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
+  });
+  box.innerHTML = stages.map(stage => {
+    const rows = groups.get(stage);
+    const bad = rows.find(r => ['failed', 'stopped'].includes(r.status));
+    const done = rows.find(r => ['done', 'warning', 'partial'].includes(r.status));
+    const warn = rows.find(r => ['warning', 'partial'].includes(r.status));
+    const running = rows.find(r => r.status === 'running');
+    const state = bad && done ? 'partial' : bad ? 'failed' : warn ? 'warning' : running ? 'running' : 'done';
+    return `<section class="event-group">
+      <div class="event-head"><span>${esc(EVENT_STAGE_LABELS[stage] || stage)}</span>
+        <span class="event-state">${esc(EVENT_STATUS_LABELS[state] || state)}</span></div>
+      ${rows.map(event => `<div class="event-row ${esc(event.status || 'done')}">
+        <span class="event-time">${esc(event.time || '')}</span>
+        <span class="event-title">${esc(event.title || '')}</span>
+        <span class="event-summary">${esc(event.summary || '')}</span>
+      </div>`).join('')}
+    </section>`;
+  }).join('');
+}
+
 function openRun(id) {
   CURRENT_RUN = Number(id);
   $('runDetail').classList.remove('hidden');
@@ -1324,6 +1485,8 @@ function openRun(id) {
   $('runDetailTitle').textContent = `测试 #${CURRENT_RUN}`;
   $('runDetailMeta').textContent = '正在加载测试记录…';
   $('logPre').textContent = '';
+  $('eventStream').innerHTML = '';
+  renderRunSummary(null);
   $('detailTableBody').innerHTML = '<tr><td colspan="10" class="muted">加载中…</td></tr>';
   $('rawWrap').innerHTML = '';
   $('reportPre').textContent = '';
@@ -1376,7 +1539,12 @@ async function pollRun() {
         return `<div class="log-line">${e}</div>`;
       }).join('')
     : '（暂无日志）';
-  if (autoScroll) pre.scrollTop = pre.scrollHeight;
+  renderRunEvents(d.events || []);
+  renderRunSummary(d.summary);
+  if (autoScroll) {
+    pre.scrollTop = pre.scrollHeight;
+    $('eventStream').scrollTop = $('eventStream').scrollHeight;
+  }
   renderRunDetail(d);
   return d;
 }
@@ -1404,7 +1572,7 @@ function renderRunDetail(d) {
         <td>${fmt(mt.up_mbits, ' Mbit/s')}</td>
         <td>${fmt(mt.down_mbits, ' Mbit/s')}</td>
         <td>${last}</td>
-        <td><span class="rb ${ratingClass(mt.rating)}">${mt.rating}</span> <span class="muted">${esc(mt.rating_detail || '')}</span></td>
+        <td>${qualityCellHtml(mt, it.status, it.error)}</td>
       </tr>`;
     }
     if (it.status === 'running') {
@@ -1417,7 +1585,7 @@ function renderRunDetail(d) {
     return `<tr>
       <td>${name}</td><td>${region}</td><td>${bw}</td>
       <td colspan="6" class="muted">—</td>
-      <td style="color:var(--red)">❌ ${esc(it.error || it.status)}</td>
+      <td>${qualityCellHtml(it.metrics_obj, it.status, it.error)}</td>
     </tr>`;
   }).join('');
   $('detailTableBody').innerHTML = rows || '<tr><td colspan="10" class="muted">等待执行...</td></tr>';
@@ -1533,18 +1701,75 @@ async function stopCurrentRun() {
   }
 }
 
-async function removeRun(id) {
-  if (!confirm('确定删除该测试记录？')) return;
-  try {
-    await api(`/api/runs/${id}`, {method: 'DELETE'});
-    if (CURRENT_RUN === Number(id)) {
-      CURRENT_RUN = null;
-      $('runDetail').classList.add('hidden');
+let activePopconfirm = null;
+
+function closePopconfirm() {
+  if (!activePopconfirm) return;
+  activePopconfirm.bubble.remove();
+  document.removeEventListener('click', activePopconfirm.outside, true);
+  window.removeEventListener('resize', activePopconfirm.close);
+  window.removeEventListener('scroll', activePopconfirm.close, true);
+  activePopconfirm = null;
+}
+
+function showPopconfirm(anchor, {title, message, confirmText = '删除', onConfirm}) {
+  closePopconfirm();
+  if (!anchor) return;
+  const bubble = document.createElement('div');
+  bubble.className = 'popconfirm';
+  bubble.innerHTML = `<h4>${esc(title)}</h4><p>${esc(message)}</p>
+    <div class="actions"><button class="small" data-pop="cancel">取消</button>
+    <button class="small danger" data-pop="confirm">${esc(confirmText)}</button></div>`;
+  document.body.appendChild(bubble);
+
+  const rect = anchor.getBoundingClientRect();
+  const box = bubble.getBoundingClientRect();
+  let left = Math.min(window.innerWidth - box.width - 8, Math.max(8, rect.right - box.width));
+  let top = rect.bottom + 8;
+  if (top + box.height > window.innerHeight - 8) top = Math.max(8, rect.top - box.height - 8);
+  bubble.style.left = left + 'px';
+  bubble.style.top = top + 'px';
+
+  const outside = (event) => {
+    if (!bubble.contains(event.target)) closePopconfirm();
+  };
+  const close = () => closePopconfirm();
+  document.addEventListener('click', outside, true);
+  window.addEventListener('resize', close);
+  window.addEventListener('scroll', close, true);
+  activePopconfirm = {bubble, outside, close};
+
+  bubble.querySelector('[data-pop="cancel"]').addEventListener('click', closePopconfirm);
+  bubble.querySelector('[data-pop="confirm"]').addEventListener('click', async (event) => {
+    const btn = event.currentTarget;
+    btn.disabled = true;
+    btn.textContent = '删除中…';
+    try {
+      await onConfirm();
+      closePopconfirm();
+    } catch (error) {
+      btn.disabled = false;
+      btn.textContent = confirmText;
+      toast('删除失败：' + error.message);
     }
-    loadRuns();
-  } catch (e) {
-    alert(e.message);
-  }
+  });
+}
+
+function removeRun(id, anchor) {
+  showPopconfirm(anchor, {
+    title: '删除测试记录',
+    message: '删除后该轮结果和原始数据将无法恢复。',
+    confirmText: '删除',
+    onConfirm: async () => {
+      await api(`/api/runs/${id}`, {method: 'DELETE'});
+      if (CURRENT_RUN === Number(id)) {
+        CURRENT_RUN = null;
+        $('runDetail').classList.add('hidden');
+      }
+      await loadRuns();
+      toast('测试记录已删除');
+    },
+  });
 }
 
 /* ---------------- 定时任务（长期对比） ---------------- */
@@ -1988,6 +2213,7 @@ function copySchedTable() {
 function renderScheduleComparison(d) {
   CURRENT_COMPARISON = d;
   const s = d.schedule || {};
+  $('schedDetailTitle').textContent = `长期对比：${s.name || '历史记录'}`;
   const rounds = d.rounds || [];
   const totalRounds = Number(d.total_rounds ?? rounds.length);
   const viewRounds = Number(d.view_rounds ?? rounds.length);
@@ -1997,7 +2223,8 @@ function renderScheduleComparison(d) {
     + `（成功 ${Math.max(0, s.run_count - s.fail_count)} / 失败 ${s.fail_count} / 未跑成 ${s.skip_count}）`
     + ` · 目标机: ${s.target_name} ← ${s.backend_count} 台后端`
     + (rounds.length ? ` · 展示最近 ${viewRounds}/${totalRounds} 轮: ${rounds[0].created_at} ~ ${rounds[rounds.length - 1].created_at}` : '')
-    + (s.expired ? ` · 已到期${s.ends_at ? '（' + s.ends_at + '）' : ''}`
+    + (s.archived ? ' · 定时任务已删除，历史记录仍可查看和复制'
+      : s.expired ? ` · 已到期${s.ends_at ? '（' + s.ends_at + '）' : ''}`
       : (s.enabled ? ` · 下次: ${s.next_run_in || '—'}` : ' · 已停用'))
     + (rounds.length > 500 ? ' · 页面明细显示最近 500 轮，复制/下载包含全部数据' : '');
 
@@ -2217,7 +2444,7 @@ const ACTIONS = {
   startRun,
   loadRuns: () => loadRuns(),
   openRun: (d) => openRun(d.id),
-  removeRun: (d) => removeRun(d.id),
+  removeRun: (d, el) => removeRun(d.id, el),
   toggleRunGroup: (d) => toggleRunGroup(d.id),
   copyReport,
   toggleReportView,
@@ -2247,7 +2474,7 @@ document.addEventListener('click', e => {
   const fn = ACTIONS[el.dataset.action];
   if (fn) {
     e.preventDefault();
-    fn(el.dataset);
+    fn(el.dataset, el);
   }
 });
 

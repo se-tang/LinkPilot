@@ -29,6 +29,7 @@ _UDP_BW_RE = re.compile(r'^\d{1,5}(?:\.\d{1,3})?[KMG]$')
 
 _state_lock = threading.Lock()
 _active = {}  # run_id -> {'stop': bool, 'log': [..]}
+_EVENT_PREFIX = '@@EVENT@@'
 
 
 def _int_in(raw, lo, hi, label, default=None):
@@ -263,11 +264,28 @@ def stop_run(run_id):
 
 
 def get_log(run_id):
+    return get_log_data(run_id)['raw_lines']
+
+
+def get_log_data(run_id):
+    """返回结构化事件和完整原始日志，兼容没有事件标记的旧记录。"""
     st = _active.get(run_id)
     if st:
-        return list(st['log'])
-    run = db.get_run(run_id)
-    return run['log'].splitlines() if run and run['log'] else []
+        lines = list(st['log'])
+    else:
+        run = db.get_run(run_id)
+        lines = run['log'].splitlines() if run and run['log'] else []
+    events = []
+    raw_lines = []
+    for line in lines:
+        if line.startswith(_EVENT_PREFIX):
+            try:
+                events.append(json.loads(line[len(_EVENT_PREFIX):]))
+            except (TypeError, ValueError):
+                raw_lines.append(line)
+        else:
+            raw_lines.append(line)
+    return {'events': events, 'raw_lines': raw_lines}
 
 
 def proto_name(ip_version):
@@ -357,6 +375,18 @@ def _worker(run_id, target, ip_version=4):
         if len(log_lines) > 4000:
             del log_lines[:len(log_lines) - 4000]
 
+    def event(stage, status, title, summary='', machine='', details=None):
+        payload = {
+            'time': time.strftime('%H:%M:%S'),
+            'stage': stage,
+            'status': status,
+            'title': title,
+            'summary': summary,
+            'machine': machine,
+            'details': details or {},
+        }
+        log_lines.append(_EVENT_PREFIX + json.dumps(payload, ensure_ascii=False))
+
     def stop_check():
         if st['stop']:
             raise RunAborted()
@@ -382,6 +412,8 @@ def _worker(run_id, target, ip_version=4):
                 f'目标机地址 {target_ip} 与所选协议 {proto} 不一致，请重新选择后再试')
         cfg = run_cfg(run)
         kind = f"UDP（-b {cfg['udp_bandwidth']}/流）" if cfg['udp'] else 'TCP'
+        event('precheck', 'running', '预检开始',
+              f'目标机 {target["name"]}，协议 {proto}，{kind}')
         log(f"=== 测试开始 | 目标机器: {target['name']} ({target_ip}) | 协议: {proto} | "
             f"{kind} | -P {cfg['streams']} -t {cfg['duration']} | "
             f"ping -c {cfg['ping_count']} ===")
@@ -437,12 +469,14 @@ def _worker(run_id, target, ip_version=4):
         log(f"[目标] iperf3 -s 已就绪（端口 {tport}，{'UDP' if cfg['udp'] else 'TCP'}"
             f"{'，' + str(cfg['streams']) + ' 线程' if cfg['streams'] > 1 else ''}），"
             f"开始流水线测试：iperf3 串行 / ping 并行")
+        event('precheck', 'done', '预检完成',
+              f'目标机端口 {tport} 已就绪，开始连接 {len(items)} 台后端机')
 
         lane = Iperf3Lane()
         for idx, it in enumerate(items):
             t = threading.Thread(target=_run_backend,
                                  args=(lane, st, log, stop_check, target, it, idx, target_ip,
-                                       proto, cfg, ttl),
+                                       proto, cfg, ttl, event, run),
                                  daemon=True)
             threads.append(t)
         for t in threads:
@@ -453,6 +487,7 @@ def _worker(run_id, target, ip_version=4):
     except RunAborted:
         status = 'stopped'
         error = '用户手动停止测试'
+        event('complete', 'stopped', '测试已停止', error)
         log('=== 测试被手动停止 ===')
         if lane:
             lane.stop()
@@ -462,6 +497,7 @@ def _worker(run_id, target, ip_version=4):
     except Exception as e:
         status = 'failed'
         error = str(e) or e.__class__.__name__
+        event('complete', 'failed', '测试失败', error)
         log(f'[致命错误] {error}')
         log(traceback.format_exc()[-800:])
         if lane:
@@ -503,16 +539,27 @@ def _worker(run_id, target, ip_version=4):
             'name': run['target_name'], 'host': run['target_host'],
             'region': run['target_region'], 'bandwidth': run['target_bandwidth'],
         }
+        summary = quality.run_summary(dict(run, status=status), items)
+        analysis_status = ('failed' if summary['overall_code'] in ('failed', 'partial')
+                           else 'warning' if summary['overall_code'] == 'attention'
+                           else 'done')
+        event('analysis', analysis_status, '结果分析',
+              f"成功 {summary['success_count']} 台，失败 {summary['failure_count']} 台，"
+              f"需关注 {summary['attention_count']} 台",
+              details=summary)
+        event('complete', status if status in ('finished', 'failed', 'partial', 'stopped') else 'done',
+              '测试完成' if status != 'failed' else '测试结束',
+              summary['overall_label'], details=summary)
         report = quality.build_report(run, target_info, items)
+        log(f'=== 测试结束，状态: {status}，报告已生成 ===')
         db.finish_run(run_id, status=status, report=report,
                       log_text='\n'.join(log_lines), error=error)
-        log(f'=== 测试结束，状态: {status}，报告已生成 ===')
         with _state_lock:
             _active.pop(run_id, None)
 
 
 def _run_backend(lane, st, log, stop_check, target, it, idx, target_ip, proto='IPv4', cfg=None,
-                 ttl=aj.SERVER_TTL_DEFAULT):
+                 ttl=aj.SERVER_TTL_DEFAULT, event=None, run=None):
     """单台后端的流水线：环境检查（并行）→ 等通道 → iperf3 上/下行（串行）→ ping（并行）。
 
     iperf3 / ping 都用目标地址字面量决定协议族（IPv4 或 IPv6），不再依赖本机默认路由；
@@ -526,6 +573,7 @@ def _run_backend(lane, st, log, stop_check, target, it, idx, target_ip, proto='I
     my_port = item_port(it, cfg)
     my_cfg = dict(cfg, port=my_port)
     db.update_item(iid, status='running', phase='检查环境')
+    event = event or (lambda *args, **kwargs: None)
     log(f"--- 后端 {name} ({it['machine_host']}) 开始 ---")
     lane_passed = False
     ping_raw = up_raw = down_raw = ''
@@ -572,6 +620,8 @@ def _run_backend(lane, st, log, stop_check, target, it, idx, target_ip, proto='I
                     raise RuntimeError(
                         f"目标机 {tq} 的 {my_port} 端口从本机不可达"
                         f"（请检查目标机防火墙/安全组/NAT 是否放行并映射到 {my_port}{hints}）")
+            event('precheck', 'done', f'{name} 预检完成',
+                  f'目标端口 {my_port} 可达', machine=name)
 
             cmd_up = build_iperf_cmd(tq, my_cfg)
             db.update_item(iid, phase='上行测试')
@@ -579,6 +629,11 @@ def _run_backend(lane, st, log, stop_check, target, it, idx, target_ip, proto='I
             code, up_raw = _job(m, cmd_up, cfg['duration'] + 60, log, stop_check)
             if code != 0:
                 raise RuntimeError('上行测试失败: ' + (up_raw or '').strip()[-200:])
+            up_s, up_r = quality.parse_iperf(up_raw)
+            event('uplink', 'done', f'{name} 上行完成',
+                  f"发送 {quality.fmt_num(up_s['mbits'] if up_s else None)} Mbit/s，"
+                  f"接收 {quality.fmt_num(up_r['mbits'] if up_r else None)} Mbit/s",
+                  machine=name)
             time.sleep(1)
 
             cmd_down = build_iperf_cmd(tq, my_cfg, reverse=True)
@@ -587,6 +642,11 @@ def _run_backend(lane, st, log, stop_check, target, it, idx, target_ip, proto='I
             code, down_raw = _job(m, cmd_down, cfg['duration'] + 60, log, stop_check)
             if code != 0:
                 raise RuntimeError('下行测试失败: ' + (down_raw or '').strip()[-200:])
+            down_s, down_r = quality.parse_iperf(down_raw)
+            event('downlink', 'done', f'{name} 下行完成',
+                  f"发送 {quality.fmt_num(down_s['mbits'] if down_s else None)} Mbit/s，"
+                  f"接收 {quality.fmt_num(down_r['mbits'] if down_r else None)} Mbit/s",
+                  machine=name)
         finally:
             lane.release()  # 无论如何立刻让出通道，下一台马上开始 iperf3
         time.sleep(1)
@@ -603,10 +663,15 @@ def _run_backend(lane, st, log, stop_check, target, it, idx, target_ip, proto='I
         invalid = bidirectional_failure(metrics)
         if invalid:
             raise RuntimeError(invalid)
-        quality.evaluate(metrics, it)
+        quality.evaluate(metrics, it, run=run)
         db.update_item(iid, status='done', phase='完成', ping_raw=ping_raw, up_raw=up_raw,
                        down_raw=down_raw,
                        metrics=json.dumps(metrics, ensure_ascii=False))
+        event('ping', 'done', f'{name} Ping 完成',
+              f"丢包 {quality.fmt_num(metrics.get('loss_pct'), 2)}%，"
+              f"RTT {quality.fmt_num(metrics.get('rtt_avg'))} ms，"
+              f"抖动 {quality.fmt_num(metrics.get('mdev_ms'), 2)} ms",
+              machine=name)
         extra = ''
         if metrics.get('udp'):
             extra = (f"| UDP 丢包 {quality.fmt_num(metrics.get('up_udp_loss_pct'), 2)}%/"
@@ -616,12 +681,18 @@ def _run_backend(lane, st, log, stop_check, target, it, idx, target_ip, proto='I
             f"| 丢包 {quality.fmt_num(metrics.get('loss_pct'))}% " + extra
             + f"| 评价: {metrics.get('rating')}")
     except RunAborted:
+        failed_metrics = quality.failure_metrics(it, '手动停止', run=run)
         db.update_item(iid, status='failed', error='手动停止', ping_raw=ping_raw,
-                       up_raw=up_raw, down_raw=down_raw, metrics='')
+                       up_raw=up_raw, down_raw=down_raw,
+                       metrics=json.dumps(failed_metrics, ensure_ascii=False))
+        event('complete', 'stopped', f'{name} 已停止', '用户手动停止', machine=name)
         log(f'[{name}] ⏹ 已停止')
     except Exception as e:
+        failed_metrics = quality.failure_metrics(it, str(e), run=run)
         db.update_item(iid, status='failed', error=str(e), ping_raw=ping_raw,
-                       up_raw=up_raw, down_raw=down_raw, metrics='')
+                       up_raw=up_raw, down_raw=down_raw,
+                       metrics=json.dumps(failed_metrics, ensure_ascii=False))
+        event('complete', 'failed', f'{name} 测试失败', str(e), machine=name)
         log(f'[{name}] ❌ 失败: {e}')
     finally:
         if not lane_passed:

@@ -141,6 +141,7 @@ CREATE TABLE IF NOT EXISTS schedules (
     fail_count INTEGER NOT NULL DEFAULT 0,
     skip_count INTEGER NOT NULL DEFAULT 0,
     last_error TEXT NOT NULL DEFAULT '',
+    archived_at TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 CREATE TABLE IF NOT EXISTS schedule_runs (
@@ -220,6 +221,8 @@ def init_db():
         db.execute('ALTER TABLE schedules ADD COLUMN lifetime_seconds INTEGER NOT NULL DEFAULT 0')
     if cols_s and 'ends_at' not in cols_s:
         db.execute('ALTER TABLE schedules ADD COLUMN ends_at TEXT')
+    if cols_s and 'archived_at' not in cols_s:
+        db.execute('ALTER TABLE schedules ADD COLUMN archived_at TEXT')
     cols_tb = [r['name'] for r in db.execute('PRAGMA table_info(agent_tombstones)').fetchall()]
     if cols_tb and 'cmd_b64' not in cols_tb:
         # 墓碑是一次性瞬态数据，结构变化直接重建
@@ -895,13 +898,19 @@ def _sql_now(now=None):
     return now or datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
 
-def get_schedules():
-    rows = get_db().execute('SELECT * FROM schedules ORDER BY id').fetchall()
+def get_schedules(include_archived=False):
+    sql = 'SELECT * FROM schedules'
+    if not include_archived:
+        sql += ' WHERE archived_at IS NULL'
+    rows = get_db().execute(sql + ' ORDER BY id').fetchall()
     return [_sched_row(r) for r in rows]
 
 
-def get_schedule(sid):
-    r = get_db().execute('SELECT * FROM schedules WHERE id=?', (sid,)).fetchone()
+def get_schedule(sid, include_archived=False):
+    sql = 'SELECT * FROM schedules WHERE id=?'
+    if not include_archived:
+        sql += ' AND archived_at IS NULL'
+    r = get_db().execute(sql, (sid,)).fetchone()
     return _sched_row(r) if r else None
 
 
@@ -910,6 +919,7 @@ def _sched_row(r):
     s['backend_ids'] = _load_json(s.get('backend_ids'), [])
     s['ports'] = _load_json(s.get('ports'), {})
     s['enabled'] = bool(s.get('enabled'))
+    s['archived'] = bool(s.get('archived_at'))
     return s
 
 
@@ -954,9 +964,12 @@ def _sched_value(col, val):
 
 
 def delete_schedule(sid):
+    """归档定时任务，保留 schedule_runs 和历史对比所需元数据。"""
     db = get_db()
-    db.execute('DELETE FROM schedule_runs WHERE schedule_id=?', (sid,))
-    db.execute('DELETE FROM schedules WHERE id=?', (sid,))
+    db.execute(
+        "UPDATE schedules SET archived_at=datetime('now','localtime'), enabled=0, "
+        "next_run_at=NULL, last_status='archived', last_error='定时任务已删除，历史记录保留' "
+        'WHERE id=? AND archived_at IS NULL', (sid,))
     db.commit()
 
 
@@ -969,6 +982,7 @@ def due_schedules(now=None):
     at = _sql_now(now)
     rows = get_db().execute(
         "SELECT * FROM schedules WHERE enabled=1 AND "
+        'archived_at IS NULL AND '
         "COALESCE(next_run_at, datetime('now','localtime')) <= ? AND "
         '(ends_at IS NULL OR ends_at > ?) '
         'ORDER BY COALESCE(next_run_at, created_at) ASC', (at, at)).fetchall()
@@ -981,6 +995,7 @@ def expire_schedules(now=None):
     db = get_db()
     rows = db.execute(
         "SELECT id FROM schedules WHERE enabled=1 AND ends_at IS NOT NULL "
+        'AND archived_at IS NULL '
         "AND ends_at <= ? AND COALESCE(last_status, '') != 'running'", (at,)).fetchall()
     ids = [r['id'] for r in rows]
     if ids:
@@ -1074,6 +1089,11 @@ def schedule_run_window(sid, limit=10000):
         'SELECT r.* FROM schedule_runs sr JOIN runs r ON r.id = sr.run_id '
         'WHERE sr.schedule_id=? AND sr.run_id IS NOT NULL '
         'ORDER BY sr.id DESC LIMIT ?', (sid, limit)).fetchall()
+    if not rows:
+        # 兼容旧版本：删除任务时 schedule_runs 已被清掉，只留下 runs.schedule_id。
+        rows = db.execute(
+            'SELECT * FROM runs WHERE schedule_id=? ORDER BY id DESC LIMIT ?',
+            (sid, limit)).fetchall()
     runs = [dict(r) for r in rows][::-1]
     items_by_run = {run['id']: [] for run in runs}
     ids = list(items_by_run)
