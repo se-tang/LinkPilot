@@ -142,13 +142,12 @@ def test_report():
          'machine_host': '9.9.9.9', 'status': 'failed', 'error': 'SSH 连接失败', 'metrics': ''},
     ]
     report = quality.build_report(run, {'name': '目标VPS', 'host': '1.2.3.4', 'region': '洛杉矶', 'bandwidth': '1G'}, items)
-    assert '| HK-01 | 香港 | 500M | 0% | 144.4 ms | 0.26 ms | 137 Mbit/s | 108 Mbit/s | 0 |' in report
-    assert '**F 失败**：SSH 连接失败' in report
-    assert '### 后端机器1：HK-01' in report
-    assert 'rtt min/avg/max/mdev = 144.239/144.402/146.898/0.255 ms' in report
-    # IP 脱敏：C/D 段打码
-    assert '1.2.*.*' in report and '1.2.3.4' not in report
-    assert '5.6.*.*' in report and '5.6.7.8' not in report
+    assert ('| HK-01 | 香港 | 500M | 0% | 144.4 ms | 0.26 ms | 137 Mbit/s '
+            '| 108 Mbit/s | 0 | **C 较差** | 上下行吞吐偏低 |') in report
+    assert '| JP-02 | 东京 | 200M | — | — | — | — | — | — | **F 失败** | SSH 连接失败 |' in report
+    assert '目标机器' not in report and '测试协议' not in report and '测试参数' not in report
+    assert '诊断详情' not in report and '原始数据' not in report
+    assert 'rtt min/avg/max/mdev' not in report
     print('---- 报告预览 ----')
     print(report)
     return report
@@ -270,19 +269,18 @@ def test_test_protocol():
         assert 'IPv6' in str(e), e
     assert runner.active_run_id() is None
 
-    # 6) 报告标注测试协议，并按 IPv6 脱敏
+    # 6) 简洁报告不包含目标机地址、协议或参数
     run6 = {'created_at': 't0', 'finished_at': 't1', 'ip_version': 6, 'error': '',
             'target_name': 'only6', 'target_host': '2606:4700:4700::1111'}
     rep = quality.build_report(run6, {'name': 'only6', 'host': '2606:4700:4700::1111',
                                       'region': '洛杉矶', 'bandwidth': '1G'}, [])
-    assert '- **测试协议**：IPv6' in rep, rep
-    assert '2606:4700:****' in rep and '1111' not in rep.split('测试协议')[0], rep
+    assert '# LinkPilot 测试结果' in rep and '测试协议' not in rep, rep
+    assert '2606:4700' not in rep and '1111' not in rep, rep
     run4 = dict(run6, ip_version=4, target_host='93.184.216.34')
     rep4 = quality.build_report(run4, {'name': 'v4', 'host': '93.184.216.34',
                                         'region': '', 'bandwidth': ''}, [])
-    assert '- **测试协议**：IPv4' in rep4, rep4
-    assert '93.184.*.*' in rep4
-    print('测试协议 / 地址探测 / 报告标注 OK')
+    assert '测试协议' not in rep4 and '93.184' not in rep4, rep4
+    print('地址探测 / 简洁报告 OK')
 
 
 def test_discovery_flow():
@@ -657,7 +655,7 @@ def test_multistream_and_udp_parse():
 
 
 def test_report_params_and_udp_columns():
-    """报告写明本次参数；UDP 测试把「重传」列换成 UDP 丢包 / 抖动。"""
+    """简洁报告不重复参数；UDP 测试使用 UDP 丢包列。"""
     import json as _json
     from app import quality
 
@@ -676,14 +674,10 @@ def test_report_params_and_udp_columns():
            'target_name': 'T', 'target_host': '1.2.3.4', 'streams': 4, 'duration': 30,
            'port': 5201, 'udp': 1, 'udp_bandwidth': '200M', 'ping_count': 50}
     rep = quality.build_report(run, {'name': 'T', 'host': '1.2.3.4', 'region': '', 'bandwidth': ''}, items)
-    assert ('- **测试参数**：iperf3 4 线程（-P）× 上行 / 下行（-R）各 30 秒（-t），'
-            '目标机端口 5201（后端机默认连它），UDP（-u，目标带宽 200M/流）') in rep, rep
-    assert 'UDP 丢包 上/下' in rep and 'UDP 抖动 上/下' in rep, rep
-    assert '重传' not in rep.split('## 原始数据')[0], rep
-    # 逐台端口：不同端口时列一行「各机连接端口」，原始数据小节也标出端口
-    assert '- **各机连接端口**：HK-01 6001 · JP-02 5201' in rep, rep
-    assert '### 后端机器1：HK-01（香港 · 500M · 5.6.*.* · 连接端口 6001）' in rep, rep
-    assert '### 后端机器2：JP-02（东京 · 200M · 9.9.*.* · 连接端口 5201）' in rep, rep
+    assert '| UDP丢包 |' in rep, rep
+    assert '| 重传 |' not in rep, rep
+    assert '测试参数' not in rep and '原始数据' not in rep, rep
+    assert '各机连接端口' not in rep, rep
 
     # 只有一台机器、端口一致时不出现「各机连接端口」这一行
     one = [dict(items[0], port=5201)]
@@ -695,17 +689,14 @@ def test_report_params_and_udp_columns():
                    udp_bandwidth='100M', ping_count=200)
     rep4 = quality.build_report(nat_run, {'name': 'T', 'host': '1.2.3.4', 'region': '', 'bandwidth': ''},
                                 [dict(items[0], port=0)])
-    assert '目标机端口 43343（后端机默认连它），TCP' in rep4, rep4
-    assert '### 后端机器1：HK-01（香港 · 500M · 5.6.*.* · 连接端口 43343）' in rep4, rep4
+    assert '测试参数' not in rep4 and '43343' not in rep4, rep4
 
     # 旧记录（没有参数列）退回默认参数，TCP 表头保留重传列
     old = {'created_at': 't0', 'finished_at': 't1', 'ip_version': 4, 'error': '',
            'target_name': 'T', 'target_host': '1.2.3.4'}
     rep2 = quality.build_report(old, {'name': 'T', 'host': '1.2.3.4', 'region': '', 'bandwidth': ''}, items)
-    assert ('- **测试参数**：iperf3 1 线程（-P）× 上行 / 下行（-R）各 10 秒（-t），'
-            '目标机端口 5201（后端机默认连它），TCP') in rep2, rep2
     assert '| 重传 |' in rep2, rep2
-    print('报告参数行 / UDP 列 / 换端口 OK')
+    print('简洁报告 / UDP 列 OK')
 
 
 def test_machine_addr_override():

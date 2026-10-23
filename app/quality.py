@@ -460,117 +460,51 @@ def mask_report_text(text):
     return _IPV4_RE.sub(r'\1.*.*', text)
 
 
-def run_params_text(run):
-    """报告里的「测试参数」描述（旧记录没有这些列时退回默认值）。"""
-    streams = int(run.get('streams') or 1)
-    duration = int(run.get('duration') or 10)
-    port = int(run.get('port') or 5201)
-    ping_count = int(run.get('ping_count') or 200)
-    kind = ('UDP（-u，目标带宽 %s/流）' % (run.get('udp_bandwidth') or '100M')
-            if int(run.get('udp') or 0) else 'TCP')
-    return (f'iperf3 {streams} 线程（-P）× 上行 / 下行（-R）各 {duration} 秒（-t），'
-            f'目标机端口 {port}（后端机默认连它），{kind}；`ping -c {ping_count} -i 1`；'
-            f'iperf3 全局串行，ping 与其它机器的 iperf3 并行')
-
-
 def build_report(run, target, items):
-    """生成 Markdown 报告：汇总表（含线路质量评价列）+ 每台机器的原始摘录。"""
-    proto = 'IPv6' if int(run.get('ip_version') or 4) == 6 else 'IPv4'
+    """生成简洁 Markdown：只保留每台后端的核心结果和评级说明。"""
     udp = bool(int(run.get('udp') or 0))
-    ncols = 11 if udp else 10
-    lines = []
-    lines.append('# iperf3 线路质量测试报告')
-    lines.append('')
-    lines.append(
-        f"- **目标机器**：{target['name']}"
-        f"（{target.get('region') or '地区未标记'} · {target.get('bandwidth') or '带宽未标记'} · `{mask_ip(target.get('host'))}`）")
-    lines.append(f"- **测试协议**：{proto}（后端发起端与目标被测端均使用 {proto}）")
-    lines.append(f"- **测试参数**：{run_params_text(run)}")
-    default_port = int(run.get('port') or 5201)
-    port_pairs = [(it['machine_name'], int(it.get('port') or default_port)) for it in items]
-    if len({p for _, p in port_pairs}) > 1:
-        # 每台后端机可以用各自的端口连目标机（目标机会按用到的端口分别起 server）
-        lines.append('- **各机连接端口**：'
-                     + ' · '.join(f'{name} {port}' for name, port in port_pairs))
-    lines.append(f"- **测试时间**：{run['created_at']} ~ {run.get('finished_at') or ''}")
-    lines.append('')
-    if udp:
-        lines.append('| 后端机器 | 地区 | 带宽 | ping 丢包 | RTT avg | ping 抖动 | 上行 '
-                     '| 下行 | UDP 丢包 上/下 | UDP 抖动 上/下 | 线路质量评价 |')
-        lines.append('|---|---|---|---|---|---|---|---|---|---|---|')
-    else:
-        lines.append('| 后端机器 | 地区 | 带宽 | 丢包率 | RTT avg | 抖动 mdev | 上行 '
-                     '| 下行 | 重传 | 线路质量评价 |')
-        lines.append('|---|---|---|---|---|---|---|---|---|---|')
+
+    def cell(value):
+        return str(value if value is not None else '—').replace('|', '\\|').replace('\r', ' ').replace('\n', ' ')
+
+    def with_unit(value, unit, digits=1):
+        return '—' if value is None else f'{fmt_num(value, digits)} {unit}'
+
+    lines = [
+        '# LinkPilot 测试结果',
+        '',
+        f"| 机器 | 地区 | 带宽 | 丢包 | RTT | 抖动 | 上行 | 下行 | {'UDP丢包' if udp else '重传'} | 评级 | 说明 |",
+        '|---|---|---|---|---|---|---|---|---|---|---|',
+    ]
     for it in items:
-        name = it['machine_name']
-        region = it['machine_region'] or '—'
-        bw = it['machine_bandwidth'] or '—'
+        name = cell(it['machine_name'])
+        region = cell(it['machine_region'] or '—')
+        bandwidth = cell(it['machine_bandwidth'] or '—')
         if it['status'] == 'done' and it['metrics']:
             mt = json.loads(it['metrics'])
-            row = (f"| {name} | {region} | {bw} "
-                   f"| {fmt_num(mt.get('loss_pct'))}% | {fmt_num(mt.get('rtt_avg'))} ms "
-                   f"| {fmt_num(mt.get('mdev_ms'), 2)} ms "
-                   f"| {fmt_num(mt.get('up_mbits'))} Mbit/s | {fmt_num(mt.get('down_mbits'))} Mbit/s ")
+            loss_values = [v for v in (
+                mt.get('loss_pct'), mt.get('up_udp_loss_pct'), mt.get('down_udp_loss_pct')
+            ) if v is not None]
+            loss = max(loss_values) if loss_values else None
+            rtt = mt.get('rtt_avg')
+            mdev = mt.get('mdev_ms')
+            up = mt.get('up_mbits')
+            down = mt.get('down_mbits')
             if udp:
-                row += (f"| {fmt_num(mt.get('up_udp_loss_pct'), 2)}% / "
-                        f"{fmt_num(mt.get('down_udp_loss_pct'), 2)}% "
-                        f"| {fmt_num(mt.get('up_jitter_ms'), 3)} / "
-                        f"{fmt_num(mt.get('down_jitter_ms'), 3)} ms ")
+                extra = (f"{fmt_num(mt.get('up_udp_loss_pct'), 2)}% / "
+                         f"{fmt_num(mt.get('down_udp_loss_pct'), 2)}%")
             else:
-                row += f"| {fmt_num(mt.get('retr_total'), 0)} "
+                extra = fmt_num(mt.get('retr_total'), 0)
             code = mt.get('rating_code') or '?'
             label = mt.get('rating_label') or mt.get('rating') or RATING_CODE_INFO.get(code, '—')
-            lines.append(row + f"| **{code} {label}**：{mt.get('rating_summary', '—')} |")
+            lines.append(
+                f"| {name} | {region} | {bandwidth} | {fmt_num(loss, 2)}% "
+                f"| {with_unit(rtt, 'ms')} | {with_unit(mdev, 'ms', 2)} "
+                f"| {with_unit(up, 'Mbit/s')} | {with_unit(down, 'Mbit/s')} "
+                f"| {extra} | **{code} {label}** | {cell(mt.get('rating_summary') or '—')} |")
         else:
-            err = (it['error'] or it['status']).replace('|', '\\|').replace('\n', ' ')
-            lines.append(f"| {name} | {region} | {bw} | "
-                         + ' | '.join(['—'] * (ncols - 4))
-                         + f" | **F 失败**：{err} |")
-
-    lines.append('')
-    lines.append('## 诊断详情')
-    lines.append('')
-    lines.append(f'> {RATING_CONFIG_NOTE}')
-    lines.append('')
-    for it in items:
-        lines.append(f"### {it['machine_name']}")
-        lines.append('')
-        if it['status'] == 'done' and it['metrics']:
-            mt = json.loads(it['metrics'])
-            code = mt.get('rating_code') or '?'
-            label = mt.get('rating_label') or mt.get('rating') or RATING_CODE_INFO.get(code, '—')
-            tags = mt.get('rating_tags') or []
-            lines.append(f"- **评级**：{code} {label}")
-            lines.append(f"- **异常标签**：{'、'.join(tags) if tags else '无'}")
-            lines.append(f"- **结论**：{mt.get('rating_summary') or '—'}")
-            for d in mt.get('rating_diagnostics') or []:
-                lines.append(f"- **{d.get('name', '指标')}**（{d.get('status', 'unknown')}）：{d.get('text', '')}")
-        else:
-            lines.append(f"- **评级**：F 失败")
-            lines.append(f"- **原因**：{it['error'] or it['status']}")
-        lines.append('')
-
-    lines.append('')
-    lines.append('## 原始数据')
-    for idx, it in enumerate(items, 1):
-        lines.append('')
-        port = int(it.get('port') or run.get('port') or 5201)
-        lines.append(
-            f"### 后端机器{idx}：{it['machine_name']}"
-            f"（{it['machine_region'] or '未标记'} · {it['machine_bandwidth'] or '未标记'} · "
-            f"{mask_ip(it['machine_host'])} · 连接端口 {port}）")
-        lines.append('')
-        lines.append('```')
-        if it['status'] == 'done' and it['metrics']:
-            mt = json.loads(it['metrics'])
-            blocks = [mt.get('ping_block'), mt.get('up_block'), mt.get('down_block')]
-            body = '\n\n'.join(b for b in blocks if b)
-            lines.append(body if body else '（无输出）')
-        else:
-            lines.append(f"测试失败：{it['error'] or it['status']}")
-        lines.append('```')
-    if run.get('error'):
-        lines.append('')
-        lines.append(f"> ⚠️ {run['error']}")
+            err = cell(it['error'] or it['status'])
+            lines.append(
+                f"| {name} | {region} | {bandwidth} | — | — | — | — | — | — "
+                f"| **F 失败** | {err} |")
     return mask_report_text('\n'.join(lines))
