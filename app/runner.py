@@ -752,7 +752,7 @@ def _probe_fail_reason(e):
     msg = str(e)
     if '超时' in msg or '未领取' in msg:
         return ('地址探测任务没有回传结果：Agent 可能没在跑任务或拒收了任务，'
-                '到机器上执行 tail -5 /var/lib/iperf3-fleet/agent.log 查看原因')
+                '到机器上执行 tail -5 /var/lib/linkpilot/agent.log 查看原因')
     return msg[:200]
 
 

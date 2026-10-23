@@ -69,7 +69,7 @@ printf 'legacy-caddy\n' >"$TMP/legacy/Caddyfile.local"
 mkdir -p "$TMP/legacy/certs"
 printf 'legacy-cert\n' >"$TMP/legacy/certs/origin.pem"
 git -C "$TMP/legacy" -c user.name=test -c user.email=test@example.com \
-  -c commit.gpgsign=false stash push -u -q -m "iperf3-fleet auto-update backup legacy"
+  -c commit.gpgsign=false stash push -u -q -m "linkpilot auto-update backup test"
 LOCAL_BACKUP="$(git -C "$TMP/legacy" rev-parse refs/stash)"
 rm -f "$TMP/legacy/.env" "$TMP/legacy/Caddyfile.local"
 rm -rf "$TMP/legacy/certs"

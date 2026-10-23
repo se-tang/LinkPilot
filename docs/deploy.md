@@ -12,11 +12,11 @@
 
 要点：
 
-- **安装输出是给人看的**：每一步一行（`▸ 步骤 ... 结果 (耗时)`），耗时的第三方命令（装 Docker、构建镜像）只显示 spinner + 已用秒数，它们的刷屏输出全部写进日志文件（默认 `/tmp/LinkPilot-install.log`，可用 `IPERF3_FLEET_LOG` 改）。失败时自动回显日志末尾 6–10 行，不必再翻屏找原因；想看到全部原始输出就加 `IPERF3_FLEET_VERBOSE=1`。管道 / CI 环境下自动退化为纯文本（无颜色、无 spinner 刷新）。
+- **安装输出是给人看的**：每一步一行（`▸ 步骤 ... 结果 (耗时)`），耗时的第三方命令（装 Docker、构建镜像）只显示 spinner + 已用秒数，它们的刷屏输出全部写进日志文件（默认 `/tmp/LinkPilot-install.log`，可用 `LINKPILOT_LOG` 改）。失败时自动回显日志末尾 6–10 行，不必再翻屏找原因；想看到全部原始输出就加 `LINKPILOT_VERBOSE=1`。管道 / CI 环境下自动退化为纯文本（无颜色、无 spinner 刷新）。
 - **可重复执行**：再次运行就是升级（自动检查更新 → 有更新才重建），数据、端口、机器接入关系全部保留；之前用过 HTTPS 会自动带上 `--profile tls`，不会把 caddy 弄丢，并顺手清理被误挂载成目录的 `Caddyfile.local`。升级时不会重复显示初始密码（避免误导）。同一条命令在**没装过的机器上是安装、装过的机器上是升级**，详见下面的「升级」。
 - **非 root 也能跑**：会通过 `sudo` 提权（需要机器上有 sudo）。
 - 国内装 Docker 慢/超时：命令改成 `... | DOCKER_MIRROR=Aliyun bash`；机器走代理：命令最前面加 `https_proxy=http://IP:端口`。
-- 环境变量：`IPERF3_FLEET_DIR`（安装目录，默认 `~/LinkPilot`）、`IPERF3_FLEET_REPO_URL`、`IPERF3_FLEET_BRANCH`、`IPERF3_FLEET_TLS=1`（同时启用 HTTPS 网关）、`IPERF3_FLEET_VERBOSE=1`、`IPERF3_FLEET_LOG`、`NO_COLOR=1`、`DOCKER_MIRROR`、`COMPOSE_MIRROR`、`IPERF3_FLEET_TARBALL`。
+- 环境变量：`LINKPILOT_DIR`（安装目录，默认 `~/LinkPilot`）、`LINKPILOT_REPO_URL`、`LINKPILOT_BRANCH`、`LINKPILOT_TLS=1`（同时启用 HTTPS 网关）、`LINKPILOT_VERBOSE=1`、`LINKPILOT_LOG`、`NO_COLOR=1`、`DOCKER_MIRROR`、`COMPOSE_MIRROR`、`LINKPILOT_TARBALL`。
 - 脚本需要 `bash`（Alpine 等默认 ash 的系统先 `apk add bash`）；机器上连 `curl` 都没有时先 `apt-get update && apt-get install -y curl`（或 `yum install -y curl` / `apk add curl`）。
 - 端口随机生成（记录在 `.env`，升级/重启不变），登录账号密码随机生成，均在部署横幅里显示一次；忘记密码删 `data/auth.json` 重启重新生成。
 - 面板容器默认只读文件系统 + 最小权限运行。
@@ -24,7 +24,7 @@
 想手动控制每一步：
 
 ```bash
-git clone https://github.com/se-tang/LinkPilot.git && cd LinkPilot && ([ -f .env ] || echo "PANEL_PORT=$(shuf -i 10000-30000 -n 1)" > .env) && docker compose up -d --build && sleep 5 && docker compose logs --tail 15 iperf3-fleet
+git clone https://github.com/se-tang/LinkPilot.git && cd LinkPilot && ([ -f .env ] || echo "PANEL_PORT=$(shuf -i 10000-30000 -n 1)" > .env) && docker compose up -d --build && sleep 5 && docker compose logs --tail 15 linkpilot
 ```
 
 ## HTTPS（可选）
@@ -49,7 +49,7 @@ docker compose --profile tls logs --tail 30 caddy   # 出现 certificate obtaine
 curl -I https://panel.example.com                   # 返回 200 / 302
 ```
 
-`Caddyfile.acme` 里就是一句 `reverse_proxy iperf3-fleet:8000`，容器名走 compose 内网，端口不用填。
+`Caddyfile.acme` 里就是一句 `reverse_proxy linkpilot:8000`，容器名走 compose 内网，端口不用填。
 
 > `PANEL_DOMAIN` 没设或为空时 Caddy 起不来（Caddyfile 的站点地址变成空，日志报 Caddyfile 解析错误）——补上域名重新 `docker compose --profile tls up -d` 即可。
 > 80 端口被别的服务占用时 ACME HTTP-01 校验必然失败（拿不到证书），请腾出 80 或改用方式 B。
@@ -91,8 +91,6 @@ docker compose --profile tls up -d
 
 **重跑当初那条一键命令就行**——脚本会自己比较本地与远端：有更新就更新代码并重建镜像，没有就报告「已是最新」；数据、端口、机器接入关系全部保留，Agent 自动重连，登录密码不变。
 
-如果机器上还是旧项目 `iperf3-fleet`，脚本会自动识别 `~/iperf3-fleet` 并直接在原目录升级为 LinkPilot。它会保留 `.env`、`data/`、证书和 Caddy 数据卷，不会在 `~/LinkPilot` 另起同名容器。
-
 ```bash
 curl -fsSL https://raw.githubusercontent.com/se-tang/LinkPilot/main/install.sh | bash
 ```
@@ -107,7 +105,7 @@ curl -fsSL https://raw.githubusercontent.com/se-tang/LinkPilot/main/install.sh |
 只想检查/更新代码、先不部署：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/se-tang/LinkPilot/main/install.sh | IPERF3_FLEET_DRY_RUN=1 bash
+curl -fsSL https://raw.githubusercontent.com/se-tang/LinkPilot/main/install.sh | LINKPILOT_DRY_RUN=1 bash
 ```
 
 也可以照旧手动来：
@@ -145,7 +143,7 @@ docker compose --profile tls up -d --force-recreate
 面板机：
 
 ```bash
-cd ~/LinkPilot && docker compose down && rm -rf data && rm -f .env && docker rmi iperf3-fleet:latest
+cd ~/LinkPilot && docker compose down && rm -rf data && rm -f .env && docker rmi linkpilot:latest
 ```
 
 节点机：
@@ -157,5 +155,5 @@ curl -fsSL http://面板IP:端口/agent/uninstall.sh | bash
 面板已删则在节点机直接执行：
 
 ```bash
-systemctl disable --now iperf3-fleet-agent 2>/dev/null; rm -f /etc/systemd/system/iperf3-fleet-agent.service; systemctl daemon-reload 2>/dev/null; pkill -f "iperf3-fleet/agent.sh" 2>/dev/null; rm -rf /usr/local/lib/iperf3-fleet /etc/iperf3-fleet /var/lib/iperf3-fleet
+systemctl disable --now linkpilot-agent 2>/dev/null; rm -f /etc/systemd/system/linkpilot-agent.service; systemctl daemon-reload 2>/dev/null; pkill -f "linkpilot/agent.sh" 2>/dev/null; rm -rf /usr/local/lib/linkpilot /etc/linkpilot /var/lib/linkpilot
 ```

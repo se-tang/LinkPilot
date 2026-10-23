@@ -1,8 +1,10 @@
+name: linkpilot
+
 services:
-  iperf3-fleet:
+  linkpilot:
     build: .
-    image: iperf3-fleet:latest
-    container_name: iperf3-fleet
+    image: linkpilot:latest
+    container_name: linkpilot
     restart: unless-stopped
     ports:
       # 对外端口在首次部署时随机生成并记录在 .env（PANEL_PORT=xxxx），升级/重启不变
@@ -37,7 +39,7 @@ services:
   #   docker compose --profile tls up -d
   caddy:
     image: caddy:2-alpine
-    container_name: iperf3-fleet-caddy
+    container_name: linkpilot-caddy
     profiles: ["tls"]
     restart: unless-stopped
     ports:
@@ -57,7 +59,7 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
-      - iperf3-fleet
+      - linkpilot
     read_only: true
     tmpfs:
       - /tmp

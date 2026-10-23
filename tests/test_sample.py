@@ -6,7 +6,7 @@ import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-os.environ['DATA_DIR'] = tempfile.mkdtemp(prefix='iperf3-fleet-test-')
+os.environ['DATA_DIR'] = tempfile.mkdtemp(prefix='linkpilot-test-')
 
 from app import quality  # noqa: E402
 
@@ -285,7 +285,7 @@ def test_probe_script():
         print('跳过 SCRIPT_REPORT_IPS 测试（缺 bash/awk）')
         return
 
-    tmp = tempfile.mkdtemp(prefix='iperf3-fleet-probe-')
+    tmp = tempfile.mkdtemp(prefix='linkpilot-probe-')
     script = os.path.join(tmp, 'probe.sh')
     with open(script, 'w', encoding='utf-8') as f:
         f.write(aj.SCRIPT_REPORT_IPS + '\n')
@@ -749,7 +749,7 @@ def test_server_lifecycle():
         print('iperf3 server 生命周期（TTL / 收尾关闭）OK')
         return
 
-    tmp = tempfile.mkdtemp(prefix='iperf3-fleet-srv-')
+    tmp = tempfile.mkdtemp(prefix='linkpilot-srv-')
     bind = os.path.join(tmp, 'bin')
     os.makedirs(bind)
     with open(os.path.join(bind, 'iperf3'), 'w', encoding='utf-8') as f:
@@ -1413,9 +1413,9 @@ def test_version_sync():
     assert "APP_VERSION" in banner and 're.search' in banner, banner[:200]
 
     # 自动更新的关键实现必须在场：检查更新 / 强制对齐 / 用新脚本重跑
-    for key in ('IPERF3_FLEET_REEXEC', 'IPERF3_FLEET_UPDATED',
+    for key in ('LINKPILOT_REEXEC', 'LINKPILOT_UPDATED',
                 'checkout -q -B "$BRANCH" "origin/$BRANCH"',
-                'IPERF3_FLEET_DRY_RUN'):
+                'LINKPILOT_DRY_RUN'):
         assert key in inst, f'install.sh 缺少自动更新关键片段：{key}'
     assert 'git pull --ff-only' not in inst, \
         '不该再用 git pull --ff-only：远端历史被重写（force push）时会直接失败'
@@ -1425,10 +1425,8 @@ def test_version_sync():
         '升级前必须把 .env / 证书 / 数据排除在本地代码改动之外'
     assert 'restore_runtime_from_backup' in inst, \
         '旧版脚本已 stash 运行时文件时，新版必须能自动恢复'
-    assert 'LEGACY_UPGRADE=1' in inst and 'com.docker.compose.project.working_dir' in inst, \
-        '从旧版 iperf3-fleet 升级时必须优先原地迁移，避免同名容器冲突'
-    assert '检测到旧版 iperf3-fleet' in inst, \
-        '旧版原地升级需要给出明确提示'
+    assert 'LINKPILOT_DIR' in inst and 'LEGACY_UPGRADE' not in inst, \
+        '安装目录应只使用 LinkPilot 配置，不保留旧项目迁移逻辑'
     for key in ('tls_config_present', 'PANEL_DOMAIN=.+', 'CADDY_HTTPS=.+'):
         assert key in inst, f'HTTPS 自动识别缺少关键片段：{key}'
     ignore = read('.gitignore')

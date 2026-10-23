@@ -20,23 +20,6 @@ curl -fsSL https://raw.githubusercontent.com/se-tang/LinkPilot/main/install.sh |
 
 脚本会自动安装缺失的 Git、Docker 和 Docker Compose，然后生成随机端口与初始登录密码。
 
-## 从 iperf3-fleet 升级
-
-直接运行上面的同一条命令：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/se-tang/LinkPilot/main/install.sh | bash
-```
-
-脚本会自动识别旧的 `~/iperf3-fleet` 安装目录，在原目录切换为 LinkPilot 代码并重建容器。以下内容会保留：
-
-- `.env`、端口和绑定地址
-- 数据库、机器和测试记录
-- Agent 接入关系
-- HTTPS 域名、证书和 Caddy 数据卷
-
-不要手工删除旧容器或直接修改容器名，否则可能造成同名冲突或丢失历史数据。
-
 ## 使用
 
 1. 添加目标机与后端机。
@@ -50,7 +33,3 @@ curl -fsSL https://raw.githubusercontent.com/se-tang/LinkPilot/main/install.sh |
 - [参数与使用说明](docs/usage.md)
 - [常见问题](docs/troubleshooting.md)
 - [开发说明](docs/development.md)
-
-## 兼容说明
-
-为支持旧安装平滑升级，Docker 容器名、`IPERF3_FLEET_*` 环境变量和 Agent 服务名暂时保留 `iperf3-fleet` 标识；面板和项目名称已经统一为 LinkPilot。

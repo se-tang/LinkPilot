@@ -8,18 +8,18 @@
 # 重复执行 = 升级，数据 / 端口 / 机器接入关系全部保留）。
 #
 # 输出风格：安静 + 进度 + 结论。只在「需要你知道」的地方说话，
-# 第三方工具的刷屏输出收进日志文件（--log / IPERF3_FLEET_LOG 可取用）。
+# 第三方工具的刷屏输出收进日志文件（--log / LINKPILOT_LOG 可取用）。
 #
 # 支持的发行版：Debian/Ubuntu、CentOS/RHEL/Rocky/Alma/Fedora、Alpine、
 #               openSUSE/SLES、Arch（其余系统会给出明确的失败原因）
 #
 # 可选环境变量（均有默认值，通常无需设置）：
-#   IPERF3_FLEET_DIR       安装目录，默认 $HOME/LinkPilot（保留旧变量名以兼容升级）
-#   IPERF3_FLEET_REPO_URL  仓库地址，默认 https://github.com/se-tang/LinkPilot.git
-#   IPERF3_FLEET_BRANCH    分支，默认 main
-#   IPERF3_FLEET_TLS=1     同时启用 HTTPS 网关（caddy，需 80/443 空闲）
-#   IPERF3_FLEET_VERBOSE=1 把被收起的第三方命令输出一并打印出来（排障用）
-#   IPERF3_FLEET_LOG       日志文件路径，默认 /tmp/LinkPilot-install.log
+#   LINKPILOT_DIR       安装目录，默认 $HOME/LinkPilot
+#   LINKPILOT_REPO_URL  仓库地址，默认 https://github.com/se-tang/LinkPilot.git
+#   LINKPILOT_BRANCH    分支，默认 main
+#   LINKPILOT_TLS=1     同时启用 HTTPS 网关（caddy，需 80/443 空闲）
+#   LINKPILOT_VERBOSE=1 把被收起的第三方命令输出一并打印出来（排障用）
+#   LINKPILOT_LOG       日志文件路径，默认 /tmp/LinkPilot-install.log
 #   NO_COLOR=1             关闭彩色输出
 #   DOCKER_MIRROR=Aliyun   用国内镜像源装 Docker（可选值见 https://get.docker.com）
 #   COMPOSE_MIRROR=...     compose 独立二进制的下载前缀（默认 GitHub 官方）
@@ -32,44 +32,15 @@ APP_NAME="LinkPilot"
 REPO_SLUG="LinkPilot"
 # 当前版本：与 app/app.py 的 APP_VERSION 保持一致（app.py 是唯一权威）。
 # 升级时脚本会用「更新后的代码里」的版本号自我重跑，所以这里的值只对「全新安装」生效。
-APP_VERSION="0.5.2"
-REPO_URL="${IPERF3_FLEET_REPO_URL:-https://github.com/se-tang/LinkPilot.git}"
-BRANCH="${IPERF3_FLEET_BRANCH:-main}"
+APP_VERSION="0.6.0"
+REPO_URL="${LINKPILOT_REPO_URL:-https://github.com/se-tang/LinkPilot.git}"
+BRANCH="${LINKPILOT_BRANCH:-main}"
 TARGET_HOME="$(getent passwd "$(id -u)" 2>/dev/null | cut -d: -f6)"
 [ -n "$TARGET_HOME" ] || TARGET_HOME="$HOME"
-CONTAINER_PROJECT_DIR=""
-if command -v docker >/dev/null 2>&1; then
-  CONTAINER_PROJECT_DIR="$(docker inspect \
-    -f '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}' \
-    iperf3-fleet 2>/dev/null || true)"
-fi
-LEGACY_UPGRADE=0
-if [ -n "${IPERF3_FLEET_DIR+x}" ]; then
-  INSTALL_DIR="$IPERF3_FLEET_DIR"
-elif [ -n "$CONTAINER_PROJECT_DIR" ] && [ -f "$CONTAINER_PROJECT_DIR/docker-compose.yml" ] \
-    && [ ! -f "$TARGET_HOME/LinkPilot/data/auth.json" ]; then
-  # 旧部署优先原地升级：继续使用旧 compose 项目名和目录，避免同名容器冲突，
-  # 同时保留 .env、data、证书与 Caddy 数据卷。
-  INSTALL_DIR="$CONTAINER_PROJECT_DIR"
-  LEGACY_UPGRADE=1
-else
-  LEGACY_INSTALL_DIR=""
-  for _candidate in "$TARGET_HOME/iperf3-fleet" /root/iperf3-fleet; do
-    if [ -f "$_candidate/docker-compose.yml" ]; then
-      LEGACY_INSTALL_DIR="$_candidate"
-      break
-    fi
-  done
-  if [ -n "$LEGACY_INSTALL_DIR" ] && [ ! -f "$TARGET_HOME/LinkPilot/data/auth.json" ]; then
-    INSTALL_DIR="$LEGACY_INSTALL_DIR"
-    LEGACY_UPGRADE=1
-  else
-    INSTALL_DIR="$TARGET_HOME/LinkPilot"
-  fi
-fi
-LOG_FILE="${IPERF3_FLEET_LOG:-/tmp/LinkPilot-install.log}"
-VERBOSE="${IPERF3_FLEET_VERBOSE:-0}"
-LOCAL_BACKUP="${IPERF3_FLEET_LOCAL_BACKUP:-}"
+INSTALL_DIR="${LINKPILOT_DIR:-$TARGET_HOME/LinkPilot}"
+LOG_FILE="${LINKPILOT_LOG:-/tmp/LinkPilot-install.log}"
+VERBOSE="${LINKPILOT_VERBOSE:-0}"
+LOCAL_BACKUP="${LINKPILOT_LOCAL_BACKUP:-}"
 
 # ---------------------------------------------------------------------------
 # 输出与通用工具
@@ -88,7 +59,7 @@ fi
 
 # 交互终端才做动画：重定向 / 日志抓取（`| tee`、CI）下只打静态行，
 # 免得输出里塞满 \r 刷新帧和 ANSI 转义
-if [ -t 1 ] && [ -z "${IPERF3_FLEET_PLAIN:-}" ]; then
+if [ -t 1 ] && [ -z "${LINKPILOT_PLAIN:-}" ]; then
   FANCY=1
 else
   FANCY=0
@@ -236,7 +207,7 @@ derive_tarball_url() {
     *) printf '' ;;
   esac
 }
-TARBALL_URL="${IPERF3_FLEET_TARBALL:-$(derive_tarball_url)}"
+TARBALL_URL="${LINKPILOT_TARBALL:-$(derive_tarball_url)}"
 
 # ---------------------------------------------------------------------------
 # 系统与包管理器探测
@@ -325,7 +296,7 @@ backup_repo_changes() {
   fi
   LOCAL_BACKUP="$(git -C "$INSTALL_DIR" rev-parse --verify refs/stash 2>/dev/null || true)"
   [ -n "$LOCAL_BACKUP" ] || return 1
-  export IPERF3_FLEET_LOCAL_BACKUP="$LOCAL_BACKUP"
+  export LINKPILOT_LOCAL_BACKUP="$LOCAL_BACKUP"
   log_file "本地改动已备份到 stash $LOCAL_BACKUP"
   return 0
 }
@@ -361,14 +332,14 @@ restore_runtime_from_backup() {
 # 先做「检查更新」再印开场：走 curl | bash 时手里的是旧脚本，
 # 若一上来就打印版本号，更新完成后版本号会对不上（显示的是旧版本）。
 # 这里只做更新，输出全部进日志；失败/无更新都静默放过，不打断后面的安装流程。
-if [ "${IPERF3_FLEET_REEXEC:-0}" != "1" ] && have git; then
+if [ "${LINKPILOT_REEXEC:-0}" != "1" ] && have git; then
   # 从仓库目录里直接执行本脚本时，同样按该目录检查更新
   if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
     _sd="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     if [ -f "$_sd/docker-compose.yml" ] && [ -d "$_sd/.git" ]; then INSTALL_DIR="$_sd"; fi
   fi
 fi
-if [ "${IPERF3_FLEET_REEXEC:-0}" != "1" ] && [ -d "$INSTALL_DIR/.git" ] && have git; then
+if [ "${LINKPILOT_REEXEC:-0}" != "1" ] && [ -d "$INSTALL_DIR/.git" ] && have git; then
   _cur_url="$(git -C "$INSTALL_DIR" remote get-url origin 2>/dev/null || true)"
   if [ -n "$_cur_url" ] && [ "$_cur_url" != "$REPO_URL" ]; then
     git -C "$INSTALL_DIR" remote set-url origin "$REPO_URL" >>"$LOG_FILE" 2>&1 || true
@@ -380,8 +351,8 @@ if [ "${IPERF3_FLEET_REEXEC:-0}" != "1" ] && [ -d "$INSTALL_DIR/.git" ] && have 
       if [ -f "$INSTALL_DIR/install.sh" ]; then
         # 通知重跑后的脚本「本轮是刚更新上来的」，这样它的那行结论会说
         # 「发现新版本 → 已自动更新」，而不是「已是最新」（否则用户以为没生效）
-        export IPERF3_FLEET_REEXEC=1 IPERF3_FLEET_UPDATED=1
-        export IPERF3_FLEET_DIR="$INSTALL_DIR" IPERF3_FLEET_LOG="$LOG_FILE"
+        export LINKPILOT_REEXEC=1 LINKPILOT_UPDATED=1
+        export LINKPILOT_DIR="$INSTALL_DIR" LINKPILOT_LOG="$LOG_FILE"
         exec bash "$INSTALL_DIR/install.sh" "$@"
       fi
     fi
@@ -398,9 +369,6 @@ _rule '─'
 printf '  %s主机%s   %s%s%s (%s)\n' "$C_DIM" "$C_RESET" "$C_BOLD" "$(hostname 2>/dev/null || echo '-')" "$C_RESET" "$OS_PRETTY"
 printf '  %s架构%s   %s\n' "$C_DIM" "$C_RESET" "$ARCH"
 printf '  %s目录%s   %s\n' "$C_DIM" "$C_RESET" "$INSTALL_DIR"
-if [ "$LEGACY_UPGRADE" = "1" ]; then
-  printf '  %s升级%s   检测到旧版 iperf3-fleet，将原地迁移并保留数据\n' "$C_DIM" "$C_RESET"
-fi
 printf '  %s日志%s   %s%s（失败时自动回显末尾）%s\n' "$C_DIM" "$C_RESET" "$C_DIM" "$LOG_FILE" "$C_RESET"
 _rule '─'
 printf '\n'
@@ -611,7 +579,7 @@ fetch_repo() {
     _local="$(git -C "$INSTALL_DIR" rev-parse HEAD 2>/dev/null || echo '')"
     _remote="$(git -C "$INSTALL_DIR" rev-parse "origin/$BRANCH" 2>/dev/null || echo '')"
     if [ -n "$_remote" ] && [ "$_local" = "$_remote" ]; then
-      if [ "${IPERF3_FLEET_UPDATED:-0}" = "1" ]; then
+      if [ "${LINKPILOT_UPDATED:-0}" = "1" ]; then
         CODE_STATE=updated       # 本轮的更新是在「重跑前」那一段完成的
       else
         CODE_STATE=current
@@ -695,10 +663,10 @@ esac
 
 # 走管道那条命令（curl | bash）时，脚本本体是「旧的那一份」：更新完代码后
 # 用更新后的脚本重新执行一次，保证本次部署用的也是最新逻辑（只重跑一次）
-if [ "$UPDATED" = "1" ] && [ "${IPERF3_FLEET_REEXEC:-0}" != "1" ] && [ -f "$INSTALL_DIR/install.sh" ]; then
+if [ "$UPDATED" = "1" ] && [ "${LINKPILOT_REEXEC:-0}" != "1" ] && [ -f "$INSTALL_DIR/install.sh" ]; then
   step_note "用更新后的脚本继续本次部署…"
-  export IPERF3_FLEET_REEXEC=1 IPERF3_FLEET_DIR="$INSTALL_DIR"
-  export IPERF3_FLEET_LOG="$LOG_FILE"
+  export LINKPILOT_REEXEC=1 LINKPILOT_DIR="$INSTALL_DIR"
+  export LINKPILOT_LOG="$LOG_FILE"
   exec bash "$INSTALL_DIR/install.sh"
 fi
 
@@ -754,12 +722,12 @@ case "${PANEL_BIND:-}" in
 esac
 
 # 只检查/更新代码，不部署（想确认更新结果、或先看参数再用）：
-#   curl -fsSL .../install.sh | IPERF3_FLEET_DRY_RUN=1 bash
-if [ "${IPERF3_FLEET_DRY_RUN:-0}" = "1" ]; then
+#   curl -fsSL .../install.sh | LINKPILOT_DRY_RUN=1 bash
+if [ "${LINKPILOT_DRY_RUN:-0}" = "1" ]; then
   printf '\n'
   printf '  %s--dry-run：只检查/更新代码，不部署面板（当前代码 v%s）- %s\n' \
     "$C_DIM" "${CODE_VER:-$APP_VERSION}" "$C_RESET"
-  printf '  %s需要部署时去掉 IPERF3_FLEET_DRY_RUN=1 重跑即可%s\n' "$C_DIM" "$C_RESET"
+  printf '  %s需要部署时去掉 LINKPILOT_DRY_RUN=1 重跑即可%s\n' "$C_DIM" "$C_RESET"
   printf '\n'
   exit 0
 fi
@@ -768,7 +736,7 @@ fi
 # 部署（自动识别是否需要带 tls profile，避免升级时把 caddy 丢了）
 # ---------------------------------------------------------------------------
 TLS=0
-[ "${IPERF3_FLEET_TLS:-}" = "1" ] && TLS=1
+[ "${LINKPILOT_TLS:-}" = "1" ] && TLS=1
 tls_config_present() {
   [ -f "$INSTALL_DIR/Caddyfile.local" ] && return 0
   [ -f "$INSTALL_DIR/.env" ] || return 1
@@ -778,7 +746,7 @@ tls_config_present() {
 if tls_config_present; then
   TLS=1
 fi
-if docker_cli ps -a --format '{{.Names}}' 2>/dev/null | grep -qx 'iperf3-fleet-caddy'; then
+if docker_cli ps -a --format '{{.Names}}' 2>/dev/null | grep -qx 'linkpilot-caddy'; then
   TLS=1
 fi
 COMPOSE_ARGS=""
@@ -811,7 +779,7 @@ fi
 # 等待面板就绪
 # ---------------------------------------------------------------------------
 step "等待面板就绪"
-CID="$(compose ps -q iperf3-fleet 2>/dev/null | head -n1)"
+CID="$(compose ps -q linkpilot 2>/dev/null | head -n1)"
 HEALTHY=0
 _i=0
 _t0="$(date +%s 2>/dev/null || echo 0)"
@@ -837,7 +805,7 @@ done
 if [ "$HEALTHY" != "1" ]; then
   warn "面板健康检查未通过，下面是容器日志："
   # shellcheck disable=SC2086
-  compose $COMPOSE_ARGS logs --tail 30 iperf3-fleet 2>/dev/null | sed 's/^/      /'
+  compose $COMPOSE_ARGS logs --tail 30 linkpilot 2>/dev/null | sed 's/^/      /'
   die "部署未成功。常见原因：端口 $PANEL_PORT 被占用（改 .env 后重跑）、磁盘空间不足、拉取镜像超时"
 fi
 printf '  %s▸%s 等待面板就绪 ... %s已就绪%s %s(%ss)%s\n' "$C_CYAN" "$C_RESET" \
@@ -847,8 +815,8 @@ printf '  %s▸%s 等待面板就绪 ... %s已就绪%s %s(%ss)%s\n' "$C_CYAN" "$
 BANNER=""
 _i=0
 while [ "$_i" -lt 15 ]; do
-  BANNER="$(compose $COMPOSE_ARGS logs --tail 40 iperf3-fleet 2>/dev/null \
-    | sed -n '/面板已部署成功/,/^=\+$/p' | sed 's/^iperf3-fleet[^|]*| *//')"
+  BANNER="$(compose $COMPOSE_ARGS logs --tail 40 linkpilot 2>/dev/null \
+    | sed -n '/面板已部署成功/,/^=\+$/p' | sed 's/^linkpilot[^|]*| *//')"
   printf '%s' "$BANNER" | grep -q "面板已部署成功" && break
   _i=$((_i + 1))
   sleep 2
@@ -882,7 +850,7 @@ if [ -n "${PANEL_PW:-}" ] && [ "$FRESH_INSTALL" = "1" ]; then
   printf '  %s登录密码%s  %s%s%s  %s（仅本次显示，请立即保存）%s\n' "$C_BOLD" "$C_RESET" \
     "$C_BOLD$C_YELLOW" "$PANEL_PW" "$C_RESET" "$C_DIM" "$C_RESET"
 elif [ "$FRESH_INSTALL" = "1" ]; then
-  printf '  %s登录密码%s  %s未从容器日志中取到，请执行：docker compose logs iperf3-fleet | grep 密码%s\n' \
+  printf '  %s登录密码%s  %s未从容器日志中取到，请执行：docker compose logs linkpilot | grep 密码%s\n' \
     "$C_BOLD" "$C_RESET" "$C_DIM" "$C_RESET"
 else
   printf '  %s登录密码%s  %s沿用已有账号（忘记密码：删除 data/auth.json 后重启容器会重新生成）%s\n' \
@@ -898,7 +866,7 @@ printf '\n'
 printf '  %s维护命令%s\n' "$C_BOLD" "$C_RESET"
 printf '    %s升级%s  重跑本脚本即可（自动检查更新，有新版本会自己更新并重建）：\n' "$C_DIM" "$C_RESET"
 printf '          curl -fsSL https://raw.githubusercontent.com/se-tang/%s/main/install.sh | bash\n' "$REPO_SLUG"
-printf '    %s日志%s  cd %s && docker compose %slogs -f --tail 100 iperf3-fleet\n' \
+printf '    %s日志%s  cd %s && docker compose %slogs -f --tail 100 linkpilot\n' \
   "$C_DIM" "$C_RESET" "$INSTALL_DIR" "$COMPOSE_ARGS"
 printf '    %s卸载%s  cd %s && docker compose %sdown && rm -rf data .env\n' \
   "$C_DIM" "$C_RESET" "$INSTALL_DIR" "$COMPOSE_ARGS"

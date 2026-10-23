@@ -1,5 +1,5 @@
 #!/bin/bash
-# iperf3-fleet agent 一键安装脚本（由面板下发）
+# linkpilot agent 一键安装脚本（由面板下发）
 # 用法: curl -fsSL http://面板地址/agent/install.sh | bash -s -- http://面板地址 接入令牌 签名密钥
 #       （机器上只有 wget 时：wget -qO- http://面板地址/agent/install.sh | bash -s -- http://面板地址 接入令牌 签名密钥）
 set -e
@@ -112,15 +112,15 @@ for _tool in curl openssl; do
   fi
 done
 
-mkdir -p /usr/local/lib/iperf3-fleet /etc/iperf3-fleet /var/lib/iperf3-fleet
+mkdir -p /usr/local/lib/linkpilot /etc/linkpilot /var/lib/linkpilot
 
-cat > /usr/local/lib/iperf3-fleet/agent.sh << 'AGENT_EOF'
+cat > /usr/local/lib/linkpilot/agent.sh << 'AGENT_EOF'
 #!/bin/bash
-# iperf3-fleet agent 主循环：心跳领取任务 → 验签 → 执行 → 流式回传输出
-CONF=/etc/iperf3-fleet/agent.conf
+# linkpilot agent 主循环：心跳领取任务 → 验签 → 执行 → 流式回传输出
+CONF=/etc/linkpilot/agent.conf
 [ -f "$CONF" ] || exit 1
 . "$CONF"
-SPOOL=/var/lib/iperf3-fleet
+SPOOL=/var/lib/linkpilot
 mkdir -p "$SPOOL" 2>/dev/null
 
 # 重新接入（令牌变了）后必须清掉任务编号水位线：面板侧该机器的记录已重建，
@@ -226,29 +226,29 @@ while true; do
   send_output "$job_id" "$SPOOL/done" 1 "$exit_code"
 done
 AGENT_EOF
-chmod 700 /usr/local/lib/iperf3-fleet/agent.sh
+chmod 700 /usr/local/lib/linkpilot/agent.sh
 printf '  %s▸%s 写入 Agent 程序 ... %s完成%s\n' "$CYN" "$R" "$GRN" "$R"
 
-cat > /etc/iperf3-fleet/agent.conf << CONF_EOF
+cat > /etc/linkpilot/agent.conf << CONF_EOF
 PANEL_URL='$PANEL_URL'
 TOKEN='$TOKEN'
 SIGN_KEY='$SIGN_KEY'
 CONF_EOF
-chmod 600 /etc/iperf3-fleet/agent.conf
+chmod 600 /etc/linkpilot/agent.conf
 printf '  %s▸%s 写入接入凭据 ... %s完成%s %s(仅 root 可读)%s\n' "$CYN" "$R" "$GRN" "$R" "$D" "$R"
 
 # ---- 常驻方式：systemd 优先，无 systemd 时退回 nohup + cron @reboot ----
 AGENT_MODE=""
 dot; printf '注册为常驻服务 ... '
 if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
-  cat > /etc/systemd/system/iperf3-fleet-agent.service << 'UNIT_EOF'
+  cat > /etc/systemd/system/linkpilot-agent.service << 'UNIT_EOF'
 [Unit]
-Description=iperf3-fleet agent
+Description=linkpilot agent
 After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=/bin/bash /usr/local/lib/iperf3-fleet/agent.sh
+ExecStart=/bin/bash /usr/local/lib/linkpilot/agent.sh
 Restart=always
 RestartSec=5
 
@@ -256,24 +256,24 @@ RestartSec=5
 WantedBy=multi-user.target
 UNIT_EOF
   systemctl daemon-reload
-  systemctl enable iperf3-fleet-agent >/dev/null 2>&1
+  systemctl enable linkpilot-agent >/dev/null 2>&1
   # 必须用 restart：重复安装时 enable --now 不会重启已运行的服务，
   # 会导致新令牌/签名密钥不生效、Agent 一直离线
-  systemctl restart iperf3-fleet-agent
-  if systemctl is-active --quiet iperf3-fleet-agent; then
+  systemctl restart linkpilot-agent
+  if systemctl is-active --quiet linkpilot-agent; then
     AGENT_MODE="systemd"
-    printf '%s完成%s %s(systemd: iperf3-fleet-agent)%s\n' "$GRN" "$R" "$D" "$R"
+    printf '%s完成%s %s(systemd: linkpilot-agent)%s\n' "$GRN" "$R" "$D" "$R"
   else
     printf '%s失败%s\n' "$RED$B" "$R"
-    note '查看原因：journalctl -u iperf3-fleet-agent -n 20'
+    note '查看原因：journalctl -u linkpilot-agent -n 20'
     fail "Agent 未能启动"
     exit 1
   fi
 else
-  pkill -f "iperf3-fleet/agent.sh" 2>/dev/null || true
-  (setsid nohup bash /usr/local/lib/iperf3-fleet/agent.sh >> /var/lib/iperf3-fleet/agent.log 2>&1 &)
-  (crontab -l 2>/dev/null | grep -v "iperf3-fleet/agent.sh"
-   echo "@reboot bash /usr/local/lib/iperf3-fleet/agent.sh >> /var/lib/iperf3-fleet/agent.log 2>&1") | crontab - 2>/dev/null || true
+  pkill -f "linkpilot/agent.sh" 2>/dev/null || true
+  (setsid nohup bash /usr/local/lib/linkpilot/agent.sh >> /var/lib/linkpilot/agent.log 2>&1 &)
+  (crontab -l 2>/dev/null | grep -v "linkpilot/agent.sh"
+   echo "@reboot bash /usr/local/lib/linkpilot/agent.sh >> /var/lib/linkpilot/agent.log 2>&1") | crontab - 2>/dev/null || true
   AGENT_MODE="nohup"
   printf '%s完成%s %s(未检测到 systemd：nohup + cron @reboot)%s\n' "$GRN" "$R" "$D" "$R"
 fi
@@ -290,7 +290,7 @@ else
   note 'Agent 无法上线。请检查：'
   note '  1) 面板机的防火墙 / 云安全组是否放行了该端口（含出方向的回包）'
   note '  2) 面板地址是否可从公网访问（NAT / 反代场景要用对外那个地址）'
-  note "  3) 放行后重试：systemctl restart iperf3-fleet-agent"
+  note "  3) 放行后重试：systemctl restart linkpilot-agent"
   rule
   exit 1
 fi
@@ -307,6 +307,6 @@ printf '  %s面板%s   %s\n' "$D" "$R" "$PANEL_URL"
 printf '  %s守护%s   %s\n' "$D" "$R" "$([ "$AGENT_MODE" = "systemd" ] && echo 'systemd（开机自启，异常自动重启）' || echo 'nohup + cron @reboot')"
 printf '\n'
 printf '  %s下一步%s 回到面板刷新，机器应显示「在线」；随后即可把它选进测试或定时任务。\n' "$B" "$R"
-printf '  %s排障%s   机器本地日志 %s/var/lib/iperf3-fleet/agent.log%s\n' "$B" "$R" "$D" "$R"
+printf '  %s排障%s   机器本地日志 %s/var/lib/linkpilot/agent.log%s\n' "$B" "$R" "$D" "$R"
 rule
 printf '\n'

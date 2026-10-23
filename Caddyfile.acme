@@ -5,7 +5,7 @@
 # 若这里写 {http.request.remote.host}，前置 CDN 时会把「CDN 边缘 IP」当成机器 IP，
 # 表现为面板里机器地址每几秒变一次、测试报端口不可达。
 {$PANEL_DOMAIN} {
-	reverse_proxy iperf3-fleet:8000 {
+	reverse_proxy linkpilot:8000 {
 		header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}
 	}
 }

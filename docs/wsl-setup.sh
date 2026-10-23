@@ -148,7 +148,7 @@ if command -v docker >/dev/null 2>&1; then
 fi
 
 # Docker Hub 在国内直连不通（registry-1.docker.io 超时），必须配加速站，
-# 否则 iperf3-fleet 拉 python:3.12-slim / caddy 会失败。可用性已实测：
+# 否则 linkpilot 拉 python:3.12-slim / caddy 会失败。可用性已实测：
 #   docker.m.daocloud.io / docker.1ms.run / docker.1panel.live  → 通
 #   dockerproxy.net / hub.rat.dev / 中科大 / 腾讯云（仅内网）   → 不通
 if command -v docker >/dev/null 2>&1; then
