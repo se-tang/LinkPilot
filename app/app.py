@@ -19,7 +19,7 @@ from . import db, quality, runner, scheduler
 
 # 版本号：这是唯一权威（面板页面、部署横幅、install.sh 都从/沿用它取）。
 # 还在测试阶段，因此用 0.x 版本号。
-APP_VERSION = '0.7.8'
+APP_VERSION = '0.7.9'
 
 app = Flask(__name__)
 app.json.ensure_ascii = False
@@ -435,8 +435,13 @@ def api_run_detail(rid):
     items = db.get_run_items(rid)
     for it in items:
         it['metrics_obj'] = json.loads(it['metrics']) if it['metrics'] else None
-    # 报告文本统一脱敏（覆盖历史报告）
-    run['report'] = quality.mask_report_text(run['report'])
+    # 按当前简洁格式重新生成，历史记录也不必重新测试。
+    run['report'] = quality.build_report(run, {
+        'name': run.get('target_name') or '—',
+        'host': run.get('target_host') or '',
+        'region': run.get('target_region') or '',
+        'bandwidth': run.get('target_bandwidth') or '',
+    }, items)
     log_data = runner.get_log_data(rid)
     return jsonify({
         'run': run,
@@ -469,8 +474,15 @@ def api_run_report(rid):
     run = db.get_run(rid)
     if not run:
         return jsonify({'error': '测试记录不存在'}), 404
+    items = db.get_run_items(rid)
+    report = quality.build_report(run, {
+        'name': run.get('target_name') or '—',
+        'host': run.get('target_host') or '',
+        'region': run.get('target_region') or '',
+        'bandwidth': run.get('target_bandwidth') or '',
+    }, items)
     return Response(
-        quality.mask_report_text(run['report'] or ''),
+        report,
         mimetype='text/markdown; charset=utf-8',
         headers={'Content-Disposition': f'attachment; filename=iperf3-report-{rid}.md'})
 

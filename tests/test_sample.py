@@ -1514,6 +1514,12 @@ def test_run_list_returns_summary_only():
     resp = c.get('/api/runs')
     assert resp.status_code == 200
     assert len(resp.get_data()) < 50000, len(resp.get_data())
+    detail = c.get(f'/api/runs/{rid}').get_json()
+    assert detail['run']['report'].startswith('# LinkPilot 测试结果'), detail['run']['report'][:80]
+    assert '诊断详情' not in detail['run']['report'] and '原始数据' not in detail['run']['report']
+    report_resp = c.get(f'/api/runs/{rid}/report')
+    assert report_resp.status_code == 200
+    assert '# LinkPilot 测试结果' in report_resp.get_data(as_text=True)
     print('测试记录列表摘要接口体积 OK')
 
 
