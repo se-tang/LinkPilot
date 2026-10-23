@@ -32,10 +32,20 @@ APP_NAME="LinkPilot"
 REPO_SLUG="LinkPilot"
 # 当前版本：与 app/app.py 的 APP_VERSION 保持一致（app.py 是唯一权威）。
 # 升级时脚本会用「更新后的代码里」的版本号自我重跑，所以这里的值只对「全新安装」生效。
-APP_VERSION="0.5.0"
+APP_VERSION="0.5.1"
 REPO_URL="${IPERF3_FLEET_REPO_URL:-https://github.com/se-tang/LinkPilot.git}"
 BRANCH="${IPERF3_FLEET_BRANCH:-main}"
-INSTALL_DIR="${IPERF3_FLEET_DIR:-$HOME/LinkPilot}"
+LEGACY_UPGRADE=0
+if [ -n "${IPERF3_FLEET_DIR+x}" ]; then
+  INSTALL_DIR="$IPERF3_FLEET_DIR"
+elif [ -f "$HOME/iperf3-fleet/docker-compose.yml" ] && [ ! -f "$HOME/LinkPilot/data/auth.json" ]; then
+  # 旧部署优先原地升级：继续使用旧 compose 项目名和目录，避免同名容器冲突，
+  # 同时保留 .env、data、证书与 Caddy 数据卷。
+  INSTALL_DIR="$HOME/iperf3-fleet"
+  LEGACY_UPGRADE=1
+else
+  INSTALL_DIR="$HOME/LinkPilot"
+fi
 LOG_FILE="${IPERF3_FLEET_LOG:-/tmp/LinkPilot-install.log}"
 VERBOSE="${IPERF3_FLEET_VERBOSE:-0}"
 LOCAL_BACKUP="${IPERF3_FLEET_LOCAL_BACKUP:-}"
@@ -367,6 +377,9 @@ _rule '─'
 printf '  %s主机%s   %s%s%s (%s)\n' "$C_DIM" "$C_RESET" "$C_BOLD" "$(hostname 2>/dev/null || echo '-')" "$C_RESET" "$OS_PRETTY"
 printf '  %s架构%s   %s\n' "$C_DIM" "$C_RESET" "$ARCH"
 printf '  %s目录%s   %s\n' "$C_DIM" "$C_RESET" "$INSTALL_DIR"
+if [ "$LEGACY_UPGRADE" = "1" ]; then
+  printf '  %s升级%s   检测到旧版 iperf3-fleet，将原地迁移并保留数据\n' "$C_DIM" "$C_RESET"
+fi
 printf '  %s日志%s   %s%s（失败时自动回显末尾）%s\n' "$C_DIM" "$C_RESET" "$C_DIM" "$LOG_FILE" "$C_RESET"
 _rule '─'
 printf '\n'

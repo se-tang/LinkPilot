@@ -91,6 +91,8 @@ docker compose --profile tls up -d
 
 **重跑当初那条一键命令就行**——脚本会自己比较本地与远端：有更新就更新代码并重建镜像，没有就报告「已是最新」；数据、端口、机器接入关系全部保留，Agent 自动重连，登录密码不变。
 
+如果机器上还是旧项目 `iperf3-fleet`，脚本会自动识别 `~/iperf3-fleet` 并直接在原目录升级为 LinkPilot。它会保留 `.env`、`data/`、证书和 Caddy 数据卷，不会在 `~/LinkPilot` 另起同名容器。
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/se-tang/LinkPilot/main/install.sh | bash
 ```
