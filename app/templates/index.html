@@ -207,6 +207,7 @@ kbd{background:var(--code-bg);border:1px solid var(--border);border-radius:4px;p
   .run-group-main .badge{font-size:11px}
   .run-child td:first-child{padding-left:14px}
   #machinesCard thead,#schedulesCard thead,#runsCard thead{display:none}
+  #machinesCard .machines-table{min-width:0}
   #machinesCard table,#machinesCard tbody,
   #schedulesCard table,#schedulesCard tbody,
   #runsCard table,#runsCard tbody{display:block}
@@ -334,6 +335,16 @@ h3{font-size:13px;color:var(--text);margin:16px 0 8px}
 .chk{color:var(--text)}
 .tbl-wrap{overflow-x:auto;scrollbar-width:thin}
 table{font-size:13px}
+.machines-table{table-layout:fixed;width:100%;min-width:620px}
+.machines-table .col-machine{width:20%}
+.machines-table .col-address{width:27%}
+.machines-table .col-meta{width:25%}
+.machines-table .col-actions{width:28%}
+.machines-table th,.machines-table td{padding:9px 8px;vertical-align:top;text-align:left}
+.machines-table .machine-name,.machines-table .machine-address,
+.machines-table .machine-meta{overflow-wrap:anywhere}
+.machines-table .machine-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px}
+.machines-table .machine-actions button{width:100%;min-width:0}
 th{
   padding:10px 11px;background:rgba(123,108,246,.05);color:var(--muted);
   font-size:11px;font-weight:750;letter-spacing:0;
@@ -561,7 +572,13 @@ details{border-radius:10px;background:color-mix(in srgb,var(--card) 92%,var(--su
       <button data-action="openMachineForm">＋ 添加机器</button>
     </div>
     <div class="tbl-wrap">
-    <table>
+    <table class="machines-table">
+      <colgroup>
+        <col class="col-machine"/>
+        <col class="col-address"/>
+        <col class="col-meta"/>
+        <col class="col-actions"/>
+      </colgroup>
       <thead><tr><th>机器</th><th>角色 / 地址</th><th>标签</th><th>操作</th></tr></thead>
       <tbody id="machinesBody"></tbody>
     </table>
@@ -1013,13 +1030,13 @@ function renderMachines() {
   }
   tb.innerHTML = MACHINES.map(m => `
     <tr>
-      <td><span class="dot ${m.online ? 'on' : 'off'}"></span><b>${esc(m.name)}</b>
+      <td class="machine-name"><span class="dot ${m.online ? 'on' : 'off'}"></span><b>${esc(m.name)}</b>
         <div class="quiet">${m.active_job ? '执行中' : (m.online ? '在线' : '离线')}</div></td>
-      <td><span class="badge ${m.role}">${m.role === 'target' ? '目标' : '后端'}</span>
+      <td class="machine-address"><span class="badge ${m.role}">${m.role === 'target' ? '目标' : '后端'}</span>
         <div class="quiet">${addrCell(m)}</div></td>
-      <td>${esc(m.region) || '—'} · ${esc(m.bandwidth) || '—'}
+      <td class="machine-meta">${esc(m.region) || '—'} · ${esc(m.bandwidth) || '—'}
         <div class="quiet">${esc(m.hostname) || '—'}</div></td>
-      <td class="actions">
+      <td class="actions machine-actions">
         <button class="small" data-action="showAgentCmd" data-id="${m.id}">接入</button>
         <button class="small" data-action="discoverMachine" data-id="${m.id}" title="重新探测本机 IPv4 / IPv6 地址">探测</button>
         <button class="small" data-action="editMachine" data-id="${m.id}">编辑</button>

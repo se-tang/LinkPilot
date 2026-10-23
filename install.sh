@@ -32,7 +32,7 @@ APP_NAME="LinkPilot"
 REPO_SLUG="LinkPilot"
 # 当前版本：与 app/app.py 的 APP_VERSION 保持一致（app.py 是唯一权威）。
 # 升级时脚本会用「更新后的代码里」的版本号自我重跑，所以这里的值只对「全新安装」生效。
-APP_VERSION="0.7.5"
+APP_VERSION="0.7.6"
 REPO_URL="${LINKPILOT_REPO_URL:-https://github.com/se-tang/LinkPilot.git}"
 BRANCH="${LINKPILOT_BRANCH:-main}"
 TARGET_HOME="$(getent passwd "$(id -u)" 2>/dev/null | cut -d: -f6)"

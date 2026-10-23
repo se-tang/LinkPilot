@@ -1450,7 +1450,8 @@ def test_dashboard_interactions_present():
                 'chart-control-label', '<th>上行</th><th>下行</th>',
                 'run-form', 'run-section-label', 'run-submit',
                 '<th>上行 均/低/高</th><th>下行 均/低/高</th>',
-                'ratingText'):
+                'ratingText', 'machines-table', 'col-machine', 'machine-actions',
+                'table-layout:fixed'):
         assert key in html, f'缺少面板交互：{key}'
     assert "confirm('确定删除该测试记录？')" not in html, '测试记录删除不应使用原生确认框'
     assert 'data-pop="confirm"' in html, 'Popconfirm 缺少确认按钮'
