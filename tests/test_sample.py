@@ -1451,7 +1451,7 @@ def test_dashboard_interactions_present():
                 'run-form', 'run-section-label', 'run-submit',
                 '<th>上行 均/低/高</th><th>下行 均/低/高</th>',
                 'ratingText', 'machines-table', 'col-machine', 'machine-actions',
-                'table-layout:fixed'):
+                'table-layout:fixed', 'function fmtN(', 'fmtN(agg.avg, nd)'):
         assert key in html, f'缺少面板交互：{key}'
     assert "confirm('确定删除该测试记录？')" not in html, '测试记录删除不应使用原生确认框'
     assert 'data-pop="confirm"' in html, 'Popconfirm 缺少确认按钮'
@@ -1461,6 +1461,7 @@ def test_dashboard_interactions_present():
     assert 'showPopconfirm(anchor' in start_block, '开始测试应使用 Popconfirm'
     assert '上行 (sender)' not in html and '下行 (receiver)' not in html
     assert '最低 ${fmt' not in html, '跨轮汇总不应再用换行堆叠最低/最高说明'
+    assert 'fmt(agg.avg, nd)' not in html, '小数位参数不能被当作字符串后缀拼接'
     for fn_name, end_marker in (
         ('function saveSchedule(anchor)', 'function editSchedule'),
         ('function toggleSchedule(id, anchor)', 'function deleteSchedule'),

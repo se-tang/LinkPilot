@@ -900,6 +900,13 @@ function fmt(v, suffix) {
   return Number(v).toFixed(1).replace(/\.0$/, '') + (suffix || '');
 }
 
+function fmtN(v, digits = 1, suffix = '') {
+  if (v === null || v === undefined) return '—';
+  let text = Number(v).toFixed(digits);
+  if (text.includes('.')) text = text.replace(/0+$/, '').replace(/\.$/, '');
+  return text + (suffix || '');
+}
+
 function ratingClass(r) {
   const code = {'优秀': 'S', '良好': 'A', '一般': 'B', '较差': 'C',
                 '失败': 'F', '数据不足': '?'}[r] || r;
@@ -2314,9 +2321,9 @@ function renderScheduleComparison(d) {
         : (st.trend_pct < -3 ? `<span class="trend-down"><b>${fmt(st.trend_pct)}%</b></span>`
           : `<span class="trend-flat"><b>${fmt(st.trend_pct)}%</b></span>`));
     const tri = (agg, nd) => agg
-      ? `${fmt(agg.avg, nd)} / ${fmt(agg.min, nd)} / ${fmt(agg.max, nd)}`
+      ? `${fmtN(agg.avg, nd)} / ${fmtN(agg.min, nd)} / ${fmtN(agg.max, nd)}`
       : '—';
-    const avg = (agg, nd, suffix = '') => agg ? `${fmt(agg.avg, nd)}${suffix}` : '—';
+    const avg = (agg, nd, suffix = '') => agg ? fmtN(agg.avg, nd, suffix) : '—';
     const ratings = [st.best_rating, st.worst_rating].filter(Boolean);
     return `<tr>
       <td>${esc(st.name)}</td><td>${esc(st.region) || '—'}</td><td>${st.samples}</td>

@@ -19,7 +19,7 @@ from . import db, quality, runner, scheduler
 
 # 版本号：这是唯一权威（面板页面、部署横幅、install.sh 都从/沿用它取）。
 # 还在测试阶段，因此用 0.x 版本号。
-APP_VERSION = '0.7.6'
+APP_VERSION = '0.7.7'
 
 app = Flask(__name__)
 app.json.ensure_ascii = False
