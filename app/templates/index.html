@@ -460,6 +460,8 @@ details{border:0;border-radius:10px;background:var(--surface2)}
 .sched-backend-option:hover{background:rgba(123,108,246,.07)}
 .sched-lifetime-row{background:transparent;border:0;border-radius:0;padding:2px 0}
 .toast{background:#111015;border-radius:10px;padding:8px 14px;box-shadow:0 12px 34px rgba(0,0,0,.3)}
+.toast.error{background:var(--red);color:#fff}
+.toast.success{background:var(--green);color:#fff}
 .chart-toolbar{margin-bottom:10px}
 .chips{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:8px 0}
 .chart-control-label{color:var(--muted);font-size:12px;margin-right:2px}
@@ -1073,14 +1075,15 @@ async function api(path, opts = {}) {
   return data;
 }
 
-function toast(msg, ms = 3500) {
+function toast(msg, ms = 3500, type = '') {
   const t = document.createElement('div');
-  t.className = 'toast';
+  t.className = 'toast' + (type ? ` ${type}` : '');
   t.textContent = msg;
   document.body.appendChild(t);
   setTimeout(() => { t.style.opacity = '0'; }, Math.max(0, ms - 300));
   setTimeout(() => t.remove(), ms);
 }
+const errorToast = (msg, ms = 4200) => toast(msg, ms, 'error');
 
 /* 统计卡数字滚动（系统开启"减少动态效果"时直接落值） */
 function setStat(id, target) {
@@ -1454,7 +1457,7 @@ async function showAgentCmd(id) {
   try {
     await showAgentStep(m);
   } catch (e) {
-    alert('生成接入码失败: ' + e.message);
+    errorToast('生成接入码失败: ' + e.message);
     closeModal();
   }
 }
@@ -1485,21 +1488,25 @@ async function saveMachine() {
       await showAgentStep(m);
     }
   } catch (e) {
-    alert('保存失败: ' + e.message);
+    errorToast('保存失败: ' + e.message);
   }
 }
 
-async function regenToken() {
+function regenToken(anchor) {
   if (!agentMachine) return;
-  if (!confirm('重置令牌后，旧的接入命令立即失效，需要重新复制新命令。确定？')) return;
-  try {
-    await issueAgentCode(agentMachine);
-    $('agentCmd').textContent = buildAgentCmd();
-    $('agentWait').textContent = '⏳ 已生成新的单次接入码，旧接入码立即失效。';
-    toast('新接入码已生成');
-  } catch (e) {
-    alert(e.message);
-  }
+  const machine = agentMachine;
+  showPopconfirm(anchor, {
+    title: '生成新接入码？',
+    message: '旧接入码立即失效，重新执行新命令后 Agent 才会切换凭据。',
+    confirmText: '生成',
+    errorPrefix: '生成失败',
+    onConfirm: async () => {
+      await issueAgentCode(machine);
+      $('agentCmd').textContent = buildAgentCmd();
+      $('agentWait').textContent = '⏳ 已生成新的单次接入码，旧接入码立即失效。';
+      toast('新接入码已生成', 3500, 'success');
+    },
+  });
 }
 
 function deleteMachine(id, anchor) {
@@ -1528,7 +1535,7 @@ async function discoverMachine(id) {
     toast(`已向「${m.name}」派发地址探测，几秒后自动刷新`);
     setTimeout(() => loadMachines().catch(() => {}), 4000);
   } catch (e) {
-    alert('探测失败: ' + e.message);
+    errorToast('探测失败: ' + e.message);
   }
 }
 
@@ -1632,12 +1639,15 @@ function startRun(anchor) {
   const target_id = parseInt($('targetSelect').value, 10);
   const backend_ids = [...document.querySelectorAll('#backendList input[type=checkbox]:checked')].map(x => parseInt(x.value, 10));
   const ip_version = $('useIpv6').disabled ? 4 : ($('useIpv6').checked ? 6 : 4);
-  if (!target_id) return alert('请先添加一台角色为「目标」的机器并接入 Agent');
-  if (!backend_ids.length) return alert('请至少勾选一台后端机器');
+  if (!target_id) return errorToast('请先添加一台角色为「目标」的机器并接入 Agent');
+  if (!backend_ids.length) return errorToast('请至少勾选一台后端机器');
   // 参数校验（服务端还会再校验一次，这里只为了少跑一趟）
   const readNum = (id, lo, hi, label) => {
     const v = parseInt($(id).value, 10);
-    if (!Number.isFinite(v) || v < lo || v > hi) { alert(`${label} 需在 ${lo}–${hi} 之间`); return null; }
+    if (!Number.isFinite(v) || v < lo || v > hi) {
+      errorToast(`${label} 需在 ${lo}–${hi} 之间`);
+      return null;
+    }
     return v;
   };
   const streams = readNum('cfgStreams', 1, 32, '线程数');
@@ -1648,7 +1658,7 @@ function startRun(anchor) {
   const udp = $('cfgUdp').checked;
   const udp_bandwidth = ($('cfgUdpBw').value || '').trim().toUpperCase() || '100M';
   if (udp && !/^\d{1,5}(\.\d{1,3})?[KMG]$/.test(udp_bandwidth)) {
-    return alert('UDP 目标带宽必须带单位（示例：100M、1G、500K）');
+    return errorToast('UDP 目标带宽必须带单位（示例：100M、1G、500K）');
   }
   // 每台后端机的端口：没单独改过的用默认端口（不提交，后端按目标机端口落库）
   const advPorts = $('cfgAdvPorts').checked;
@@ -1659,7 +1669,7 @@ function startRun(anchor) {
       if (raw === undefined || raw === null || raw === '') continue;
       const p = parseInt(raw, 10);
       if (!Number.isFinite(p) || p < 1 || p > 65535) {
-        return alert(`机器端口需在 1–65535 之间（收到 ${raw}）`);
+        return errorToast(`机器端口需在 1–65535 之间（收到 ${raw}）`);
       }
       ports[id] = p;
     }
@@ -1990,7 +2000,7 @@ function renderRunDetail(d) {
 
 function copyReport() {
   const text = $('reportPre').textContent;
-  if (!text || text.startsWith('（')) return alert('报告还未生成');
+  if (!text || text.startsWith('（')) return errorToast('报告还未生成');
   copyText(text, '已复制 Markdown 报告');
 }
 
@@ -2069,15 +2079,21 @@ function downloadReport() {
   if (CURRENT_RUN) window.open(`/api/runs/${CURRENT_RUN}/report`);
 }
 
-async function stopCurrentRun() {
+function stopCurrentRun(anchor) {
   if (!CURRENT_RUN) return;
-  if (!confirm('确定停止当前测试？')) return;
-  try {
-    await api(`/api/runs/${CURRENT_RUN}/stop`, {method: 'POST'});
-    toast('停止指令已发送，正在收尾...');
-  } catch (e) {
-    alert(e.message);
-  }
+  const runId = CURRENT_RUN;
+  showPopconfirm(anchor, {
+    title: '停止当前测试？',
+    message: '已完成的单机结果会保留，未完成部分记为停止。',
+    confirmText: '停止',
+    danger: true,
+    busyText: '停止中…',
+    errorPrefix: '停止失败',
+    onConfirm: async () => {
+      await api(`/api/runs/${runId}/stop`, {method: 'POST'});
+      toast('停止指令已发送，正在收尾...');
+    },
+  });
 }
 
 let activePopconfirm = null;
@@ -2436,23 +2452,26 @@ function closeSchedModal() {
 
 function saveSchedule(anchor) {
   const interval = intervalSeconds();
-  if (!interval) return alert('请填写间隔时间（≥ 1）');
+  if (!interval) return errorToast('请填写间隔时间（≥ 1）');
   if (interval < 300 || interval > 30 * 86400) {
-    return alert('间隔需在 5 分钟 ~ 30 天之间（当前 ' + humanDuration(interval) + '）');
+    return errorToast('间隔需在 5 分钟 ~ 30 天之间（当前 ' + humanDuration(interval) + '）');
   }
   const lifetime = lifetimeSeconds();
-  if (lifetime === null) return alert('请填写有效的任务运行时长（≥ 1）');
+  if (lifetime === null) return errorToast('请填写有效的任务运行时长（≥ 1）');
   if (lifetime > 365 * 86400) {
-    return alert('任务运行时长最长 365 天（当前 ' + humanDuration(lifetime) + '）');
+    return errorToast('任务运行时长最长 365 天（当前 ' + humanDuration(lifetime) + '）');
   }
   const target_id = parseInt($('sTarget').value, 10);
-  if (!target_id) return alert('请先添加一台角色为「目标」的机器');
+  if (!target_id) return errorToast('请先添加一台角色为「目标」的机器');
   const backend_ids = [...$('sBackendList').querySelectorAll('input:checked')]
     .map(x => parseInt(x.value, 10));
-  if (!backend_ids.length) return alert('请至少勾选一台后端机器');
+  if (!backend_ids.length) return errorToast('请至少勾选一台后端机器');
   const readNum = (id, lo, hi, label) => {
     const v = parseInt($(id).value, 10);
-    if (!Number.isFinite(v) || v < lo || v > hi) { alert(`${label} 需在 ${lo}–${hi} 之间`); return null; }
+    if (!Number.isFinite(v) || v < lo || v > hi) {
+      errorToast(`${label} 需在 ${lo}–${hi} 之间`);
+      return null;
+    }
     return v;
   };
   const streams = readNum('sStreams', 1, 32, '线程数');
@@ -2463,7 +2482,7 @@ function saveSchedule(anchor) {
   const udp = $('sUdp').checked;
   const udp_bandwidth = ($('sUdpBw').value || '100M').trim().toUpperCase() || '100M';
   if (udp && !/^\d{1,5}(\.\d{1,3})?[KMG]$/.test(udp_bandwidth)) {
-    return alert('UDP 目标带宽必须带单位（示例：100M、1G、500K）');
+    return errorToast('UDP 目标带宽必须带单位（示例：100M、1G、500K）');
   }
   const ip_version = $('sIpv6').checked ? 6 : 4;
   const ports = {};
@@ -2660,7 +2679,7 @@ function buildSchedReportText(d) {
 }
 
 async function copySchedReport() {
-  if (!CURRENT_COMPARISON) return alert('对比数据还没有加载完成');
+  if (!CURRENT_COMPARISON) return errorToast('对比数据还没有加载完成');
   const btn = document.querySelector('[data-action="copySchedReport"]');
   const old = btn ? btn.textContent : '';
   if (btn) { btn.disabled = true; btn.textContent = '生成报告中…'; }
@@ -2681,14 +2700,14 @@ async function copySchedReport() {
     </div>`;
     await copyRichText(text, html, '长期对比报告已复制');
   } catch (e) {
-    alert('复制失败: ' + e.message);
+    errorToast('复制失败: ' + e.message);
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = old; }
   }
 }
 
 function downloadSchedReport() {
-  if (!CURRENT_COMPARISON) return alert('对比数据还没有加载完成');
+  if (!CURRENT_COMPARISON) return errorToast('对比数据还没有加载完成');
   const s = CURRENT_COMPARISON.schedule || {};
   const safe = String(s.name || '长期对比').replace(/[\\/:*?"<>|]/g, '_');
   const blob = new Blob([buildSchedReportText(CURRENT_COMPARISON)], {type: 'text/markdown;charset=utf-8'});
@@ -2744,7 +2763,7 @@ function comparisonTableHtml(d) {
 }
 
 function copySchedTable() {
-  if (!CURRENT_COMPARISON) return alert('对比数据还没有加载完成');
+  if (!CURRENT_COMPARISON) return errorToast('对比数据还没有加载完成');
   const d = CURRENT_COMPARISON;
   const note = `最近 ${d.view_rounds || d.rounds.length}/${d.total_rounds || d.rounds.length} 轮`;
   const html = `<div style="font-family:-apple-system,'Segoe UI','Microsoft YaHei',sans-serif;color:#302c26">
@@ -3143,7 +3162,7 @@ const ACTIONS = {
   editMachine: (d) => editMachine(d.id),
   deleteMachine: (d, el) => deleteMachine(d.id, el),
   discoverMachine: (d) => discoverMachine(d.id),
-  regenToken,
+  regenToken: (d, el) => regenToken(el),
   copyAgentCmd: () => copyText($('agentCmd').textContent, '已复制接入命令'),
   logout,
   startRun: (d, el) => startRun(el),
@@ -3156,7 +3175,7 @@ const ACTIONS = {
   toggleReportView,
   toggleTheme,
   downloadReport,
-  stopCurrentRun,
+  stopCurrentRun: (d, el) => stopCurrentRun(el),
   openScheduleForm: () => openScheduleForm(null),
   closeSchedModal,
   saveSchedule: (d, el) => saveSchedule(el),
@@ -3347,7 +3366,7 @@ async function init() {
       }
     }, 8000);
   } catch (e) {
-    if (e.message !== '未登录') alert('面板初始化失败: ' + e.message);
+    if (e.message !== '未登录') errorToast('面板初始化失败: ' + e.message);
   }
 }
 init();

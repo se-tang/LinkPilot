@@ -1,6 +1,7 @@
 """用样例数据验证解析/评价/报告逻辑。直接运行: python tests/test_sample.py"""
 import json
 import os
+import re
 import sys
 import tempfile
 import time
@@ -1612,7 +1613,14 @@ def test_dashboard_interactions_present():
                 'data-action="toggleSchedCard"'):
         assert key in html, f'缺少面板交互：{key}'
     assert "confirm('确定删除该测试记录？')" not in html, '测试记录删除不应使用原生确认框'
+    assert 'alert(' not in html and 'prompt(' not in html and \
+        not re.search(r'(?<!Pop)confirm\s*\(', html), \
+        '面板不应再使用浏览器原生 alert/confirm/prompt'
     assert 'data-pop="confirm"' in html, 'Popconfirm 缺少确认按钮'
+    regen_block = html.split('function regenToken(', 1)[1].split('function deleteMachine', 1)[0]
+    assert 'showPopconfirm(anchor' in regen_block, '新接入码应使用 Popconfirm'
+    stop_block = html.split('function stopCurrentRun(', 1)[1].split('let activePopconfirm', 1)[0]
+    assert 'showPopconfirm(anchor' in stop_block, '停止测试应使用 Popconfirm'
     start_block = html.split('function startRun(anchor)', 1)[1].split('/* ---------------- 测试记录', 1)[0]
     assert 'if (!confirm(' not in start_block and "confirm('" not in start_block, \
         '开始测试不应使用原生确认框'
