@@ -12,19 +12,19 @@ import threading
 import time
 from urllib.parse import urlsplit
 
-from flask import Flask, Response, jsonify, redirect, render_template, request, session
+from flask import Flask, Response, g, jsonify, redirect, render_template, request, session
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from . import db, quality, runner, scheduler
+from . import db, job_types, quality, runner, scheduler
 
 # 版本号：这是唯一权威（面板页面、部署横幅、install.sh 都从/沿用它取）。
 # 还在测试阶段，因此用 0.x 版本号。
-APP_VERSION = '0.7.12'
+APP_VERSION = '0.7.13'
 
 app = Flask(__name__)
 app.json.ensure_ascii = False
 app.secret_key = db.get_secret_key()
-app.permanent_session_lifetime = datetime.timedelta(days=30)
+app.permanent_session_lifetime = datetime.timedelta(days=7)
 
 # 安全配置：请求体上限 + 会话 Cookie 属性
 app.config['MAX_CONTENT_LENGTH'] = 4 * 1024 * 1024
@@ -33,6 +33,13 @@ app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 if os.environ.get('PANEL_COOKIE_SECURE') == '1':
     # 套了 HTTPS 反代时设置，Cookie 只经加密连接传输
     app.config['SESSION_COOKIE_SECURE'] = True
+app.config['SESSION_COOKIE_NAME'] = 'linkpilot_session'
+
+AGENT_INTERNAL_PORT = int(os.environ.get('PANEL_AGENT_INTERNAL_PORT', '8001'))
+PANEL_HTTPS = os.environ.get('PANEL_HTTPS') == '1'
+ALLOW_INSECURE_AGENT = os.environ.get('PANEL_ALLOW_INSECURE_AGENT') == '1'
+PROXY_SECRET = os.environ.get('PANEL_PROXY_SECRET', '')
+TRUST_LOCAL_PROXY = os.environ.get('PANEL_TRUST_LOCAL_PROXY') == '1'
 
 AGENT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'agent')
 
@@ -40,12 +47,10 @@ AGENT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'agent')
 _PUBLIC_PREFIXES = ('/agent/', '/api/agent/')
 _PUBLIC_PATHS = {'/login', '/api/login', '/api/health', '/favicon.ico'}
 
-# 登录防爆破：同一 IP 60 秒内失败 5 次 → 锁定 300 秒
+# 登录防爆破：同一 IP 60 秒内失败 5 次 → 锁定 300 秒（SQLite 持久化）
 _FAIL_WINDOW = 60.0
 _FAIL_MAX = 5
 _LOCK_SECONDS = 300
-_login_fails = {}  # ip -> {'fails': [时间戳], 'locked_until': 时间戳}
-_lf_lock = threading.Lock()
 
 
 # Cloudflare 官方回源网段（https://www.cloudflare.com/ips/，如官方调整请同步更新）
@@ -67,70 +72,82 @@ def _is_cloudflare_ip(ip):
     return any(a in n for n in _CF_NETWORKS)
 
 
+def _proxy_headers_trusted():
+    supplied = request.headers.get('X-LinkPilot-Proxy-Secret', '')
+    if PROXY_SECRET and secrets.compare_digest(str(supplied), str(PROXY_SECRET)):
+        return True
+    if not TRUST_LOCAL_PROXY:
+        return False
+    try:
+        if int(request.environ.get('SERVER_PORT', '0')) == AGENT_INTERNAL_PORT:
+            return False
+        remote = ipaddress.ip_address(request.remote_addr or '')
+    except ValueError:
+        return False
+    return remote.is_loopback or remote.is_private
+
+
 def _client_ip():
-    """Agent 真实来源 IP。XFF 由 Caddy 按部署模式写入，面板取 XFF 最后一项：
-    - 方式 A（域名直连 Caddy，无 CF）：XFF = 对端 IP = 真实客户端；
-    - 方式 B（CF 橙云前置）：Caddyfile.origin 用 header_up 把 XFF 覆盖为
-      CF-Connecting-IP = Agent 真实 IP，因此源站防火墙必须只放行 Cloudflare
-      回源网段，否则直连 Caddy 者可自带该头伪造 agent_ip；
-    - 面板直挂 CF（无 Caddy）：remote 属于 CF 网段时优先采信 CF-Connecting-IP；
-    - **Caddyfile.acme + CF 橙云**（配置混用）：Caddy 写进 XFF 的是「对端」=
-      Cloudflare 边缘 IP，会每几秒换一个，必须改回 CF-Connecting-IP，
-      否则机器地址会被记成会变的 CDN 地址（表现为地址乱跳、测试报端口不可达）；
-    - 公网直连（无反代）：一律用 remote_addr，防止伪造头伪造 agent_ip / 绕过限速。"""
+    """Return the client address only when the forwarding trust chain is proven.
+
+    Caddy injects a per-install proxy secret. X-Forwarded-* is ignored on direct
+    requests, so a client cannot forge agent_ip by supplying its own headers.
+    A direct Cloudflare request is the only non-proxy case where CF-Connecting-IP
+    is trusted, and only because the TCP peer itself is a Cloudflare edge.
+    """
     ra = request.remote_addr or ''
-    cf_header = request.headers.get('CF-Connecting-IP', '').strip()
-    if cf_header:
+    proxy_ok = _proxy_headers_trusted()
+    cf_header = ''
+    if proxy_ok or _is_cloudflare_ip(ra):
+        candidate = request.headers.get('CF-Connecting-IP', '').strip()
         try:
-            ipaddress.ip_address(cf_header)
+            cf_header = ipaddress.ip_address(candidate).compressed if candidate else ''
         except ValueError:
             cf_header = ''
-    ip = ra
-    try:
-        ra_ip = ipaddress.ip_address(ra)
-        behind_proxy = ra_ip.is_private or _is_cloudflare_ip(ra)
-    except ValueError:
-        behind_proxy = False
-    if behind_proxy:
-        if _is_cloudflare_ip(ra) and cf_header:
-            # 面板（或反代）直挂 CF：remote 就是 CF 边缘，CF-Connecting-IP 最可信
+    if _is_cloudflare_ip(ra) and cf_header:
+        return cf_header[:64]
+    if proxy_ok:
+        if cf_header:
             return cf_header[:64]
         xff = request.headers.get('X-Forwarded-For', '')
         if xff:
             last = xff.split(',')[-1].strip()
             try:
-                ipaddress.ip_address(last)
-                ip = last
+                return ipaddress.ip_address(last).compressed[:64]
             except ValueError:
                 pass
-        # 取到的是 Cloudflare 边缘地址 → 说明这一跳是 CF 回源，改用 CF 写入的真实客户端 IP
-        if cf_header and _is_cloudflare_ip(ip) and not _is_cloudflare_ip(cf_header):
-            ip = cf_header
     try:
-        ipaddress.ip_address(ip)
+        return ipaddress.ip_address(ra).compressed[:64]
     except ValueError:
-        ip = ra
-    return ip[:64]
+        return ra[:64]
 
 
 def _login_locked_seconds(ip):
-    with _lf_lock:
-        rec = _login_fails.get(ip)
-        if not rec:
-            return 0
-        remain = rec.get('locked_until', 0) - time.time()
-        return max(0, int(remain))
+    return db.auth_limited_seconds(f'login:{ip}')
 
 
 def _record_login_fail(ip):
-    now = time.time()
-    with _lf_lock:
-        rec = _login_fails.setdefault(ip, {'fails': [], 'locked_until': 0})
-        rec['fails'] = [t for t in rec['fails'] if now - t < _FAIL_WINDOW]
-        rec['fails'].append(now)
-        if len(rec['fails']) >= _FAIL_MAX:
-            rec['locked_until'] = now + _LOCK_SECONDS
-            rec['fails'] = []
+    return db.record_auth_failure(
+        f'login:{ip}', window=_FAIL_WINDOW, max_fails=_FAIL_MAX,
+        lock_seconds=_LOCK_SECONDS)
+
+
+def _auth_tag():
+    _, password_hash = db.get_auth()
+    return hashlib.sha256(password_hash.encode('utf-8')).hexdigest()[:24] if password_hash else ''
+
+
+def _session_user():
+    user = session.get('user')
+    if not user or not secrets.compare_digest(str(session.get('auth_tag') or ''), _auth_tag()):
+        return ''
+    return str(user)
+
+
+@app.before_request
+def init_request_security():
+    g.csp_nonce = secrets.token_urlsafe(18)
+    return None
 
 
 @app.after_request
@@ -138,10 +155,42 @@ def security_headers(resp):
     resp.headers['X-Content-Type-Options'] = 'nosniff'
     resp.headers['X-Frame-Options'] = 'DENY'
     resp.headers['Referrer-Policy'] = 'no-referrer'
-    # 页面与 API 一律禁止浏览器缓存：升级后旧页面/旧数据不会再被使用
+    resp.headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=()'
+    nonce = getattr(g, 'csp_nonce', '')
+    resp.headers['Content-Security-Policy'] = (
+        "default-src 'self'; "
+        f"script-src 'self' 'nonce-{nonce}'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; font-src 'self'; connect-src 'self'; "
+        "manifest-src 'self'; object-src 'none'; base-uri 'self'; "
+        "form-action 'self'; frame-ancestors 'none'"
+    )
+    forwarded_https = (_proxy_headers_trusted()
+                       and request.headers.get('X-Forwarded-Proto', '').lower() == 'https')
+    if PANEL_HTTPS or forwarded_https:
+        resp.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
     if resp.mimetype == 'text/html' or request.path.startswith('/api/'):
-        resp.headers['Cache-Control'] = 'no-cache'
+        resp.headers['Cache-Control'] = 'no-store'
     return resp
+
+
+def _on_agent_port():
+    try:
+        return int(request.environ.get('SERVER_PORT', '0')) == AGENT_INTERNAL_PORT
+    except (TypeError, ValueError):
+        return False
+
+
+def _is_agent_path(path):
+    return path.startswith('/api/agent/') or path.startswith('/agent/')
+
+
+@app.before_request
+def agent_port_guard():
+    """The public Agent listener can never be used to reach the management UI."""
+    if _on_agent_port() and request.path != '/api/health' and not _is_agent_path(request.path):
+        return jsonify({'error': 'not found'}), 404
+    return None
 
 
 @app.before_request
@@ -159,48 +208,50 @@ def csrf_guard():
     return None
 
 
-def _job_sig(sign_key, job_id, cmd_b64):
-    """任务签名：Agent 用接入时一次性下发的签名密钥验签后才执行，
-    防止中间人篡改心跳响应注入命令（签名密钥从不在网络中传输）。"""
+def _job_sig(sign_key, job_id, payload_b64):
+    """HMAC over the base64-encoded structured payload."""
     if not sign_key:
         return ''
     return hmac.new(sign_key.encode('utf-8'),
-                    f'{job_id}:{cmd_b64}'.encode('utf-8'),
+                    f'{job_id}:{payload_b64}'.encode('utf-8'),
                     hashlib.sha256).hexdigest()
 
 
 @app.before_request
 def auth_gate():
     p = request.path
-    if p in _PUBLIC_PATHS or p.startswith(_PUBLIC_PREFIXES):
+    if (p in _PUBLIC_PATHS or p in ('/api/agent/register',)
+            or p.startswith(_PUBLIC_PREFIXES) or p.startswith('/static/')):
         return None
-    if p == '/':
-        if not session.get('user'):
+    if not _session_user():
+        if p == '/':
             return redirect('/login')
-        return None
-    if p.startswith('/api/'):
-        if not session.get('user'):
+        if p.startswith('/api/'):
             return jsonify({'error': '未登录或登录已过期'}), 401
+        return redirect('/login')
     return None
 
 
 @app.route('/')
 def index():
-    return render_template('index.html', version=APP_VERSION)
+    agent_url = os.environ.get('PANEL_AGENT_URL', '').rstrip('/')
+    if not agent_url:
+        agent_url = request.url_root.rstrip('/')
+    return render_template(
+        'index.html', version=APP_VERSION, agent_url=agent_url,
+        allow_insecure_agent=ALLOW_INSECURE_AGENT, csp_nonce=g.csp_nonce)
 
 
 @app.route('/login')
 def login_page():
-    if session.get('user'):
+    if _session_user():
         return redirect('/')
-    return render_template('login.html', version=APP_VERSION)
+    return render_template('login.html', version=APP_VERSION, csp_nonce=g.csp_nonce)
 
 
 @app.post('/api/login')
 def api_login():
-    # 限速桶固定用 remote_addr：不采信可被伪造的转发头，
-    # 经反代时所有登录共享同一桶（单管理员场景可接受，宁紧勿松）
-    ip = request.remote_addr or '?'
+    ip = _client_ip() or '?'
     locked = _login_locked_seconds(ip)
     if locked:
         return jsonify({'error': f'失败次数过多，已锁定，请 {locked} 秒后再试'}), 429
@@ -212,8 +263,10 @@ def api_login():
     if not ok:
         _record_login_fail(ip)
         return jsonify({'error': '用户名或密码错误'}), 401
+    db.clear_auth_failures(f'login:{ip}')
     session.clear()
     session['user'] = user
+    session['auth_tag'] = _auth_tag()
     session.permanent = True
     return jsonify({'ok': True})
 
@@ -226,7 +279,7 @@ def api_logout():
 
 @app.get('/api/me')
 def api_me():
-    return jsonify({'user': session.get('user') or ''})
+    return jsonify({'user': _session_user()})
 
 
 @app.get('/api/health')
@@ -238,7 +291,7 @@ def api_health():
 
 @app.get('/api/machines')
 def api_machines():
-    return jsonify(db.get_machines())
+    return jsonify([db.public_machine(m) for m in db.get_machines()])
 
 
 @app.get('/api/machines/<int:mid>')
@@ -246,7 +299,7 @@ def api_machine_get(mid):
     m = db.get_machine(mid)
     if not m:
         return jsonify({'error': '机器不存在'}), 404
-    return jsonify(m)
+    return jsonify(db.public_machine(m))
 
 
 def _machine_fields(data):
@@ -279,7 +332,7 @@ def _machine_fields(data):
 def api_machine_create():
     data = request.get_json(force=True, silent=True) or {}
     fields = _machine_fields(data)
-    return jsonify(db.create_machine(fields))
+    return jsonify(db.public_machine(db.create_machine(fields)))
 
 
 @app.put('/api/machines/<int:mid>')
@@ -289,15 +342,22 @@ def api_machine_update(mid):
         return jsonify({'error': '机器不存在'}), 404
     data = request.get_json(force=True, silent=True) or {}
     fields = _machine_fields(data)
-    return jsonify(db.update_machine(mid, fields))
+    return jsonify(db.public_machine(db.update_machine(mid, fields)))
 
 
-@app.post('/api/machines/<int:mid>/regen-token')
-def api_machine_regen(mid):
+@app.post('/api/machines/<int:mid>/registration-code')
+def api_machine_registration_code(mid):
     m = db.get_machine(mid)
     if not m:
         return jsonify({'error': '机器不存在'}), 404
-    return jsonify(db.regen_token(mid))
+    code = db.create_registration_code(mid, ttl_seconds=600)
+    agent_url = os.environ.get('PANEL_AGENT_URL', '').rstrip('/') or request.url_root.rstrip('/')
+    return jsonify({
+        'machine_id': mid,
+        'code': code,
+        'agent_url': agent_url,
+        'expires_in': 600,
+    })
 
 
 @app.delete('/api/machines/<int:mid>')
@@ -305,11 +365,11 @@ def api_machine_delete(mid):
     m = db.get_machine(mid)
     if not m:
         return jsonify({'error': '机器不存在'}), 404
-    cmd_b64 = sig = ''
+    payload = sig = ''
     if m['last_seen'] and m['sign_key']:
-        cmd_b64 = base64.b64encode(_uninstall_cmd().encode('utf-8')).decode('ascii')
-        sig = _job_sig(m['sign_key'], 'tombstone-uninstall', cmd_b64)
-    db.delete_machine(mid, cmd_b64, sig)
+        payload = job_types.encode('uninstall')
+        sig = _job_sig(m['sign_key'], 'tombstone-uninstall', payload)
+    db.delete_machine(mid, payload, sig)
     return jsonify({'ok': True})
 
 
@@ -345,34 +405,86 @@ def agent_uninstall():
 
 # ---------------- Agent API（令牌认证） ----------------
 
+def _agent_registration_transport_ok():
+    if ALLOW_INSECURE_AGENT or PANEL_HTTPS:
+        return True
+    if (_proxy_headers_trusted()
+            and request.headers.get('X-Forwarded-Proto', '').lower() == 'https'):
+        return True
+    if (_is_cloudflare_ip(request.remote_addr or '')
+            and request.headers.get('X-Forwarded-Proto', '').lower() == 'https'):
+        return True
+    try:
+        return ipaddress.ip_address(request.remote_addr or '').is_loopback
+    except ValueError:
+        return False
+
+
+@app.post('/api/agent/register')
+def api_agent_register():
+    """Exchange a one-time registration code for the Agent protocol credentials."""
+    if not _agent_registration_transport_ok():
+        return jsonify({'error': 'Agent 注册要求 HTTPS；请启用 TLS 后重试'}), 403
+    ip = _client_ip() or '?'
+    locked = db.auth_limited_seconds(f'register:{ip}')
+    if locked:
+        return jsonify({'error': f'注册尝试过多，请 {locked} 秒后再试'}), 429
+    data = request.get_json(force=True, silent=True) or {}
+    code = str(data.get('code') or '').strip().upper()
+    m = db.consume_registration_code(code)
+    if not m:
+        db.record_auth_failure(
+            f'register:{ip}', window=600, max_fails=10, lock_seconds=600)
+        return jsonify({'error': '注册码无效、过期或已使用'}), 403
+    db.clear_auth_failures(f'register:{ip}')
+    return jsonify({
+        'machine_id': m['id'],
+        'token': m['token'],
+        'sign_key': m['sign_key'],
+        'agent_protocol': 2,
+    })
+
+
 def _agent_machine():
     return db.get_machine_by_token(request.headers.get('X-Agent-Token', ''))
-
-
-def _uninstall_cmd():
-    with open(os.path.join(AGENT_DIR, 'uninstall.sh'), encoding='utf-8') as f:
-        return f.read()
 
 
 @app.post('/api/agent/heartbeat')
 def agent_heartbeat():
     m = _agent_machine()
     if not m:
-        # 已删除机器的残留 Agent：返回一次性墓碑任务 = 已签名的卸载脚本，Agent 验签后执行
+        # 已删除机器的残留 Agent：下发结构化卸载任务。
         tomb = db.pop_tombstone(request.headers.get('X-Agent-Token', ''))
         if tomb:
-            body = ('status=ok\njob_id=tombstone-uninstall\ntimeout=60\n'
-                    f"cmd_b64={tomb['cmd_b64']}\nsig={tomb['sig']}\n")
+            payload_b64 = base64.b64encode(tomb['payload'].encode('utf-8')).decode('ascii')
+            body = ('status=ok\nprotocol=2\njob_id=tombstone-uninstall\ntimeout=60\n'
+                    f"payload_b64={payload_b64}\nsig={tomb['sig']}\n")
             return Response(body, mimetype='text/plain; charset=utf-8')
         return jsonify({'error': 'invalid token'}), 403
     m = db.touch_machine(m['id'], request.headers.get('X-Agent-Host', ''),
                          _client_ip())
+    if request.headers.get('X-Agent-Protocol') != '2':
+        try:
+            db.set_machine_probe(
+                m['id'], 'Agent 协议版本过旧；请重新生成接入码并重跑 Agent 安装脚本')
+        except Exception:
+            pass
+        return Response('status=upgrade_required\nprotocol=2\n',
+                        mimetype='text/plain; charset=utf-8')
     job = db.next_queued_job(m['id'])
-    lines = ['status=ok']
+    lines = ['status=ok', 'protocol=2']
     if job:
-        cmd_b64 = base64.b64encode(job['cmd'].encode('utf-8')).decode('ascii')
-        lines += [f"job_id={job['id']}", f"timeout={job['timeout']}", f'cmd_b64={cmd_b64}',
-                  f"sig={_job_sig(m['sign_key'], job['id'], cmd_b64)}"]
+        try:
+            params = json.loads(job['params'])
+            payload = job_types.encode(job['kind'], params)
+        except Exception:
+            db.fail_job(job['id'], '任务参数无效，已拒绝下发')
+            return Response('status=error\nprotocol=2\n',
+                            mimetype='text/plain; charset=utf-8')
+        payload_b64 = base64.b64encode(payload.encode('utf-8')).decode('ascii')
+        lines += [f"job_id={job['id']}", f"kind={job['kind']}",
+                  f"timeout={job['timeout']}", f'payload_b64={payload_b64}',
+                  f"sig={_job_sig(m['sign_key'], job['id'], payload_b64)}"]
     return Response('\n'.join(lines) + '\n', mimetype='text/plain; charset=utf-8')
 
 
@@ -387,6 +499,8 @@ def agent_output():
     job = db.get_job(jid) if jid else None
     if not job or job['machine_id'] != m['id']:
         return jsonify({'error': 'job not found'}), 404
+    if job['status'] != 'running':
+        return jsonify({'error': 'job already finished'}), 410
     text = request.form.get('text', '')
     if text:
         db.append_job_output(jid, text)
@@ -524,7 +638,13 @@ def api_schedules():
 
 def _schedule_payload(data, base=None):
     """先做参数校验（和手动测试同一套），再收敛定时任务自身的字段。"""
-    params = runner.normalize_params(data)
+    merged = dict(data)
+    if base:
+        for key in ('streams', 'duration', 'port', 'ping_count', 'udp',
+                    'udp_bandwidth', 'ports'):
+            if key not in merged and base.get(key) is not None:
+                merged[key] = base.get(key)
+    params = runner.normalize_params(merged)
     fields = scheduler.normalize_schedule(data, base=base)
     fields.update({k: params[k] for k in ('streams', 'duration', 'port', 'ping_count',
                                           'udp_bandwidth', 'ports')})
@@ -689,6 +809,12 @@ if __name__ == '__main__':
     runner.start_orphan_reclaimer()
     scheduler.start_scheduler()
     from waitress import serve
-    # clear_untrusted_proxy_headers=False：保留 X-Forwarded-For 交给 _client_ip()
-    # 按规则采信（仅反代/内网来源），否则经 Caddy 接入的 Agent 真实 IP 会被剥离
-    serve(app, host='0.0.0.0', port=8000, threads=8, clear_untrusted_proxy_headers=False)
+
+    def run_agent_listener():
+        serve(app, host='0.0.0.0', port=AGENT_INTERNAL_PORT, threads=4,
+              clear_untrusted_proxy_headers=False)
+
+    # 管理端口只由 Compose 绑定到回环地址；Agent 端口单独监听并限制路由。
+    threading.Thread(target=run_agent_listener, daemon=True).start()
+    serve(app, host='0.0.0.0', port=8000, threads=8,
+          clear_untrusted_proxy_headers=False)

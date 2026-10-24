@@ -19,7 +19,7 @@ import time
 import traceback
 
 from . import agent_jobs as aj
-from . import db, quality
+from . import db, job_types, quality
 
 # 测试参数默认值与上限（前端只做提示，这里才是准入门槛）
 DEFAULT_PARAMS = {'streams': 1, 'duration': 10, 'port': 5201,
@@ -172,7 +172,7 @@ _DISTRO_DAEMON_HINT = (
 
 
 def parse_daemon_report(out):
-    """解析 aj.script_check_daemon 的输出 → (发行版服务状态, {端口: 占用该端口的进程行})。
+    """解析 Agent check_daemon 的输出 → (发行版服务状态, {端口: 占用该端口的进程行})。
 
     状态取值 active（正在跑）/ enabled（没跑但开机自启）/ inactive（没跑也没自启）/
     absent（没有这个服务）/ unknown（体检任务本身没跑成）。
@@ -336,12 +336,12 @@ def start_run(target_id, backend_ids, ip_version=4, params=None,
     return run_id
 
 
-def _job(machine, cmd, timeout, log, stop_check):
+def _job(machine, kind, params, timeout, log, stop_check):
     """向机器派发一个任务并等待完成，流式转发输出，返回 (exit_code, 输出)。"""
     name = machine['name']
-    job_id = db.create_job(machine['id'], cmd, timeout)
-    first_line = cmd.strip().splitlines()[0] if cmd.strip() else ''
-    log(f'[{name}] 派发任务 #{job_id}: {first_line[:80]}')
+    job_id = db.create_job(machine['id'], kind, params, timeout)
+    command_preview = job_types.preview(kind, params)
+    log(f'[{name}] 派发任务 #{job_id}: {command_preview[:100]}')
     lb = LineBuffer(lambda line: log(f'[{name}] {line}'))
     offset = 0
     start = time.time()
@@ -362,7 +362,7 @@ def _job(machine, cmd, timeout, log, stop_check):
             raise RuntimeError(f'[{name}] agent 未领取任务（可能离线），请确认机器在线')
         if time.time() - start > timeout + 90:
             db.fail_job(job_id, '任务执行超时')
-            raise TimeoutError(f'[{name}] 任务执行超时({timeout}s): {first_line[:60]}')
+            raise TimeoutError(f'[{name}] 任务执行超时({timeout}s): {command_preview[:60]}')
         time.sleep(0.8)
 
 
@@ -418,7 +418,7 @@ def _worker(run_id, target, ip_version=4):
             f"{kind} | -P {cfg['streams']} -t {cfg['duration']} | "
             f"ping -c {cfg['ping_count']} ===")
         log('[目标] 通过 Agent 检查/安装 iperf3 与 ping ...')
-        code, out = _job(target, aj.SCRIPT_ENSURE, 600, log, stop_check)
+        code, out = _job(target, 'ensure_tools', {}, 600, log, stop_check)
         if code != 0:
             raise RuntimeError('目标机 iperf3/ping 安装失败: ' + (out or '').strip()[-300:])
 
@@ -431,7 +431,8 @@ def _worker(run_id, target, ip_version=4):
         # 面板杀不掉也起不来自己的 server），先问清楚，好把提示写进日志和报错里。
         # 体检只是提示性质，自己失败（超时等）不能拖累整轮测试。
         try:
-            code, dout = _job(target, aj.script_check_daemon(ports), 15, log, stop_check)
+            code, dout = _job(target, 'check_daemon', {'ports': ports},
+                              15, log, stop_check)
             daemon_state, busy_ports = (parse_daemon_report(dout) if code == 0
                                         else ('unknown', {}))
         except RunAborted:
@@ -449,7 +450,9 @@ def _worker(run_id, target, ip_version=4):
             f"（正常收尾会立即关闭，此值只兜底面板异常）")
         for p in ports:
             required = (p == tport)
-            code, out = _job(target, aj.script_start_server(p, ttl), 30, log, stop_check)
+            code, out = _job(
+                target, 'start_server',
+                {'port': p, 'ttl': ttl, 'bind': target_ip}, 30, log, stop_check)
             if code == 0:
                 started_ports.append(p)
                 # 立刻落库：面板万一在这之后崩溃/被重启，下次启动能按这个清单回收 server
@@ -517,7 +520,7 @@ def _worker(run_id, target, ip_version=4):
             log('=== 正在关闭目标机 iperf3 server（端口 '
                 + '、'.join(str(p) for p in started_ports) + '）===')
             try:
-                _job(target, aj.script_stop_server(started_ports), 15, log, None)
+                _job(target, 'stop_server', {'ports': started_ports}, 15, log, None)
             except Exception as e:
                 log(f'[目标] ⚠️ 关闭 iperf3 server 失败（{e}）；'
                     f'残留进程会在 {ttl} 秒存活上限到点后自动退出')
@@ -585,7 +588,7 @@ def _run_backend(lane, st, log, stop_check, target, it, idx, target_ip, proto='I
             raise RuntimeError('该机器 Agent 离线，无法执行测试')
 
         # 环境检查与其他机器并行，互不干扰
-        code, out = _job(m, aj.SCRIPT_ENSURE, 600, log, stop_check)
+        code, out = _job(m, 'ensure_tools', {}, 600, log, stop_check)
         if code != 0:
             raise RuntimeError('iperf3/ping 检查安装失败: ' + (out or '').strip()[-300:])
 
@@ -603,14 +606,18 @@ def _run_backend(lane, st, log, stop_check, target, it, idx, target_ip, proto='I
         lane_passed = True
         try:
             # 通道内先预检本机要用的端口；不通则尝试自动重启目标机该端口的 server
-            code, out = _job(m, aj.script_check_port(tq, my_port), 15, log, stop_check)
+            code, out = _job(m, 'check_port', {'host': tq, 'port': my_port},
+                             15, log, stop_check)
             if code != 0:
                 log(f"[{name}] {my_port} 端口不通，尝试重启目标机 iperf3 server ...")
-                code2, out2 = _job(target, aj.script_start_server(my_port, ttl), 30,
-                                   log, stop_check)
+                code2, out2 = _job(
+                    target, 'start_server',
+                    {'port': my_port, 'ttl': ttl, 'bind': target_ip},
+                    30, log, stop_check)
                 if code2 != 0:
                     raise RuntimeError('目标机 iperf3 server 启动失败: ' + (out2 or '').strip()[-200:])
-                code, out = _job(m, aj.script_check_port(tq, my_port), 15, log, stop_check)
+                code, out = _job(m, 'check_port', {'host': tq, 'port': my_port},
+                                 15, log, stop_check)
                 if code != 0:
                     hints = ''
                     if proto == 'IPv6':
@@ -626,7 +633,12 @@ def _run_backend(lane, st, log, stop_check, target, it, idx, target_ip, proto='I
             cmd_up = build_iperf_cmd(tq, my_cfg)
             db.update_item(iid, phase='上行测试')
             log(f'[{name}] $ {cmd_up}   （{proto}）')
-            code, up_raw = _job(m, cmd_up, cfg['duration'] + 60, log, stop_check)
+            code, up_raw = _job(
+                m, 'iperf_client',
+                {'host': tq, 'port': my_port, 'duration': cfg['duration'],
+                 'streams': cfg['streams'], 'udp': cfg['udp'],
+                 'udp_bandwidth': cfg['udp_bandwidth'], 'reverse': False},
+                cfg['duration'] + 60, log, stop_check)
             if code != 0:
                 raise RuntimeError('上行测试失败: ' + (up_raw or '').strip()[-200:])
             up_s, up_r = quality.parse_iperf(up_raw)
@@ -639,7 +651,12 @@ def _run_backend(lane, st, log, stop_check, target, it, idx, target_ip, proto='I
             cmd_down = build_iperf_cmd(tq, my_cfg, reverse=True)
             db.update_item(iid, phase='下行测试')
             log(f'[{name}] $ {cmd_down}   （{proto}）')
-            code, down_raw = _job(m, cmd_down, cfg['duration'] + 60, log, stop_check)
+            code, down_raw = _job(
+                m, 'iperf_client',
+                {'host': tq, 'port': my_port, 'duration': cfg['duration'],
+                 'streams': cfg['streams'], 'udp': cfg['udp'],
+                 'udp_bandwidth': cfg['udp_bandwidth'], 'reverse': True},
+                cfg['duration'] + 60, log, stop_check)
             if code != 0:
                 raise RuntimeError('下行测试失败: ' + (down_raw or '').strip()[-200:])
             down_s, down_r = quality.parse_iperf(down_raw)
@@ -655,7 +672,8 @@ def _run_backend(lane, st, log, stop_check, target, it, idx, target_ip, proto='I
         cmd_ping = f'ping -c {cfg["ping_count"]} -i 1 {shlex.quote(tq)}'
         db.update_item(iid, phase=f"ping {cfg['ping_count']}次（约{cfg['ping_count']}秒）")
         log(f"[{name}] $ {cmd_ping}  （约需 {cfg['ping_count']} 秒，与其它机器的 iperf3 并行）")
-        code, ping_raw = _job(m, cmd_ping, cfg['ping_count'] + 120, log, stop_check)
+        code, ping_raw = _job(m, 'ping', {'host': tq, 'count': cfg['ping_count']},
+                              cfg['ping_count'] + 120, log, stop_check)
         if 'packets transmitted' not in (ping_raw or ''):
             raise RuntimeError('ping 失败: ' + (ping_raw or '').strip()[-200:])
 
@@ -764,7 +782,7 @@ def clear_orphan_servers(force=False):
             db.mark_orphan_ports_cleared(rec['id'])
             continue
         try:
-            _job(m, aj.script_stop_server(ports), 15, lambda _s: None, None)
+            _job(m, 'stop_server', {'ports': ports}, 15, lambda _s: None, None)
         except Exception as e:
             _orphan_next[rec['id']] = time.time() + _ORPHAN_RETRY_SECONDS
             print(f'[回收] 机器「{m["name"]}」端口 {ports} 的残留 server 未回收：{e}', flush=True)
@@ -834,7 +852,7 @@ def discover_machine(mid, force=False):
         raise RuntimeError('机器不存在')
     if not db.machine_online(m):
         raise RuntimeError(f'机器「{m["name"]}」的 Agent 未上线，无法探测地址')
-    code, out = _job(m, aj.SCRIPT_REPORT_IPS, 20, lambda _s: None, None)
+    code, out = _job(m, 'report_ips', {}, 20, lambda _s: None, None)
     found = aj.parse_ip_report(out)
     if found:
         db.set_machine_ips(mid, found, force=force)

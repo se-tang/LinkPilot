@@ -7,14 +7,22 @@ services:
     container_name: linkpilot
     restart: unless-stopped
     ports:
-      # 对外端口在首次部署时随机生成并记录在 .env（PANEL_PORT=xxxx），升级/重启不变
-      # 启用 HTTPS 后建议在 .env 加 PANEL_BIND=127.0.0.1 关闭公网 HTTP 直连（Agent 走域名）
-      - "${PANEL_BIND:-0.0.0.0}:${PANEL_PORT:-8088}:8000"
+      # 管理面默认只绑回环，公网访问必须经 HTTPS 反代或 SSH 隧道。
+      - "${PANEL_BIND:-127.0.0.1}:${PANEL_PORT:-8088}:8000"
+      # Agent 通道独立监听；该端口只放行 /agent/ 与 /api/agent/。
+      - "${PANEL_AGENT_BIND:-0.0.0.0}:${PANEL_AGENT_PORT:-18080}:8001"
     environment:
       TZ: Asia/Shanghai
       DATA_DIR: /data
       # 横幅里显示的对外端口，与上面的端口映射保持一致
       PANEL_PORT: ${PANEL_PORT:-8088}
+      PANEL_AGENT_PORT: ${PANEL_AGENT_PORT:-18080}
+      PANEL_AGENT_INTERNAL_PORT: 8001
+      PANEL_AGENT_URL: ${PANEL_AGENT_URL:-}
+      PANEL_HTTPS: ${PANEL_HTTPS:-0}
+      PANEL_ALLOW_INSECURE_AGENT: ${PANEL_ALLOW_INSECURE_AGENT:-0}
+      PANEL_PROXY_SECRET: ${PANEL_PROXY_SECRET:-}
+      PANEL_TRUST_LOCAL_PROXY: ${PANEL_TRUST_LOCAL_PROXY:-0}
       # 启用 HTTPS（tls profile / 反向代理）后设为 1，Cookie 仅经加密连接传输
       PANEL_COOKIE_SECURE: ${PANEL_COOKIE_SECURE:-}
     volumes:
@@ -27,6 +35,8 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 512m
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
       interval: 30s
@@ -38,7 +48,7 @@ services:
   #   .env 追加 PANEL_DOMAIN=面板域名 与 PANEL_COOKIE_SECURE=1，然后
   #   docker compose --profile tls up -d
   caddy:
-    image: caddy:2-alpine
+    image: caddy:2.10.2-alpine
     container_name: linkpilot-caddy
     profiles: ["tls"]
     restart: unless-stopped
@@ -48,6 +58,7 @@ services:
       - "${CADDY_HTTPS:-443}:443"
     environment:
       PANEL_DOMAIN: ${PANEL_DOMAIN:-}
+      PANEL_PROXY_SECRET: ${PANEL_PROXY_SECRET:-}
     volumes:
       - type: bind
         source: ./Caddyfile.local

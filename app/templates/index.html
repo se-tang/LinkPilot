@@ -953,14 +953,14 @@ details{border:0;border-radius:10px;background:var(--surface2)}
     <div id="mStepAgent" class="hidden">
       <h3>接入 Agent：<span id="agentStepName" style="color:var(--text)"></span></h3>
       <div class="field">
-        <label>面板地址（Agent 需能访问，按需修改）</label>
+        <label>Agent 接入地址（需支持 HTTPS）</label>
         <input id="agentPanelUrl"/>
       </div>
       <p class="hint">在机器上以 root 执行：</p>
       <pre id="agentCmd"></pre>
       <div class="actions">
         <button data-action="copyAgentCmd">📋 复制命令</button>
-        <button data-action="regenToken" id="regenBtn">♻ 重置密钥</button>
+        <button data-action="regenToken" id="regenBtn">♻ 新接入码</button>
         <button class="primary hidden" data-action="closeModal" id="agentDoneBtn">✅ 已上线，完成</button>
         <button data-action="closeModal" id="agentSkipBtn">稍后接入</button>
       </div>
@@ -1040,13 +1040,14 @@ details{border:0;border-radius:10px;background:var(--surface2)}
   </div>
 </div>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 let MACHINES = [];
 let RUN_PORTS = {};          // 机器ID -> 本次测试单独指定的 iperf3 端口（未改过的机器不在此表）
 let CURRENT_RUN = null;
 let pollTimer = null;
 let agentTimer = null;
 let agentMachine = null;
+let agentAwaitingReconnect = false;
 let runFormInit = false;
 let EXPANDED_RUN_GROUPS = new Set();
 let EXPANDED_SCHED_CARDS = new Set();   // 手机端定时任务卡片默认收起，记住展开的id
@@ -1054,6 +1055,8 @@ let RUNS_FILTER = 'manual';  // 测试记录默认只看手动，定时任务记
 let ALL_RUNS = [];           // 全量测试记录缓存，供总览页「最近测试」使用
 // 数据指纹：后台轮询拿到相同数据时直接跳过重绘，避免与用户操作撞车造成卡顿
 let LAST_MACHINES_SIG = '', LAST_SCHEDULES_SIG = '', LAST_RUNS_SIG = '', LAST_CMP_SIG = '';
+const DEFAULT_AGENT_URL = {{ agent_url|tojson }};
+const ALLOW_INSECURE_AGENT = {{ 'true' if allow_insecure_agent else 'false' }};
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -1372,23 +1375,40 @@ function openMachineForm(m) {
 }
 
 function buildAgentCmd() {
-  if (!agentMachine) return '';
+  if (!agentMachine || !agentMachine.registration_code) return '';
   let url = $('agentPanelUrl').value.trim().replace(/\/+$/, '');
-  if (url && !/^https?:\/\//.test(url)) url = 'http://' + url;
+  if (url && !/^https?:\/\//.test(url)) {
+    url = (DEFAULT_AGENT_URL.startsWith('https://') ? 'https://' : 'http://') + url;
+  }
+  if (!/^https?:\/\/[^\s'"]+$/.test(url)) return 'Agent 接入地址格式无效';
+  if (url.startsWith('http://') && !ALLOW_INSECURE_AGENT) {
+    return '当前仅允许 HTTPS 接入；请先为面板配置域名和 TLS。';
+  }
+  const q = (s) => "'" + String(s).replace(/'/g, "'\\''") + "'";
   // 全新机器可能只装了 curl 或只装了 wget：两种下载器自适应，避免接入命令跑不起来
   const fetchCmd = `command -v curl >/dev/null 2>&1 && curl -fsSL ${url}/agent/install.sh || wget -qO- ${url}/agent/install.sh`;
-  return `( ${fetchCmd} ) | bash -s -- ${url} ${agentMachine.token} ${agentMachine.sign_key}`;
+  const env = url.startsWith('http://') ? 'LINKPILOT_INSECURE_HTTP=1 ' : '';
+  return `( ${fetchCmd} ) | ${env}bash -s -- ${q(url)} ${q(agentMachine.registration_code)}`;
 }
 
-function showAgentStep(m) {
-  agentMachine = m;
+async function issueAgentCode(m) {
+  const data = await api(`/api/machines/${m.id}/registration-code`, {method: 'POST'});
+  agentMachine = {...m, registration_code: data.code, agent_url: data.agent_url};
+  agentAwaitingReconnect = !!m.online;
+  $('agentPanelUrl').value = data.agent_url || DEFAULT_AGENT_URL;
+  return agentMachine;
+}
+
+async function showAgentStep(m) {
+  await issueAgentCode(m);
   $('agentStepName').textContent = m.name;
   $('mStepForm').classList.add('hidden');
   $('mStepAgent').classList.remove('hidden');
   $('agentDoneBtn').classList.add('hidden');
   $('regenBtn').classList.remove('hidden');
-  $('agentWait').textContent = '⏳ 等待 Agent 接入...（在机器上执行上方命令后约 3 秒上线）';
-  if (!$('agentPanelUrl').value.trim()) $('agentPanelUrl').value = location.origin;
+  $('agentWait').textContent = agentAwaitingReconnect
+    ? '⏳ 旧 Agent 仍在线；在机器上执行新命令后会自动切换凭据'
+    : '⏳ 等待 Agent 接入...（在机器上执行上方命令后约 3 秒上线）';
   $('agentCmd').textContent = buildAgentCmd();
   stopAgentPoll();
   agentTimer = setInterval(pollAgent, 2000);
@@ -1404,6 +1424,13 @@ async function pollAgent() {
   if (!agentMachine) return;
   let m;
   try { m = await api(`/api/machines/${agentMachine.id}?_=${Date.now()}`); } catch (e) { return; }
+  if (agentAwaitingReconnect) {
+    if (!m.online) {
+      agentAwaitingReconnect = false;
+      $('agentWait').textContent = '⏳ 旧 Agent 已断开，等待新凭据上线...';
+    }
+    return;
+  }
   if (m.online) {
     $('agentWait').innerHTML = `<span style="color:var(--green)">✅ Agent 已上线（${esc(m.agent_ip || '')} ${esc(m.hostname || '')}）</span>`;
     $('agentDoneBtn').classList.remove('hidden');
@@ -1418,19 +1445,25 @@ function stopAgentPollKeepMachine() {
 
 function editMachine(id) { openMachineForm(MACHINES.find(x => x.id === Number(id))); }
 
-function showAgentCmd(id) {
+async function showAgentCmd(id) {
   const m = MACHINES.find(x => x.id === Number(id));
   if (!m) return;
   $('mStepForm').classList.add('hidden');
   $('mStepAgent').classList.remove('hidden');
   $('modal').classList.remove('hidden');
-  showAgentStep(m);
+  try {
+    await showAgentStep(m);
+  } catch (e) {
+    alert('生成接入码失败: ' + e.message);
+    closeModal();
+  }
 }
 
 function closeModal() {
   $('modal').classList.add('hidden');
   stopAgentPoll();
   agentMachine = null;
+  agentAwaitingReconnect = false;
 }
 
 async function saveMachine() {
@@ -1449,7 +1482,7 @@ async function saveMachine() {
     } else {
       const m = await api('/api/machines', {method: 'POST', body: JSON.stringify(body)});
       await loadMachines();
-      showAgentStep(m);
+      await showAgentStep(m);
     }
   } catch (e) {
     alert('保存失败: ' + e.message);
@@ -1460,10 +1493,10 @@ async function regenToken() {
   if (!agentMachine) return;
   if (!confirm('重置令牌后，旧的接入命令立即失效，需要重新复制新命令。确定？')) return;
   try {
-    agentMachine = await api(`/api/machines/${agentMachine.id}/regen-token`, {method: 'POST'});
+    await issueAgentCode(agentMachine);
     $('agentCmd').textContent = buildAgentCmd();
-    $('agentWait').textContent = '⏳ 密钥已重置，请复制新命令在机器上重新执行。';
-    toast('令牌已重置');
+    $('agentWait').textContent = '⏳ 已生成新的单次接入码，旧接入码立即失效。';
+    toast('新接入码已生成');
   } catch (e) {
     alert(e.message);
   }

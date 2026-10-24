@@ -20,12 +20,16 @@
 curl -fsSL https://raw.githubusercontent.com/se-tang/LinkPilot/main/install.sh | bash
 ```
 
-脚本会自动安装缺失的 Git、Docker 和 Docker Compose，然后生成随机端口与初始登录密码。
+脚本会自动安装缺失的 Git、Docker 和 Docker Compose，生成独立的管理端口、Agent 端口与初始登录密码。
+
+- 管理面默认只绑定 `127.0.0.1`，需通过 SSH 隧道或 HTTPS 反向代理访问。
+- Agent 使用独立公网端口，且只开放注册、心跳和结果回传接口。
+- 远程接入默认要求 HTTPS；接入命令只包含一次性注册码，不包含长期密钥。
 
 ## 使用
 
 1. 添加目标机与后端机。
-2. 复制接入命令，在机器上以 root 执行。
+2. 复制一次性接入命令，在机器上以 root 执行；安装阶段完成后 Agent 以低权限用户运行。
 3. 选择目标机、勾选后端机并开始测试。
 4. 长期观察使用「定时任务」，完成后查看「汇总对比」。
 

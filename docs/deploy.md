@@ -8,7 +8,7 @@
 
 1. 自检系统与包管理器（Debian/Ubuntu、CentOS/RHEL/Rocky/Alma/Fedora、Alpine、openSUSE、Arch）；
 2. `curl`/`wget` + `ca-certificates` → `git` → **docker + docker compose v2**（官方安装脚本 → 发行版仓库 → compose 独立二进制逐级兜底，守护进程没起会自动拉起）；`git` 装不上时自动退回源码包下载；
-3. 克隆到 `~/LinkPilot` → 生成 `.env`（随机端口）→ `docker compose up -d --build` → 等健康检查通过后打印部署横幅（含初始登录密码）。
+3. 克隆到 `~/LinkPilot` → 生成 `.env`（管理端口 + Agent 端口）→ `docker compose up -d --build` → 等健康检查通过后打印部署信息。
 
 要点：
 
@@ -18,7 +18,7 @@
 - 国内装 Docker 慢/超时：命令改成 `... | DOCKER_MIRROR=Aliyun bash`；机器走代理：命令最前面加 `https_proxy=http://IP:端口`。
 - 环境变量：`LINKPILOT_DIR`（安装目录，默认 `~/LinkPilot`）、`LINKPILOT_REPO_URL`、`LINKPILOT_BRANCH`、`LINKPILOT_TLS=1`（同时启用 HTTPS 网关）、`LINKPILOT_VERBOSE=1`、`LINKPILOT_LOG`、`NO_COLOR=1`、`DOCKER_MIRROR`、`COMPOSE_MIRROR`、`LINKPILOT_TARBALL`。
 - 脚本需要 `bash`（Alpine 等默认 ash 的系统先 `apk add bash`）；机器上连 `curl` 都没有时先 `apt-get update && apt-get install -y curl`（或 `yum install -y curl` / `apk add curl`）。
-- 端口随机生成（记录在 `.env`，升级/重启不变），登录账号密码随机生成，均在部署横幅里显示一次；忘记密码删 `data/auth.json` 重启重新生成。
+- 管理端口和 Agent 端口随机生成并记录在 `.env`，升级/重启不变。管理面默认绑定 `127.0.0.1`；Agent 端口单独对外。登录密码只从 `data/.initial_password` 读取一次并由安装脚本展示，不再写入容器日志。
 - 面板容器默认只读文件系统 + 最小权限运行。
 
 想手动控制每一步：
@@ -79,17 +79,17 @@ docker compose --profile tls up -d
 
 > 若之前在未创建 `Caddyfile.local` 时启动过容器，Docker 会把它误建成一个**目录**（`ls -la` 显示为 `drwxr-xr-x`）。先 `rm -rf Caddyfile.local` 再重新执行上面的 `cp -T` 即可。
 
-确认 HTTPS 正常后，在 `.env` 追加 `PANEL_BIND=127.0.0.1` 并 `docker compose --profile tls up -d`，关闭公网 HTTP 直连（面板与 Agent 均走域名接入）。
+新安装默认已将管理面绑定到 `127.0.0.1`。配置域名后重跑安装脚本或 `docker compose --profile tls up -d`，面板与 Agent 均走 HTTPS 域名。
 
-> ⚠️ 改成 `PANEL_BIND=127.0.0.1` 后，端口不再对外监听，**之前用 `http://IP:端口` 接入的 Agent 会全部失联**：回面板用 `https://你的域名` 重新生成接入命令，在每台机器上重跑一次即可（重复接入会用新地址重启服务，机器令牌不变）。还没切域名接入前，先别急着加 `PANEL_BIND`。
+> 从旧版本升级时，Agent 协议已切换到结构化任务，**旧 Agent 必须重新生成一次性接入码并重跑安装命令**。这是协议迁移，不是重新添加机器；历史测试数据保留。
 
-方式 B 下 Agent 真实 IP 取自 CF-Connecting-IP，**源站防火墙/安全组务必只放行 Cloudflare 回源网段**（https://www.cloudflare.com/ips/），否则能直连 Caddy 的人可自带该头伪造 agent_ip。
+方式 B 只接受 Cloudflare 回源网段；其他来源由 Caddy 直接返回 403。面板还要求内部代理密钥，二者同时满足才采信转发地址。
 
 注意：登录限速按来源 IP 计，经反代部署时所有登录共享同一桶——他人 5 次失败会短暂锁住登录页（300 秒）。
 
 ## 升级
 
-**重跑当初那条一键命令就行**——脚本会自己比较本地与远端：有更新就更新代码并重建镜像，没有就报告「已是最新」；数据、端口、机器接入关系全部保留，Agent 自动重连，登录密码不变。
+**重跑当初那条一键命令就行**——脚本会自己比较本地与远端：有更新就更新代码并重建镜像，没有就报告「已是最新」；数据、管理端口、Agent 端口和登录密码保持不变。跨 Agent 协议版本升级时，需要回面板重新生成一次性接入码并重跑 Agent 安装命令。
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/se-tang/LinkPilot/main/install.sh | bash

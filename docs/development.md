@@ -68,6 +68,6 @@ git config core.hooksPath hooks
 | 改什么 | 怎么生效 |
 |:--|:--|
 | 面板（`app.py` / `db.py` / `runner.py` / `agent_jobs.py` / 模板） | 面板机 `git pull` 后重建镜像（见 [deploy.md](deploy.md#升级)），节点机无需任何操作 |
-| `app/agent/install.sh`（Agent 本体） | 必须到节点机重跑一次接入命令（面板会下发新脚本） |
+| `app/agent/install.sh`（Agent 本体） | 必须到节点机重跑一次接入命令；当前只接受 v2 结构化任务协议 |
 
 `app/agent/install.sh` 会下发到所有节点，**重复执行必须幂等**；下发给 Agent 的任务脚本（`agent_jobs.py`）会随心跳生效，不用重装 Agent。

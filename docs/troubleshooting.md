@@ -16,11 +16,11 @@ tail -20 /var/lib/linkpilot/agent.log
 | 面板日志告警「检测到发行版自带的 iperf3 常驻服务」，或测试报「目标机 iperf3 -s 启动失败（端口 5201）」且日志里有 `Address already in use` | 这台机器上有人**手工**装 iperf3 时选了「作为守护进程启动」，于是有个 systemd 服务一直占着 5201（命令行 `iperf3 --server`、`Restart=always`，面板既杀不掉也抢不到端口，还会被它拖累成启动失败）。处理：目标机执行 `systemctl disable --now iperf3` 后重试；或把面板里的「目标机端口」改成别的端口（如 5202）绕开。确认是谁占的：`ss -ltnp \| grep 5201`。用面板自动安装的机器不会出现这个问题（非交互安装取的是默认值「否」）。 |
 | 测试已经结束，目标机上 `ss -ltnp \| grep iperf3` 还能看到 `iperf3 -s` 在监听 | 正常情况下测试结束（含手动停止、出错中断）面板会立即关闭 server。仍能看到的多半是：面板容器在测试中被重启 / 目标机 Agent 掉线，导致关闭任务送不到。这类残留面板会在**重启后自动回收**（它按测试记录里存的「本轮起过的端口」精确清理，日志里会打印 `[回收] 已清理机器「X」上残留的 iperf3 server（端口 …）`），即使目标机当时离线，等它上线后也会补做；同时进程本身还有**存活上限**兜底（面板日志里写了 `server 存活上限 N 秒`，300–3600 秒）到点自动退出。要立刻收掉：`for f in /tmp/iperf3-server*.pid; do kill "$(cat "$f")"; rm -f "$f"; done`，或直接 `pkill -f "iperf3 -s -p NNNN"`（**别用不带 -p 的裸 `pkill -f 'iperf3 -s'`**，会杀掉机器上与本面板无关的 iperf3）。根治手段仍是安全组只放行后端机 IP，见 [usage.md](usage.md#端口与安全组)。 |
 | 机器显示**在线**，但测试地址旁有 ⚠️、或一直显示「无 IPv6」 | 面板下发的地址探测任务没被 Agent 执行完。机器列表的 ⚠️ 鼠标悬停会写明原因；面板日志 `grep 探测` 可见 `[探测] 机器 #N 地址: {...}`（成功）或 `未获取到全局地址`。 |
-| 机器上 `agent.log` 出现「**拒绝执行：任务 #N 为重放**」 | Agent 本地记录的任务编号水位比面板当前编号大：面板数据库被重置（重新部署 / 删过 `data`）后任务编号从 1 重新开始，Agent 会把之后所有任务当重放**静默拒绝**。当前版本的面板任务编号改为时间戳打底，**升级即自愈，无需重装任何 Agent**；重新执行一次接入命令也会重置水位。 |
+| 机器上 `agent.log` 出现「**拒绝执行：任务 #N 为重放**」 | Agent 本地任务编号水位高于面板当前编号，通常发生在面板数据目录被删除或回滚后。请回面板生成新的一次性接入码并重跑 Agent 安装命令；新 Agent 会同时更新协议版本、凭据和任务水位。 |
 | 测试任务全部「任务执行超时」，机器上却没有日志 | 同上，Agent 拒收了任务。 |
 | 机器上 `ip -6 addr show scope global` 只有 `fe80::` 或 `fc00::` / `fd00::` | 这台机器确实没有**全局可路由**的 IPv6（链路本地 / ULA 不能用于跨公网测试），面板显示「无 IPv6」是正确结果，不是探测故障。 |
 | 机器在线但地址一直停在「探测中…」 | 心跳正常只说明连通；地址要靠探测任务补齐，点「探测地址」手动重试即可。 |
-| Agent 一直不上线 | 机器上 `systemctl status linkpilot-agent` 与 `agent.log`：`curl_exit=60` 多为证书问题（用 IP 接入却配了 https 域名），`curl_exit=28` 是连不上面板（防火墙 / 安全组 / DNS），`curl_exit=22` 是令牌被面板拒绝（机器被删过，需重新接入）。 |
+| Agent 一直不上线 | 机器上 `systemctl status linkpilot-agent` 与 `agent.log`：`curl_exit=60` 多为证书问题，`curl_exit=28` 是连不上面板（防火墙 / 安全组 / DNS），`curl_exit=22` 是令牌被面板拒绝。若面板刚跨协议升级，请到机器管理重新生成一次性接入码并重跑安装命令。 |
 | 面板打不开 | `docker compose ps` 看容器状态与健康检查；`docker compose logs --tail 50 linkpilot`。 |
 | Caddy 证书签不下来 | 域名 A 记录是否指向本机、安全组是否放行 80/443、80 是否被别的服务占用；`docker compose --profile tls logs --tail 30 caddy`。 |
 | 面板容器反复重启 | 常见是端口冲突（改 `.env` 的 `PANEL_PORT` 后 `docker compose up -d`）或磁盘空间不足。 |

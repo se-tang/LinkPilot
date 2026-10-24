@@ -159,11 +159,13 @@ def test_report():
 
 
 def test_xff_and_limiter():
-    """CF-Connecting-IP 优先（CF 前置场景）+ XFF 取尾项 + 伪造不可绕过限速。"""
+    """Only a proven proxy secret allows forwarding headers to affect client IP."""
+    import app.app as app_mod
     from app import db
     from app.app import app as flask_app
     db.init_db()
     c = flask_app.test_client()
+    db.clear_auth_failures('login:127.0.0.1')
 
     # 1) CF 直连（remote 属于 CF 网段）：CF-Connecting-IP 最可信
     m = db.create_machine({'name': 'xff', 'role': 'backend', 'region': '', 'bandwidth': ''})
@@ -174,38 +176,50 @@ def test_xff_and_limiter():
            environ_base={'REMOTE_ADDR': '172.70.0.5'})
     assert db.get_machine(m['id'])['agent_ip'] == '203.0.113.7'
 
-    # 2) Caddy 反代（remote 为内网、非 CF 网段）：自带/走私的 CF 头必须被忽略，
-    #    以 Caddy 覆盖后的 XFF 为准
+    # 2) 私网来源但没有代理密钥：客户端自带的转发头一律忽略
     m1b = db.create_machine({'name': 'xff-caddy', 'role': 'backend', 'region': '', 'bandwidth': ''})
     c.post('/api/agent/heartbeat',
            headers={'X-Agent-Token': m1b['token'],
                     'CF-Connecting-IP': '9.9.9.9',
                     'X-Forwarded-For': '203.0.113.7'},
            environ_base={'REMOTE_ADDR': '127.0.0.1'})
-    assert db.get_machine(m1b['id'])['agent_ip'] == '203.0.113.7'
+    assert db.get_machine(m1b['id'])['agent_ip'] == '127.0.0.1'
 
-    # 2b) 方式 B 实际链路（CF 橙云 → Caddy → 面板）：Caddyfile.origin 用
-    #     header_up 把 XFF 覆盖为 CF-Connecting-IP（CF 写入的 Agent 真实 IP），
-    #     请求自带的其他转发头/走私值被覆盖丢弃
+    # 2b) Caddy 注入正确代理密钥后，才接受它写入的 CF/XFF 头
+    old_secret = app_mod.PROXY_SECRET
+    app_mod.PROXY_SECRET = 'test-proxy-secret'
     m1c = db.create_machine({'name': 'xff-cfchain', 'role': 'backend', 'region': '', 'bandwidth': ''})
     c.post('/api/agent/heartbeat',
            headers={'X-Agent-Token': m1c['token'],
+                    'X-LinkPilot-Proxy-Secret': 'test-proxy-secret',
                     'CF-Connecting-IP': '173.245.48.5',
                     'X-Forwarded-For': '203.0.113.77'},
            environ_base={'REMOTE_ADDR': '172.18.0.1'})
-    assert db.get_machine(m1c['id'])['agent_ip'] == '203.0.113.77'
+    assert db.get_machine(m1c['id'])['agent_ip'] == '173.245.48.5'
 
-    # 2c) Caddyfile.acme + CF 橙云（配置混用）：Caddy 写进 XFF 的是「对端」= CF 边缘 IP，
-    #     这是个每几秒换一个的 CDN 地址，必须改回 CF-Connecting-IP（CF 写入的真实客户端 IP），
-    #     否则机器地址会被记成 CDN 边缘 IP —— 表现为地址乱跳 + 测试报端口不可达
+    # 2c) 错误代理密钥仍然不能污染地址
     m1d = db.create_machine({'name': 'xff-cfedge', 'role': 'target', 'region': '', 'bandwidth': ''})
     c.post('/api/agent/heartbeat',
            headers={'X-Agent-Token': m1d['token'],
+                    'X-LinkPilot-Proxy-Secret': 'wrong',
                     'CF-Connecting-IP': '203.0.113.10',
                     'X-Forwarded-For': '172.67.131.196'},
            environ_base={'REMOTE_ADDR': '172.18.0.1'})
-    assert db.get_machine(m1d['id'])['agent_ip'] == '203.0.113.10', \
+    assert db.get_machine(m1d['id'])['agent_ip'] == '172.18.0.1', \
         db.get_machine(m1d['id'])['agent_ip']
+    app_mod.PROXY_SECRET = old_secret
+
+    # 2d) 管理口仅绑回环时，允许本机 Nginx/SSH 隧道写入 XFF
+    old_trust = app_mod.TRUST_LOCAL_PROXY
+    app_mod.TRUST_LOCAL_PROXY = True
+    m1e = db.create_machine({'name': 'xff-local-proxy', 'role': 'backend',
+                             'region': '', 'bandwidth': ''})
+    c.post('/api/agent/heartbeat',
+           headers={'X-Agent-Token': m1e['token'],
+                    'X-Forwarded-For': '203.0.113.88'},
+           environ_base={'REMOTE_ADDR': '127.0.0.1'})
+    assert db.get_machine(m1e['id'])['agent_ip'] == '203.0.113.88'
+    app_mod.TRUST_LOCAL_PROXY = old_trust
 
     # 3) 公网直连伪造 XFF/CF 头 → 一律不采信，取 remote_addr
     m2 = db.create_machine({'name': 'xff2', 'role': 'backend', 'region': '', 'bandwidth': ''})
@@ -215,7 +229,7 @@ def test_xff_and_limiter():
            environ_base={'REMOTE_ADDR': '93.184.216.34'})
     assert db.get_machine(m2['id'])['agent_ip'] == '93.184.216.34'
 
-    # 4) 限速桶用 remote_addr：轮换伪造头无法绕过，5 次失败即锁定
+    # 4) 限速桶用可信客户端 IP；锁定写入 SQLite，初始化后仍然存在
     for i in range(5):
         c.post('/api/login',
                headers={'X-Forwarded-For': f'10.0.0.{i}', 'CF-Connecting-IP': f'10.1.1.{i}'},
@@ -226,7 +240,10 @@ def test_xff_and_limiter():
                   environ_base={'REMOTE_ADDR': '127.0.0.1'},
                   json={'user': 'x', 'password': 'y'})
     assert resp.status_code == 429, resp.get_data(as_text=True)
-    print('CF-Connecting-IP 优先 / XFF 取尾项 / 伪造不可信 / 限速不可绕过 OK')
+    db.init_db()
+    assert db.auth_limited_seconds('login:127.0.0.1') > 0
+    db.clear_auth_failures('login:127.0.0.1')
+    print('可信代理密钥 / 伪造头不可信 / 持久化登录锁定 OK')
 
 
 def test_test_protocol():
@@ -316,7 +333,8 @@ def test_discovery_flow():
         time.sleep(0.05)
     assert job, '面板未派发地址探测任务'
     body = 'IPV4=93.184.216.34\nIPV6=2606:4700:4700::1111\n'
-    assert 'IPV4=' in job['cmd'] or 'IPV4' in job['cmd'], job['cmd']
+    assert job['kind'] == 'report_ips', dict(job)
+    assert db.next_queued_job(m['id'])['id'] == job['id']
     c.post('/api/agent/output',
            headers={'X-Agent-Token': m['token']},
            data={'job_id': job['id'], 'text': body, 'done': '1', 'exit_code': '0'})
@@ -328,22 +346,27 @@ def test_discovery_flow():
 
 
 def test_probe_script():
-    """SCRIPT_REPORT_IPS 的地址提取：稳定 v6 优先、只有临时地址也能取到、ULA/链路本地忽略。"""
+    """Agent report_ips：稳定 v6 优先、临时地址兜底、ULA/链路本地忽略。"""
     if os.name != 'posix':
-        print('跳过 SCRIPT_REPORT_IPS 测试（仅 POSIX 环境执行）')
+        print('跳过 Agent report_ips 测试（仅 POSIX 环境执行）')
         return
     import shutil
     import subprocess
     from app import agent_jobs as aj
 
     if not shutil.which('bash') or not shutil.which('awk'):
-        print('跳过 SCRIPT_REPORT_IPS 测试（缺 bash/awk）')
+        print('跳过 Agent report_ips 测试（缺 bash/awk）')
         return
 
     tmp = tempfile.mkdtemp(prefix='linkpilot-probe-')
     script = os.path.join(tmp, 'probe.sh')
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    with open(os.path.join(root, 'app', 'agent', 'install.sh'), encoding='utf-8') as f:
+        installer = f.read()
+    start = installer.index('report_ips() {')
+    end = installer.index('\n}\n\nrun_job()', start) + 2
     with open(script, 'w', encoding='utf-8') as f:
-        f.write(aj.SCRIPT_REPORT_IPS + '\n')
+        f.write('#!/bin/bash\n' + installer[start:end] + '\nreport_ips\n')
 
     # 假 ip / hostname：数据文件放在 stub 同目录，脚本内用 $(dirname "$0") 定位，
     # 不把绝对路径写进 stub（Windows 反斜杠路径在 MSYS 下不可靠）
@@ -422,7 +445,7 @@ def test_probe_script():
     got = aj.parse_ip_report('IPV4=93.184.216.34\nIPV6=240e:3b0:1234:5678:9abc:def0:1234:5678\n')
     assert got == {'ip4': '93.184.216.34',
                    'ip6': '240e:3b0:1234:5678:9abc:def0:1234:5678'}, got
-    print('SCRIPT_REPORT_IPS 地址提取 OK（稳定/临时/ULA/无 ip 四种情况）')
+    print('Agent report_ips 地址提取 OK（稳定/临时/ULA/无 ip 四种情况）')
 
 
 def test_job_ids():
@@ -436,14 +459,14 @@ def test_job_ids():
     from app import db
     db.init_db()
     m = db.create_machine({'name': 'jid', 'role': 'backend', 'region': '', 'bandwidth': ''})
-    a = db.create_job(m['id'], 'echo a', 10)
-    b = db.create_job(m['id'], 'echo b', 10)
+    a = db.create_job(m['id'], 'report_ips', {}, 10)
+    b = db.create_job(m['id'], 'report_ips', {}, 10)
     assert a > 10 ** 12, a                    # 时间戳打底，不再是 1、2、3
     assert b > a, (a, b)
     _time.sleep(0.005)                        # 模拟「面板数据库被重置」：清空任务表
     db.get_db().execute('DELETE FROM jobs')
     db.get_db().commit()
-    c = db.create_job(m['id'], 'echo c', 10)
+    c = db.create_job(m['id'], 'report_ips', {}, 10)
     assert c > b, (b, c)
     print('任务编号跨重置递增 OK:', a, b, c)
 
@@ -473,6 +496,7 @@ def test_probe_error_surfaced():
                 break
             _time.sleep(0.05)
         assert job, '面板未派发地址探测任务'
+        assert db.next_queued_job(m['id'])['id'] == job['id']
         c.post('/api/agent/output',
                headers={'X-Agent-Token': m['token']},
                data={'job_id': job['id'], 'text': body, 'done': '1', 'exit_code': '0'})
@@ -502,6 +526,7 @@ def test_probe_error_surfaced():
 def test_test_params():
     """测试参数：校验、iperf3 命令拼装、端口/协议落到 Agent 脚本上。"""
     from app import agent_jobs as aj
+    from app import job_types
     from app import runner
 
     # 1) 默认值与历史行为一致（单线程 / 10 秒 / 5201 / ping 200 / TCP）
@@ -533,20 +558,13 @@ def test_test_params():
     udp_cmd = runner.build_iperf_cmd('2606:4700:4700::1111', dict(tcp, udp=True, udp_bandwidth='200M'))
     assert udp_cmd == 'iperf3 -c 2606:4700:4700::1111 -p 6500 -t 30 -P 4 -u -b 200M', udp_cmd
 
-    # 5) 端口等参数要真的落到 Agent 脚本里；每台后端机可各用各的端口，
-    #    所以起 server 的脚本必须只清本端口，不能把别的端口的 server 一起杀了
-    srv = aj.script_start_server(6500)
-    assert 'PORT=6500' in srv and '/tmp/iperf3-server-$PORT.pid' in srv, srv
-    assert '5201' not in srv, srv
-    assert 'iperf3 -s -p $PORT' in srv, srv                 # 只清同端口残留
-    assert "pkill -f 'iperf3 -s'" not in srv, srv           # 不能无差别清杀
-    assert 'timeout "$TTL" iperf3 -s -p "$PORT"' in srv, srv  # 存活上限随 TTL 走
-    stop = aj.script_stop_server([6500])
-    assert 'PORTS="6500"' in stop, stop
-    assert '/tmp/iperf3-server*.pid' in stop, stop           # 收尾时按 pid 文件全部停掉
-    assert 'pkill -f "iperf3 -s -p $p"' in stop, stop       # 兜底匹配只针对用过的端口
-    assert "pkill -f 'iperf3 -s'" not in stop, stop          # 不能无差别清杀
-    assert 'port="6500"' in aj.script_check_port('1.2.3.4', 6500)
+    # 5) 端口等参数只通过白名单结构化载荷下发
+    srv = job_types.encode('start_server', {'port': 6500, 'ttl': 600, 'bind': '1.2.3.4'})
+    assert 'port=6500' in srv and 'bind=1.2.3.4' in srv and 'kind=start_server' in srv, srv
+    stop = job_types.encode('stop_server', {'ports': [6500]})
+    assert 'ports=6500' in stop and 'kind=stop_server' in stop, stop
+    check = job_types.encode('check_port', {'host': '1.2.3.4', 'port': 6500})
+    assert 'host=1.2.3.4' in check and 'port=6500' in check, check
     assert aj.valid_port(0) == 5201 and aj.valid_port(70000) == 5201
     assert aj.valid_port('abc') == 5201 and aj.valid_port('6500') == 6500
 
@@ -618,8 +636,8 @@ def _login(client):
     先清掉登录限速状态——前面的用例会故意打失败登录把测试客户端 IP 锁住。
     """
     from app import db
-    from app import app as app_module
-    app_module._login_fails.clear()
+    db.get_db().execute('DELETE FROM auth_limits')
+    db.get_db().commit()
     user, _ = db.get_auth()
     with open(db.INITIAL_PW_PATH, encoding='utf-8') as f:
         pw = f.read().strip()
@@ -761,16 +779,22 @@ def test_server_lifecycle():
     assert aj.clamp_ttl('abc') == aj.SERVER_TTL_DEFAULT == 1800
     assert aj.clamp_ttl('900') == 900 and aj.clamp_ttl(900.7) == 900
 
-    # 2) TTL 真的写进启动脚本
-    assert 'TTL=300' in aj.script_start_server(5201, 1)
-    assert 'TTL=1800' in aj.script_start_server(5201)            # 不传就用默认
-    assert 'timeout "$TTL"' in aj.script_start_server(5201, 3600)
-
-    # 3) 关闭脚本：去重排序、丢弃非法端口，且没有无差别的裸 pkill
-    stop = aj.script_stop_server([6002, 5201, 5201, 0, 'x'])
-    assert 'PORTS="5201 6002"' in stop, stop
-    assert 'pkill -f "iperf3 -s -p $p"' in stop, stop
-    assert "pkill -f 'iperf3 -s'" not in stop, stop
+    # 2) 结构化任务自身限制 TTL / 端口，且 Agent 本地模板包含绑定与 TTL
+    from app import job_types
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    with open(os.path.join(root, 'app', 'agent', 'install.sh'), encoding='utf-8') as f:
+        installer = f.read()
+    assert 'iperf3 -s -B "$chosen" -p "$port"' in installer
+    assert 'timeout "$ttl"' in installer
+    for bad in (
+        {'port': 0, 'ttl': 600, 'bind': '1.2.3.4'},
+        {'port': 5201, 'ttl': 1, 'bind': '1.2.3.4'},
+    ):
+        try:
+            job_types.normalize('start_server', bad)
+            raise AssertionError(f'应拒绝非法 server 参数：{bad}')
+        except ValueError:
+            pass
 
     # 4) 预估 TTL = iperf3 串行关键路径 + 余量：短测试不再白留 30 分钟，
     #    而 3 台 × 300 秒这种长测（旧代码固定 1800 会在中途过期打断测试）要够用
@@ -790,15 +814,18 @@ def test_server_lifecycle():
     #    都要收尾），而不是只在成功路径上关一次
     src = inspect.getsource(runner._worker)
     assert len(src.split('finally:')) == 2, src
-    assert 'script_stop_server' in src.split('finally:', 1)[1], src
+    assert "'stop_server'" in src.split('finally:', 1)[1], src
     assert 'started_ports' in src, src
 
-    # 6) 真执行（仅 Linux + bash）：用假 iperf3 验证「启动 → 关闭」和 TTL 自过期兜底
+    # 6) 真执行（仅 Linux + bash）：直接源码执行 Agent 内嵌的白名单处理函数
     if sys.platform != 'linux' or not shutil.which('bash') or not shutil.which('timeout'):
         print('跳过 server 脚本真执行用例（仅 Linux + bash/coreutils 环境执行）')
         print('iperf3 server 生命周期（TTL / 收尾关闭）OK')
         return
 
+    start = installer.index('P() {')
+    end = installer.index('\nwhile true; do', start)
+    functions = installer[start:end]
     tmp = tempfile.mkdtemp(prefix='linkpilot-srv-')
     bind = os.path.join(tmp, 'bin')
     os.makedirs(bind)
@@ -815,35 +842,35 @@ def test_server_lifecycle():
         except (OSError, ValueError, IndexError):
             return False
 
-    def run(script):
-        return subprocess.run(['bash', '-c', script], capture_output=True, text=True, env=env)
+    spool = tempfile.mkdtemp(prefix='linkpilot-agent-job-')
+    script_path = os.path.join(spool, 'run-job.sh')
+    with open(script_path, 'w', encoding='utf-8') as f:
+        f.write('#!/bin/bash\nset -eu\n')
+        f.write(f'SPOOL={spool}\n')
+        f.write(functions)
+        f.write('\nrun_job\n')
+    os.chmod(script_path, 0o700)
 
-    stop_port, ttl_port = 65011, 65012
+    def run_job(kind, params):
+        with open(os.path.join(spool, 'payload'), 'w', encoding='utf-8') as f:
+            f.write(job_types.encode(kind, params))
+        return subprocess.run(['bash', script_path], capture_output=True, text=True, env=env)
+
+    stop_port = 65011
     pidf = f'/tmp/iperf3-server-{stop_port}.pid'
-    pidf_ttl = f'/tmp/iperf3-server-{ttl_port}.pid'
     try:
-        r = run(aj.script_start_server(stop_port, 600))
+        r = run_job('start_server', {'port': stop_port, 'ttl': 600, 'bind': '127.0.0.1'})
         assert f'SERVER_STARTED port={stop_port} ttl=600' in r.stdout, (r.stdout, r.stderr)
         pid = open(pidf, encoding='utf-8').read().strip()
         assert alive(pid), '假 iperf3 没起来'
 
-        r = run(aj.script_stop_server([stop_port]))
+        r = run_job('stop_server', {'ports': [stop_port]})
         assert f'IPERF3_SERVER_STOPPED ports={stop_port}' in r.stdout, r.stdout
         time.sleep(0.5)
         assert not alive(pid), '关闭脚本没有真的杀掉 server'
         assert not os.path.exists(pidf), '关闭后 pid 文件没清理'
-
-        # TTL 兜底：绕过 clamp 直接写 2 秒，模拟「面板崩了、关闭指令送不到」
-        short = (aj.SCRIPT_START_SERVER_TMPL
-                 .replace('__PORT__', str(ttl_port)).replace('__TTL__', '2'))
-        r = run(short)
-        assert 'SERVER_STARTED' in r.stdout, (r.stdout, r.stderr)
-        pid_ttl = open(pidf_ttl, encoding='utf-8').read().strip()
-        assert alive(pid_ttl), '假 iperf3 没起来（TTL 用例）'
-        time.sleep(3.5)
-        assert not alive(pid_ttl), 'TTL 到点后 server 没有自过期（端口会一直开着）'
     finally:
-        for f in (pidf, pidf_ttl):
+        for f in (pidf,):
             if os.path.exists(f):
                 try:
                     os.kill(int(open(f, encoding='utf-8').read().strip()), 9)
@@ -855,17 +882,14 @@ def test_server_lifecycle():
 
 def test_daemon_guard():
     """发行版自带 iperf3 常驻服务的体检：探测脚本、解析、提示语、apt 不弹窗的保证。"""
-    from app import agent_jobs as aj
     from app import runner
 
-    # 1) 体检脚本：查 systemd 单元状态 + 本次端口占用，并跳过本面板自己残留的 server
-    chk = aj.script_check_daemon([6500, 5201, 5201, 0])
-    assert 'PORTS="5201 6500"' in chk, chk                 # 去重 + 排序 + 丢掉非法端口
-    assert 'systemctl is-active --quiet iperf3' in chk, chk
-    assert 'systemctl is-enabled --quiet iperf3' in chk, chk   # 没跑但开机自启也要报
-    assert 'DISTRO_DAEMON=$state' in chk and 'PORT_BUSY=$p $line' in chk, chk
-    assert '/tmp/iperf3-server-$p.pid' in chk, chk          # 自己上一轮残留的不算冲突
-    assert 'ss -ltnp' in chk and 'netstat -ltnp' in chk, chk
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    with open(os.path.join(root, 'app', 'agent', 'install.sh'), encoding='utf-8') as f:
+        installer = f.read()
+    for needle in ('DISTRO_DAEMON=$state', 'PORT_BUSY=$p $line',
+                   '/tmp/iperf3-server-$p.pid', 'ss -ltnp', 'netstat -ltnp'):
+        assert needle in installer, needle
 
     # 2) 解析：几种状态 / 端口占用 / 任务没跑成（只提示，不误判为故障）
     state, busy = runner.parse_daemon_report(
@@ -881,14 +905,9 @@ def test_daemon_guard():
     assert 'systemctl disable --now iperf3' in runner._DISTRO_DAEMON_HINT
     assert '目标机端口' in runner._DISTRO_DAEMON_HINT
 
-    # 4) 装包时不会弹「是否作为守护进程启动」：非交互 + -y，debconf 取默认值 No
-    #    （Debian/Ubuntu 的 iperf3 模板 iperf3/start_daemon 默认 false）
-    assert 'export DEBIAN_FRONTEND=noninteractive' in aj.SCRIPT_ENSURE, aj.SCRIPT_ENSURE
-    assert 'apt-get install -y iperf3' in aj.SCRIPT_ENSURE, aj.SCRIPT_ENSURE
-
-    # 5) openSUSE 的包名是 iperf（提供的二进制才叫 iperf3），必须能回退
-    assert 'zypper --non-interactive install iperf3' in aj.SCRIPT_ENSURE, aj.SCRIPT_ENSURE
-    assert 'zypper --non-interactive install iperf' in aj.SCRIPT_ENSURE, aj.SCRIPT_ENSURE
+    # Agent 安装时预装依赖；openSUSE 保留 iperf 包名回退
+    assert 'ensure_pkg iperf3 iperf3 iperf3 iperf3' in installer
+    assert 'zypper --non-interactive install iperf' in installer
     print('发行版 iperf3 守护进程体检 / apt 非交互安装 OK')
 
 
@@ -904,11 +923,11 @@ def test_job_cleanup_paths():
     b = db.create_machine({'name': 'clean-b', 'role': 'backend', 'region': '', 'bandwidth': ''})
 
     # 队列里三个任务：两个属于本次机器、一个是别人的
-    j1 = db.create_job(b['id'], 'echo hi', 30)
-    j2 = db.create_job(b['id'], 'echo hi', 30)
+    j1 = db.create_job(b['id'], 'report_ips', {}, 30)
+    j2 = db.create_job(b['id'], 'report_ips', {}, 30)
     other = db.create_machine({'name': 'clean-x', 'role': 'backend', 'region': '', 'bandwidth': ''})
-    j3 = db.create_job(other['id'], 'echo hi', 30)
-    db.create_job(t['id'], 'echo hi', 30)
+    j3 = db.create_job(other['id'], 'report_ips', {}, 30)
+    db.create_job(t['id'], 'report_ips', {}, 30)
 
     db.cancel_queued_jobs([b['id'], t['id']])              # 不能抛
     assert db.get_job(j1)['status'] == 'failed', db.get_job(j1)
@@ -953,8 +972,8 @@ def test_orphan_server_reclaim():
     calls = []
     real_job = runner._job
 
-    def fake_job(machine, cmd, timeout, log, stop_check):
-        calls.append((machine['id'], cmd))
+    def fake_job(machine, kind, params, timeout, log, stop_check):
+        calls.append((machine['id'], kind, params))
         return 0, 'IPERF3_SERVER_STOPPED'
 
     runner._job = fake_job
@@ -964,9 +983,7 @@ def test_orphan_server_reclaim():
         runner._job = real_job
     assert rid in done, (done, calls)
     assert calls and calls[0][0] == t['id'], calls
-    # 只回收记录里那两个端口，且不能是无差别的裸 pkill
-    assert 'PORTS="5201 6002"' in calls[0][1], calls[0][1]
-    assert "pkill -f 'iperf3 -s'" not in calls[0][1], calls[0][1]
+    assert calls[0][1] == 'stop_server' and sorted(calls[0][2]['ports']) == [5201, 6002], calls
     # 回收过就不再重复派发
     assert not db.runs_with_orphan_ports(), db.runs_with_orphan_ports()
     assert runner.clear_orphan_servers(force=True) == []
@@ -1090,7 +1107,14 @@ def test_schedule_params():
     assert r.status_code == 200, r.get_json()
     assert db.get_schedule(sid)['next_run_at'] != before, '改了间隔应该重排下一次'
 
-    # 7) 停用 / 启用 / 删除
+    # 7) 部分更新只改名，不能把测试参数重置为默认值
+    r = c.put(f'/api/schedules/{sid}', json={'name': '只改名字'})
+    assert r.status_code == 200, r.get_json()
+    preserved = db.get_schedule(sid)
+    assert (preserved['streams'], preserved['duration'], preserved['ping_count'],
+            preserved['udp'], preserved['udp_bandwidth']) == (2, 5, 20, 1, '50M'), preserved
+
+    # 8) 停用 / 启用 / 删除
     r = c.post(f'/api/schedules/{sid}/toggle')
     assert r.status_code == 200 and r.get_json()['enabled'] is False, r.get_json()
     assert db.due_schedules('2099-01-01 00:00:00') == [] or all(
@@ -1423,7 +1447,7 @@ def test_active_job_keeps_machine_online():
     db.get_db().execute('UPDATE machines SET last_seen=0 WHERE id=?', (m['id'],))
     db.get_db().commit()
     assert db.get_machine(m['id'])['online'] is False
-    jid = db.create_job(m['id'], 'sleep 10', 30)
+    jid = db.create_job(m['id'], 'ping', {'host': '93.184.216.34', 'count': 1}, 30)
     assert db.next_queued_job(m['id'])['id'] == jid
     got = db.get_machine(m['id'])
     assert got['online'] is True and got['active_job'] is True, got
@@ -1432,6 +1456,119 @@ def test_active_job_keeps_machine_online():
     db.get_db().commit()
     assert db.get_machine(m['id'])['online'] is False
     print('活动任务期间机器在线状态 OK')
+
+
+def test_security_hardening():
+    """Registration codes, structured jobs, CSP, port isolation and file permissions."""
+    import base64
+    import json as _json
+    import stat
+    import app.app as app_mod
+    from app import db, job_types
+    db.init_db()
+    c = app_mod.app.test_client()
+    _login(c)
+
+    m = db.create_machine({
+        'name': 'security-agent', 'role': 'backend', 'region': '', 'bandwidth': '',
+    })
+    public = c.get(f'/api/machines/{m["id"]}').get_json()
+    assert 'token' not in public and 'sign_key' not in public, public
+
+    code_resp = c.post(f'/api/machines/{m["id"]}/registration-code')
+    assert code_resp.status_code == 200, code_resp.get_data(as_text=True)
+    reg = code_resp.get_json()
+    assert len(reg['code']) == 10 and reg['expires_in'] == 600, reg
+    stored = db.get_db().execute(
+        'SELECT code_hash FROM agent_reg_codes WHERE machine_id=? ORDER BY expires_at DESC',
+        (m['id'],)).fetchone()
+    assert stored and stored['code_hash'] != reg['code'], stored
+
+    old_allow = app_mod.ALLOW_INSECURE_AGENT
+    app_mod.ALLOW_INSECURE_AGENT = True
+    try:
+        enrolled = c.post('/api/agent/register', json={'code': reg['code']})
+        assert enrolled.status_code == 200, enrolled.get_data(as_text=True)
+        secrets_json = enrolled.get_json()
+        assert len(secrets_json['token']) == 64
+        assert len(secrets_json['sign_key']) == 64
+        assert c.post('/api/agent/register', json={'code': reg['code']}).status_code == 403
+    finally:
+        app_mod.ALLOW_INSECURE_AGENT = old_allow
+
+    # Structured jobs contain no free-form shell and are signed as canonical payloads.
+    assert job_types.encode('ping', {'host': '93.184.216.34', 'count': 2}) == (
+        'kind=ping\ncount=2\nhost=93.184.216.34\n')
+    for bad in (
+        ('ping', {'host': '1.2.3.4;id', 'count': 1}),
+        ('iperf_client', {'host': '1.2.3.4', 'port': 1, 'duration': 1,
+                          'streams': 1, 'udp': False, 'udp_bandwidth': '1M',
+                          'reverse': False, 'cmd': 'x'}),
+        ('unknown_shell', {}),
+    ):
+        try:
+            job_types.normalize(*bad)
+            raise AssertionError(f'应拒绝非法任务：{bad}')
+        except ValueError:
+            pass
+
+    jid = db.create_job(m['id'], 'ping', {'host': '93.184.216.34', 'count': 2}, 10)
+    hb = c.post('/api/agent/heartbeat', headers={
+        'X-Agent-Token': secrets_json['token'],
+        'X-Agent-Protocol': '2',
+        'X-Agent-Host': 'security-agent',
+    }, environ_base={'REMOTE_ADDR': '127.0.0.1'})
+    assert hb.status_code == 200, hb.get_data(as_text=True)
+    fields = dict(line.split('=', 1) for line in hb.get_data(as_text=True).splitlines()
+                  if '=' in line)
+    assert fields['job_id'] == str(jid) and fields['kind'] == 'ping', fields
+    payload = base64.b64decode(fields['payload_b64']).decode()
+    assert payload == job_types.encode('ping', {'host': '93.184.216.34', 'count': 2})
+
+    done = c.post('/api/agent/output', headers={'X-Agent-Token': secrets_json['token']},
+                  data={'job_id': jid, 'text': 'ok', 'done': '1', 'exit_code': '0'})
+    assert done.status_code == 200
+    late = c.post('/api/agent/output', headers={'X-Agent-Token': secrets_json['token']},
+                  data={'job_id': jid, 'text': 'tamper', 'done': '1', 'exit_code': '0'})
+    assert late.status_code == 410
+
+    login_page = app_mod.app.test_client().get('/login')
+    csp = login_page.headers.get('Content-Security-Policy', '')
+    assert "script-src 'self' 'nonce-" in csp and 'frame-ancestors none' not in csp
+    assert 'frame-ancestors \'none\'' in csp
+    assert 'nonce="' in login_page.get_data(as_text=True)
+
+    isolated = c.get(
+        '/api/machines',
+        base_url=f'http://127.0.0.1:{app_mod.AGENT_INTERNAL_PORT}')
+    assert isolated.status_code == 404, isolated.get_data(as_text=True)
+
+    for path in (db.DB_PATH, db.SECRET_PATH):
+        mode = stat.S_IMODE(os.stat(path).st_mode)
+        assert mode & 0o077 == 0, (path, oct(mode))
+
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    with open(os.path.join(root, 'app', 'agent', 'install.sh'), encoding='utf-8') as f:
+        agent_installer = f.read()
+    for needle in ('X-Agent-Protocol: 2', 'iperf3 -s -B "$chosen"',
+                   'NoNewPrivileges=true', 'User=linkpilot'):
+        assert needle in agent_installer, needle
+    assert 'bash "$SPOOL/job.sh"' not in agent_installer
+    assert 'PANEL_URL=\'$PANEL_URL\'' not in agent_installer
+
+    with open(os.path.join(root, 'Caddyfile.acme'), encoding='utf-8') as f:
+        caddy_acme = f.read()
+    assert 'X-LinkPilot-Proxy-Secret' in caddy_acme
+    assert 'header_up -CF-Connecting-IP' in caddy_acme
+    assert 'X-Forwarded-For {http.request.header.CF-Connecting-IP}' not in caddy_acme
+    with open(os.path.join(root, 'docker-compose.yml'), encoding='utf-8') as f:
+        compose = f.read()
+    assert '${PANEL_BIND:-127.0.0.1}' in compose
+    assert '${PANEL_AGENT_BIND:-0.0.0.0}' in compose
+    with open(os.path.join(root, 'Dockerfile'), encoding='utf-8') as f:
+        dockerfile = f.read()
+    assert 'USER 10001:10001' in dockerfile
+    print('注册码 / 结构化任务 / CSP / 管理面隔离 / 权限 OK')
 
 
 def test_dashboard_interactions_present():
@@ -1662,6 +1799,7 @@ if __name__ == '__main__':
     test_schedule_comparison_report()
     test_incomplete_direction_is_failure()
     test_active_job_keeps_machine_online()
+    test_security_hardening()
     test_dashboard_interactions_present()
     test_event_stream_log_contract()
     test_run_list_returns_summary_only()

@@ -1,5 +1,6 @@
 """SQLite 数据层 v2：机器（Agent 令牌接入）、任务队列、面板登录凭据。"""
 import datetime
+import hashlib
 import ipaddress
 import json
 import os
@@ -11,11 +12,17 @@ import time
 
 from werkzeug.security import generate_password_hash
 
+from . import job_types
+
 _DATA_DIR = os.environ.get('DATA_DIR')
 if not _DATA_DIR:
     _DATA_DIR = '/data' if os.name != 'nt' else os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data')
-os.makedirs(_DATA_DIR, exist_ok=True)
+os.makedirs(_DATA_DIR, mode=0o700, exist_ok=True)
+try:
+    os.chmod(_DATA_DIR, 0o700)
+except OSError:
+    pass
 DB_PATH = os.path.join(_DATA_DIR, 'panel.db')
 AUTH_PATH = os.path.join(_DATA_DIR, 'auth.json')
 INITIAL_PW_PATH = os.path.join(_DATA_DIR, '.initial_password')
@@ -34,7 +41,17 @@ def get_db():
         conn.row_factory = sqlite3.Row
         conn.execute('PRAGMA journal_mode=WAL')
         _local.conn = conn
+        _secure_data_files()
     return conn
+
+
+def _secure_data_files():
+    for path in (DB_PATH, DB_PATH + '-wal', DB_PATH + '-shm', SECRET_PATH,
+                 AUTH_PATH, INITIAL_PW_PATH):
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
 
 
 SCHEMA = '''
@@ -100,7 +117,8 @@ CREATE TABLE IF NOT EXISTS run_items (
 CREATE TABLE IF NOT EXISTS jobs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     machine_id INTEGER NOT NULL,
-    cmd TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT '',
+    params TEXT NOT NULL DEFAULT '{}',
     timeout INTEGER NOT NULL DEFAULT 120,
     status TEXT NOT NULL DEFAULT 'queued',
     output TEXT NOT NULL DEFAULT '',
@@ -111,9 +129,21 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 CREATE TABLE IF NOT EXISTS agent_tombstones (
     token TEXT PRIMARY KEY,
-    cmd_b64 TEXT NOT NULL DEFAULT '',
+    payload TEXT NOT NULL DEFAULT '',
     sig TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE TABLE IF NOT EXISTS agent_reg_codes (
+    code_hash TEXT PRIMARY KEY,
+    machine_id INTEGER NOT NULL,
+    expires_at REAL NOT NULL,
+    used_at REAL
+);
+CREATE TABLE IF NOT EXISTS auth_limits (
+    key TEXT PRIMARY KEY,
+    fails TEXT NOT NULL DEFAULT '[]',
+    locked_until REAL NOT NULL DEFAULT 0,
+    updated_at REAL NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS schedules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -223,12 +253,26 @@ def init_db():
         db.execute('ALTER TABLE schedules ADD COLUMN ends_at TEXT')
     if cols_s and 'archived_at' not in cols_s:
         db.execute('ALTER TABLE schedules ADD COLUMN archived_at TEXT')
+    cols_jobs = [r['name'] for r in db.execute('PRAGMA table_info(jobs)').fetchall()]
+    if cols_jobs and 'kind' not in cols_jobs:
+        db.execute("ALTER TABLE jobs ADD COLUMN kind TEXT NOT NULL DEFAULT ''")
+    if cols_jobs and 'params' not in cols_jobs:
+        db.execute("ALTER TABLE jobs ADD COLUMN params TEXT NOT NULL DEFAULT '{}'")
+    db.execute("UPDATE jobs SET status='failed', exit_code=-1, "
+               "output=output || '[面板] 旧版自由脚本文本任务已作废\\n' "
+               "WHERE status IN ('queued','running') AND kind=''")
     cols_tb = [r['name'] for r in db.execute('PRAGMA table_info(agent_tombstones)').fetchall()]
-    if cols_tb and 'cmd_b64' not in cols_tb:
+    if cols_tb and 'payload' not in cols_tb:
         # 墓碑是一次性瞬态数据，结构变化直接重建
         db.execute('DROP TABLE agent_tombstones')
         db.executescript(SCHEMA)
+    cols_limits = [r['name'] for r in db.execute('PRAGMA table_info(auth_limits)').fetchall()]
+    if cols_limits and 'updated_at' not in cols_limits:
+        db.execute('ALTER TABLE auth_limits ADD COLUMN updated_at REAL NOT NULL DEFAULT 0')
+    db.execute('DELETE FROM auth_limits WHERE updated_at > 0 AND updated_at < ?',
+               (time.time() - 7 * 86400,))
     db.commit()
+    _secure_data_files()
     repair_incomplete_items()
     mark_stale_runs()
     ensure_auth()
@@ -408,8 +452,14 @@ def get_auth():
 
 def get_secret_key():
     if not os.path.exists(SECRET_PATH):
-        with open(SECRET_PATH, 'w') as f:
+        fd = os.open(SECRET_PATH, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, 'w') as f:
             f.write(secrets.token_hex(32))
+    else:
+        try:
+            os.chmod(SECRET_PATH, 0o600)
+        except OSError:
+            pass
     with open(SECRET_PATH) as f:
         return f.read().strip()
 
@@ -475,12 +525,24 @@ def get_machine(mid):
 def get_machine_by_token(token):
     if not token:
         return None
-    r = get_db().execute('SELECT * FROM machines WHERE token=?', (token,)).fetchone()
-    if not r:
-        return None
-    m = dict(r)
-    m['online'] = _row_online(m)
-    return m
+    # 机器数量很小；逐条常量时间比较，避免把令牌比较时序暴露给 Agent API。
+    for r in get_db().execute('SELECT * FROM machines').fetchall():
+        expected = str(r['token'] or '')
+        if expected and secrets.compare_digest(expected, str(token)):
+            m = dict(r)
+            m['online'] = _row_online(m)
+            return m
+    return None
+
+
+def public_machine(m):
+    """Return a machine row safe for admin pages and API responses."""
+    if not m:
+        return m
+    out = dict(m)
+    out.pop('token', None)
+    out.pop('sign_key', None)
+    return out
 
 
 def create_machine(f):
@@ -490,7 +552,7 @@ def create_machine(f):
         'VALUES (?,?,?,?,?,?,?)',
         (f['name'], f['role'], f['region'], f['bandwidth'],
          (f.get('addr_override') or '').strip(),
-         secrets.token_hex(16), secrets.token_hex(32)))
+         secrets.token_hex(32), secrets.token_hex(32)))
     db.commit()
     return get_machine(cur.lastrowid)
 
@@ -508,9 +570,128 @@ def update_machine(mid, f):
 def regen_token(mid):
     db = get_db()
     db.execute('UPDATE machines SET token=?, sign_key=? WHERE id=?',
-               (secrets.token_hex(16), secrets.token_hex(32), mid))
+               (secrets.token_hex(32), secrets.token_hex(32), mid))
     db.commit()
     return get_machine(mid)
+
+
+_REG_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+
+
+def _registration_hash(code):
+    return hashlib.sha256(str(code or '').strip().upper().encode('utf-8')).hexdigest()
+
+
+def create_registration_code(mid, ttl_seconds=600):
+    """Issue a one-time, short-lived Agent registration code.
+
+    Only a hash is stored, so a database read does not expose a reusable code.
+    """
+    if not get_machine(mid):
+        raise ValueError('机器不存在')
+    db = get_db()
+    now = time.time()
+    db.execute('DELETE FROM agent_reg_codes WHERE expires_at < ?', (now - 86400,))
+    db.execute('DELETE FROM agent_reg_codes WHERE machine_id=? AND used_at IS NULL',
+               (mid,))
+    for _ in range(20):
+        code = ''.join(secrets.choice(_REG_ALPHABET) for _ in range(10))
+        try:
+            db.execute(
+                'INSERT INTO agent_reg_codes (code_hash, machine_id, expires_at) '
+                'VALUES (?,?,?)',
+                (_registration_hash(code), mid, now + max(60, min(int(ttl_seconds), 1800))))
+            db.commit()
+            return code
+        except sqlite3.IntegrityError:
+            db.rollback()
+    raise RuntimeError('注册码生成失败')
+
+
+def consume_registration_code(code):
+    """Consume a code and rotate the machine credentials atomically."""
+    if not code:
+        return None
+    db = get_db()
+    try:
+        db.execute('BEGIN IMMEDIATE')
+        row = db.execute(
+            'SELECT * FROM agent_reg_codes WHERE code_hash=?',
+            (_registration_hash(code),)).fetchone()
+        now = time.time()
+        if (not row or row['used_at'] is not None
+                or float(row['expires_at']) < now):
+            db.rollback()
+            return None
+        db.execute('UPDATE agent_reg_codes SET used_at=? WHERE code_hash=?',
+                   (now, row['code_hash']))
+        cur = db.execute('UPDATE machines SET token=?, sign_key=? WHERE id=?',
+                         (secrets.token_hex(32), secrets.token_hex(32), row['machine_id']))
+        if cur.rowcount != 1:
+            db.rollback()
+            return None
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    m = get_machine(row['machine_id'])
+    if m:
+        m['agent_protocol'] = 2
+    return m
+
+
+def add_registration_failure(mid, reason):
+    """Keep a short diagnostic without leaking the submitted registration code."""
+    if not mid:
+        return
+    try:
+        set_machine_probe(mid, str(reason)[:200])
+    except Exception:
+        pass
+
+
+def auth_limited_seconds(key):
+    row = get_db().execute(
+        'SELECT locked_until FROM auth_limits WHERE key=?', (key,)).fetchone()
+    if not row:
+        return 0
+    return max(0, int(float(row['locked_until']) - time.time()))
+
+
+def record_auth_failure(key, window=60, max_fails=5, lock_seconds=300):
+    """Persist failure windows so a container restart cannot reset lockout."""
+    db = get_db()
+    now = time.time()
+    with _job_id_lock:
+        try:
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute('SELECT * FROM auth_limits WHERE key=?', (key,)).fetchone()
+            try:
+                fails = json.loads(row['fails']) if row else []
+            except (TypeError, ValueError):
+                fails = []
+            fails = [float(t) for t in fails if now - float(t) < window]
+            fails.append(now)
+            locked_until = float(row['locked_until'] or 0) if row else 0
+            if len(fails) >= max_fails:
+                locked_until = now + lock_seconds
+                fails = []
+            db.execute(
+                'INSERT INTO auth_limits (key, fails, locked_until, updated_at) '
+                'VALUES (?,?,?,?) '
+                'ON CONFLICT(key) DO UPDATE SET fails=excluded.fails, '
+                'locked_until=excluded.locked_until, updated_at=excluded.updated_at',
+                (key, json.dumps(fails), locked_until, now))
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+    return max(0, int(locked_until - now))
+
+
+def clear_auth_failures(key):
+    get_db().execute('DELETE FROM auth_limits WHERE key=?', (key,))
+    get_db().commit()
 
 
 def ip_family(ip):
@@ -609,7 +790,7 @@ def set_machine_probe(mid, error=''):
     return get_machine(mid)
 
 
-def delete_machine(mid, cmd_b64='', sig=''):
+def delete_machine(mid, payload='', sig=''):
     """删除机器；曾上线过的留下令牌墓碑（内含已签名的卸载任务），
     Agent 下次心跳时自动执行卸载脚本。"""
     db = get_db()
@@ -617,19 +798,21 @@ def delete_machine(mid, cmd_b64='', sig=''):
     if not m:
         return
     if m['last_seen']:
-        db.execute('INSERT OR REPLACE INTO agent_tombstones (token, cmd_b64, sig) VALUES (?,?,?)',
-                   (m['token'], cmd_b64, sig))
+        db.execute('INSERT OR REPLACE INTO agent_tombstones (token, payload, sig) VALUES (?,?,?)',
+                   (m['token'], payload, sig))
     db.execute('DELETE FROM machines WHERE id=?', (mid,))
     db.execute('DELETE FROM jobs WHERE machine_id=?', (mid,))
+    db.execute('DELETE FROM agent_reg_codes WHERE machine_id=?', (mid,))
     db.commit()
 
 
 def pop_tombstone(token):
-    """取出一次性墓碑：命中则删除并返回 (cmd_b64, sig)，面板据此下发已签名的卸载脚本。"""
+    """取出一次性墓碑：命中则删除并返回结构化卸载任务。"""
     if not token:
         return None
     db = get_db()
-    r = db.execute('SELECT cmd_b64, sig FROM agent_tombstones WHERE token=?', (token,)).fetchone()
+    r = db.execute('SELECT payload, sig FROM agent_tombstones WHERE token=?',
+                   (token,)).fetchone()
     if not r:
         return None
     db.execute('DELETE FROM agent_tombstones WHERE token=?', (token,))
@@ -809,14 +992,19 @@ def _alloc_job_id(db):
     return max(int(time.time() * 1000), cur_max + 1)
 
 
-def create_job(machine_id, cmd, timeout):
+def create_job(machine_id, kind, params, timeout):
+    """Queue a structured job after validating its type and parameters."""
+    clean = job_types.normalize(kind, params)
+    params_json = json.dumps(clean, ensure_ascii=False, sort_keys=True)
     db = get_db()
     with _job_id_lock:            # 编号分配 + 插入必须原子，否则并发会撞主键
         for _ in range(20):
             jid = _alloc_job_id(db)
             try:
-                db.execute('INSERT INTO jobs (id, machine_id, cmd, timeout) VALUES (?,?,?,?)',
-                           (jid, machine_id, cmd, int(timeout)))
+                db.execute(
+                    'INSERT INTO jobs (id, machine_id, kind, params, timeout) '
+                    'VALUES (?,?,?,?,?)',
+                    (jid, machine_id, kind, params_json, int(timeout)))
                 db.commit()
                 return jid
             except sqlite3.IntegrityError:
@@ -834,7 +1022,8 @@ def next_queued_job(machine_id):
     """领取最早排队的任务：置为 running 并记录领取时间。"""
     db = get_db()
     r = db.execute(
-        "SELECT * FROM jobs WHERE machine_id=? AND status='queued' ORDER BY id LIMIT 1",
+        "SELECT * FROM jobs WHERE machine_id=? AND status='queued' "
+        "AND kind!='' ORDER BY id LIMIT 1",
         (machine_id,)).fetchone()
     if not r:
         return None

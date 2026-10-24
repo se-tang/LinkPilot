@@ -32,7 +32,7 @@ APP_NAME="LinkPilot"
 REPO_SLUG="LinkPilot"
 # 当前版本：与 app/app.py 的 APP_VERSION 保持一致（app.py 是唯一权威）。
 # 升级时脚本会用「更新后的代码里」的版本号自我重跑，所以这里的值只对「全新安装」生效。
-APP_VERSION="0.7.12"
+APP_VERSION="0.7.13"
 REPO_URL="${LINKPILOT_REPO_URL:-https://github.com/se-tang/LinkPilot.git}"
 BRANCH="${LINKPILOT_BRANCH:-main}"
 TARGET_HOME="$(getent passwd "$(id -u)" 2>/dev/null | cut -d: -f6)"
@@ -681,6 +681,20 @@ rand_port() {
   printf '%s\n' "$((10000 + (RANDOM % 20001)))"
 }
 port_in_use() { (exec 3<>"/dev/tcp/127.0.0.1/$1") >/dev/null 2>&1; }
+env_get() {
+  sed -n "s/^$1=//p" "$INSTALL_DIR/.env" 2>/dev/null | tail -n1
+}
+env_set_default() {
+  grep -q "^$1=" "$INSTALL_DIR/.env" 2>/dev/null \
+    || printf '%s=%s\n' "$1" "$2" >>"$INSTALL_DIR/.env"
+}
+env_set_value() {
+  if grep -q "^$1=" "$INSTALL_DIR/.env" 2>/dev/null; then
+    sed -i "s|^$1=.*|$1=$2|" "$INSTALL_DIR/.env"
+  else
+    printf '%s=%s\n' "$1" "$2" >>"$INSTALL_DIR/.env"
+  fi
+}
 
 # 这里判断「是不是首次部署」，必须在 docker compose 之前定死：
 # compose 一起容器就会把 ./data 建出来，之后再看就永远是「已有数据」了
@@ -708,9 +722,46 @@ else
   step_done "随机端口 $_p"
 fi
 PANEL_PORT="$(sed -n 's/^PANEL_PORT=//p' "$INSTALL_DIR/.env" | tail -n1)"
-PANEL_BIND="$(sed -n 's/^PANEL_BIND=//p' "$INSTALL_DIR/.env" | tail -n1)"
 PANEL_DOMAIN="$(sed -n 's/^PANEL_DOMAIN=//p' "$INSTALL_DIR/.env" | tail -n1)"
 [ -n "${PANEL_PORT:-}" ] || PANEL_PORT=8088
+if [ "$FRESH_INSTALL" = "1" ]; then
+  env_set_default PANEL_BIND 127.0.0.1
+else
+  # 老部署原本等价于 0.0.0.0；升级时保留可访问性，避免突然断管。
+  env_set_default PANEL_BIND 0.0.0.0
+fi
+env_set_default PANEL_AGENT_BIND 0.0.0.0
+if [ -z "$(env_get PANEL_AGENT_PORT)" ]; then
+  _ap=""
+  _i=0
+  while [ "$_i" -lt 30 ]; do
+    _ap="$(rand_port)"
+    [ "$_ap" != "$PANEL_PORT" ] && ! port_in_use "$_ap" && break
+    _ap=""
+    _i=$((_i + 1))
+  done
+  [ -n "$_ap" ] || _ap="$(rand_port)"
+  printf 'PANEL_AGENT_PORT=%s\n' "$_ap" >>"$INSTALL_DIR/.env"
+fi
+if [ -z "$(env_get PANEL_ALLOW_INSECURE_AGENT)" ]; then
+  if [ "$FRESH_INSTALL" = "1" ]; then
+    printf 'PANEL_ALLOW_INSECURE_AGENT=0\n' >>"$INSTALL_DIR/.env"
+  else
+    # 旧版没有独立 Agent 端口，升级时先兼容其 HTTP 接入；面板会持续提示风险。
+    printf 'PANEL_ALLOW_INSECURE_AGENT=1\n' >>"$INSTALL_DIR/.env"
+  fi
+fi
+if [ -z "$(env_get PANEL_PROXY_SECRET)" ]; then
+  _secret="$(openssl rand -hex 32 2>/dev/null || date +%s%N | sha256sum | awk '{print $1}')"
+  printf 'PANEL_PROXY_SECRET=%s\n' "$_secret" >>"$INSTALL_DIR/.env"
+fi
+PANEL_BIND="$(env_get PANEL_BIND)"
+PANEL_AGENT_PORT="$(env_get PANEL_AGENT_PORT)"
+chmod 600 "$INSTALL_DIR/.env"
+case "${PANEL_BIND:-}" in
+  127.0.0.1|::1|"[::1]") env_set_value PANEL_TRUST_LOCAL_PROXY 1 ;;
+  *) env_set_value PANEL_TRUST_LOCAL_PROXY 0 ;;
+esac
 # 面板绑定的网卡地址（空/0.0.0.0/127.0.0.1 时本机健康检查走回环）
 HEALTH_HOST="127.0.0.1"
 case "${PANEL_BIND:-}" in
@@ -749,6 +800,10 @@ fi
 COMPOSE_ARGS=""
 if [ "$TLS" = "1" ]; then
   COMPOSE_ARGS="--profile tls"
+  env_set_value PANEL_HTTPS 1
+  env_set_value PANEL_COOKIE_SECURE 1
+  env_set_value PANEL_ALLOW_INSECURE_AGENT 0
+  env_set_value PANEL_AGENT_BIND 127.0.0.1
   # 历史误挂载会把 Caddyfile.local 建成目录，导致 caddy 静默启动失败
   if [ -d "$INSTALL_DIR/Caddyfile.local" ]; then
     warn "Caddyfile.local 是目录（历史误挂载残留），已清理"
@@ -758,7 +813,57 @@ if [ "$TLS" = "1" ]; then
     cp -T "$INSTALL_DIR/Caddyfile.acme" "$INSTALL_DIR/Caddyfile.local" 2>/dev/null \
       || cp "$INSTALL_DIR/Caddyfile.acme" "$INSTALL_DIR/Caddyfile.local"
   fi
+  if [ -f "$INSTALL_DIR/Caddyfile.local" ]; then
+    # 旧版 CF 回源模板只靠“源站防火墙”兜底，升级时直接换成带 CF 网段校验的新模板。
+    if grep -q 'auto_https off' "$INSTALL_DIR/Caddyfile.local" \
+       && ! grep -q '@cloudflare' "$INSTALL_DIR/Caddyfile.local" \
+       && [ -f "$INSTALL_DIR/Caddyfile.origin" ]; then
+      cp "$INSTALL_DIR/Caddyfile.local" "$INSTALL_DIR/Caddyfile.local.bak"
+      cp "$INSTALL_DIR/Caddyfile.origin" "$INSTALL_DIR/Caddyfile.local"
+    fi
+    # 老模板没有代理密钥，也没有阻止客户端伪造 CF-Connecting-IP。
+    if ! grep -q 'X-LinkPilot-Proxy-Secret' "$INSTALL_DIR/Caddyfile.local"; then
+      sed -i '/reverse_proxy linkpilot:8000 {/a\		header_up X-LinkPilot-Proxy-Secret {$PANEL_PROXY_SECRET}' \
+        "$INSTALL_DIR/Caddyfile.local"
+    fi
+    if ! grep -q 'X-Forwarded-Proto' "$INSTALL_DIR/Caddyfile.local"; then
+      sed -i '/reverse_proxy linkpilot:8000 {/a\		header_up X-Forwarded-Proto {scheme}' \
+        "$INSTALL_DIR/Caddyfile.local"
+    fi
+    if ! grep -q 'auto_https off' "$INSTALL_DIR/Caddyfile.local"; then
+      sed -i 's|header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}|header_up X-Forwarded-For {http.request.remote.host}|' \
+        "$INSTALL_DIR/Caddyfile.local"
+      sed -i '/header_up -CF-Connecting-IP/d' "$INSTALL_DIR/Caddyfile.local"
+      sed -i '/reverse_proxy linkpilot:8000 {/a\		header_up -CF-Connecting-IP' \
+        "$INSTALL_DIR/Caddyfile.local"
+    fi
+  fi
+else
+  env_set_value PANEL_HTTPS 0
+  env_set_value PANEL_AGENT_BIND 0.0.0.0
+  if [ "$(env_get PANEL_ALLOW_INSECURE_AGENT)" = "1" ]; then
+    warn "当前未启用 HTTPS：为兼容旧 Agent，明文注册仍开启；建议尽快配置 PANEL_DOMAIN"
+  else
+    warn "当前未启用 HTTPS：管理面仅供本机访问，新 Agent 注册已禁用；请配置 PANEL_DOMAIN"
+  fi
 fi
+
+_pub_ip="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") {print $(i + 1); exit}}')"
+[ -n "${_pub_ip:-}" ] || _pub_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+[ -n "${_pub_ip:-}" ] || _pub_ip="<面板机IP>"
+if [ -z "$(env_get PANEL_AGENT_URL)" ] && [ "$TLS" = "1" ] && [ -n "${PANEL_DOMAIN:-}" ]; then
+  env_set_value PANEL_AGENT_URL "https://$PANEL_DOMAIN"
+else
+  case "$_pub_ip" in
+    *:*) _agent_host="[$_pub_ip]" ;;
+    *) _agent_host="$_pub_ip" ;;
+  esac
+  [ -n "$(env_get PANEL_AGENT_URL)" ] \
+    || env_set_value PANEL_AGENT_URL "http://$_agent_host:$PANEL_AGENT_PORT"
+fi
+
+mkdir -p "$INSTALL_DIR/data"
+as_root chown -R 10001:10001 "$INSTALL_DIR/data"
 
 cd "$INSTALL_DIR" || die "无法进入 $INSTALL_DIR"
 # shellcheck disable=SC2086
@@ -810,7 +915,7 @@ else
     "$(( $(date +%s 2>/dev/null || echo 0) - _t0 ))" "$C_RESET"
 fi
 
-# 抓取容器横幅（含一次性初始登录密码）：只取我们真正要展示的那几行
+# 抓取容器横幅：密码不再进入容器日志，随后从 0600 文件读取一次
 BANNER=""
 _i=0
 while [ "$_i" -lt 15 ]; do
@@ -829,7 +934,11 @@ _banner_field() { # $1=字段名
   printf '%s\n' "$BANNER" | sed -n "s/.*$1[:：][[:space:]]*//p" | head -n1 | tr -d '\r'
 }
 PANEL_USER="$(_banner_field '登录账号')"
-PANEL_PW="$(_banner_field '登录密码')"
+PANEL_PW=""
+if [ "$FRESH_INSTALL" = "1" ] && [ -f "$INSTALL_DIR/data/.initial_password" ]; then
+  PANEL_PW="$(cat "$INSTALL_DIR/data/.initial_password" 2>/dev/null || true)"
+  as_root rm -f "$INSTALL_DIR/data/.initial_password"
+fi
 if [ -z "${PANEL_USER:-}" ] && [ -f "$INSTALL_DIR/data/auth.json" ]; then
   PANEL_USER="$(sed -n 's/.*"user"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
     "$INSTALL_DIR/data/auth.json" | head -n1)"
@@ -844,17 +953,21 @@ printf '  %s✓ 部署完成%s  %s%s v%s%s\n' "$C_GREEN$C_BOLD" "$C_RESET" \
   "$C_BOLD" "$APP_NAME" "${CODE_VER:-$APP_VERSION}" "$C_RESET"
 _rule '─'
 printf '\n'
-if [ -n "${PANEL_DOMAIN:-}" ]; then
+if [ "$TLS" = "1" ] && [ -n "${PANEL_DOMAIN:-}" ]; then
   printf '  %s面板%s   %shttps://%s%s\n' "$C_BOLD" "$C_RESET" "$C_BOLD$C_CYAN" "$PANEL_DOMAIN" "$C_RESET"
+elif [ "${PANEL_BIND:-}" = "127.0.0.1" ]; then
+  printf '  %s面板%s   %shttp://127.0.0.1:%s%s  %s(SSH 隧道或 HTTPS 反代访问)%s\n' \
+    "$C_BOLD" "$C_RESET" "$C_BOLD$C_CYAN" "$PANEL_PORT" "$C_RESET" "$C_DIM" "$C_RESET"
 else
   printf '  %s面板%s   %shttp://%s:%s%s\n' "$C_BOLD" "$C_RESET" "$C_BOLD$C_CYAN" "$PANEL_IP" "$PANEL_PORT" "$C_RESET"
 fi
+printf '  %sAgent%s  %s\n' "$C_BOLD" "$C_RESET" "${PANEL_AGENT_URL:-$(env_get PANEL_AGENT_URL)}"
 printf '  %s账号%s   %s\n' "$C_BOLD" "$C_RESET" "${PANEL_USER:-见 data/auth.json}"
 if [ -n "${PANEL_PW:-}" ] && [ "$FRESH_INSTALL" = "1" ]; then
   printf '  %s密码%s   %s%s%s  %s(仅显示一次，请保存)%s\n' "$C_BOLD" "$C_RESET" \
     "$C_BOLD$C_YELLOW" "$PANEL_PW" "$C_RESET" "$C_DIM" "$C_RESET"
 elif [ "$FRESH_INSTALL" = "1" ]; then
-  printf '  %s密码%s   %s见容器日志：docker compose logs linkpilot | grep 密码%s\n' \
+  printf '  %s密码%s   %s未读取到一次性密码文件；请重置 data/auth.json 后重启%s\n' \
     "$C_BOLD" "$C_RESET" "$C_DIM" "$C_RESET"
 else
   printf '  %s密码%s   沿用原密码  %s(重置：删除 data/auth.json 后重启)%s\n' \
