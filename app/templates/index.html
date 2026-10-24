@@ -430,7 +430,7 @@ body.machine-dragging *{cursor:grabbing!important}
   font-size:13px;font-weight:750;color:var(--text);
 }
 .machine-drag-ghost .ghost-state{flex:none;color:var(--muted);font-size:11px}
-.theme-wash-overlay{
+.theme-reveal-filter{
   position:fixed;inset:0;z-index:160;pointer-events:none;contain:strict;
   will-change:clip-path,opacity;
 }
@@ -2582,40 +2582,46 @@ function revealThemeWithSnapshot(nextTheme, origin, finish) {
   });
 }
 
-function revealThemeLightweight(nextTheme, origin, finish) {
-  // 桌面页面图表和表格更多，克隆整页会产生明显主线程卡顿。这里直接落主题，
-  // 再用一个纯色圆形扫光表达扩散方向；不复制 DOM、不做 backdrop-filter。
-  const oldBackground = getComputedStyle(document.body).getPropertyValue('--bg').trim();
+function revealThemeWithFilter(nextTheme, origin, finish) {
+  // 桌面端不复制 DOM，只在圆形区域内对真实页面做亮度反转和色相回正。
+  // 这样文字、图表和图标都在原位置参与揭示，且滤镜由合成层完成，不阻塞主线程。
   const overlay = document.createElement('div');
-  overlay.className = 'theme-wash-overlay';
+  overlay.className = 'theme-reveal-filter';
   overlay.setAttribute('aria-hidden', 'true');
-  overlay.style.background = oldBackground || (nextTheme === 'dark' ? '#f7f8fc' : '#0b0b12');
+  overlay.style.backdropFilter = 'invert(1) hue-rotate(180deg) saturate(.86) brightness(1.03)';
+  overlay.style.webkitBackdropFilter = 'invert(1) hue-rotate(180deg) saturate(.86) brightness(1.03)';
+  overlay.style.background = nextTheme === 'dark'
+    ? 'rgba(11,11,18,.08)' : 'rgba(247,248,252,.10)';
   const x = Math.max(0, Math.min(window.innerWidth, origin.x));
   const y = Math.max(0, Math.min(window.innerHeight, origin.y));
   const radius = Math.hypot(Math.max(x, window.innerWidth - x),
     Math.max(y, window.innerHeight - y)) + 48;
   overlay.style.clipPath = `circle(0px at ${x}px ${y}px)`;
-  finish();
   document.body.appendChild(overlay);
   let animation;
   try {
     animation = overlay.animate([
-      {clipPath: `circle(0px at ${x}px ${y}px)`, opacity: 0},
-      {clipPath: `circle(${radius * .48}px at ${x}px ${y}px)`, opacity: .20, offset: .48},
-      {clipPath: `circle(${radius}px at ${x}px ${y}px)`, opacity: 0},
+      {clipPath: `circle(0px at ${x}px ${y}px)`},
+      {clipPath: `circle(${radius}px at ${x}px ${y}px)`},
     ], {
-      duration: 480,
+      duration: 520,
       easing: 'cubic-bezier(.2,.72,.25,1)',
       fill: 'forwards',
     });
   } catch (e) {
     overlay.remove();
+    finish();
     THEME_TRANSITIONING = false;
     const button = $('themeBtn');
     if (button) button.removeAttribute('aria-busy');
     return;
   }
-  animation.finished.catch(() => {}).finally(() => {
+  animation.finished.then(() => {
+    finish();
+    return overlay.animate(
+      [{opacity: 1}, {opacity: 0}],
+      {duration: 90, easing: 'linear', fill: 'forwards'}).finished;
+  }).catch(() => {}).finally(() => {
     overlay.remove();
     THEME_TRANSITIONING = false;
     const button = $('themeBtn');
@@ -2652,7 +2658,7 @@ function applyTheme(t, origin = null) {
     THEME_TRANSITIONING = true;
     const button = $('themeBtn');
     if (button) button.setAttribute('aria-busy', 'true');
-    revealThemeLightweight(t, origin, change);
+    revealThemeWithFilter(t, origin, change);
     return;
   }
   if (!document.startViewTransition) {
