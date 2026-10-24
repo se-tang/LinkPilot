@@ -97,4 +97,34 @@ sed -n '/^run_spinner() {/,/^}/p' "$ROOT/install.sh" >"$TMP/run_spinner.sh"
   test "$(printf '%s\n' "$SPIN_OUT" | grep -c '▸ spinner-test ...')" -eq 2
 )
 
-printf 'install.sh update / non-interactive log OK\n'
+# 外部 Nginx 终止 TLS 时，安装脚本只识别指向当前管理端口的 HTTPS 站点，
+# 不能误启用内置 Caddy。
+sed -n '/^detect_external_https_url() {/,/^}/p' "$ROOT/install.sh" >"$TMP/detect.sh"
+mkdir -p "$TMP/nginx-bin"
+cat >"$TMP/nginx-bin/nginx" <<'NGINX_EOF'
+#!/bin/sh
+cat <<'CFG'
+server {
+  listen 443 ssl;
+  server_name fleet.example.com;
+  ssl_certificate /tmp/fullchain.pem;
+  location / { proxy_pass http://127.0.0.1:11192; }
+}
+server {
+  listen 443 ssl;
+  server_name other.example.com;
+  ssl_certificate /tmp/fullchain.pem;
+  location / { proxy_pass http://127.0.0.1:22222; }
+}
+CFG
+NGINX_EOF
+chmod +x "$TMP/nginx-bin/nginx"
+(
+  PANEL_PORT=11192
+  # shellcheck disable=SC1091
+  . "$TMP/detect.sh"
+  detected="$(PATH="$TMP/nginx-bin:$PATH" detect_external_https_url)"
+  test "$detected" = "https://fleet.example.com"
+)
+
+printf 'install.sh update / non-interactive log / external TLS detection OK\n'

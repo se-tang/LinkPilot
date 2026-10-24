@@ -32,7 +32,7 @@ APP_NAME="LinkPilot"
 REPO_SLUG="LinkPilot"
 # 当前版本：与 app/app.py 的 APP_VERSION 保持一致（app.py 是唯一权威）。
 # 升级时脚本会用「更新后的代码里」的版本号自我重跑，所以这里的值只对「全新安装」生效。
-APP_VERSION="0.7.13"
+APP_VERSION="0.7.14"
 REPO_URL="${LINKPILOT_REPO_URL:-https://github.com/se-tang/LinkPilot.git}"
 BRANCH="${LINKPILOT_BRANCH:-main}"
 TARGET_HOME="$(getent passwd "$(id -u)" 2>/dev/null | cut -d: -f6)"
@@ -695,6 +695,28 @@ env_set_value() {
     printf '%s=%s\n' "$1" "$2" >>"$INSTALL_DIR/.env"
   fi
 }
+detect_external_https_url() {
+  command -v nginx >/dev/null 2>&1 || return 1
+  nginx -T 2>/dev/null | awk -v port="$PANEL_PORT" '
+    function flush_server() {
+      if (in_server && ssl && proxied && server_name != "") print "https://" server_name
+    }
+    /^[[:space:]]*server[[:space:]]*\{/ {
+      in_server=1; depth=1; ssl=0; proxied=0; server_name=""; next
+    }
+    in_server {
+      if (server_name == "" && $0 ~ /^[[:space:]]*server_name[[:space:]]+/) {
+        line=$0; sub(/^[[:space:]]*server_name[[:space:]]+/, "", line);
+        sub(/;.*/, "", line);
+        split(line, names, /[[:space:]]+/); if (names[1] != "_") server_name=names[1]
+      }
+      if ($0 ~ /^[[:space:]]*ssl_certificate[[:space:]]+/) ssl=1
+      if (index($0, "proxy_pass http://127.0.0.1:" port ";")) proxied=1
+      opens=gsub(/\{/, "{"); closes=gsub(/\}/, "}"); depth += opens - closes
+      if (depth <= 0) { flush_server(); in_server=0 }
+    }
+  ' | sort -u | head -n1
+}
 
 # 这里判断「是不是首次部署」，必须在 docker compose 之前定死：
 # compose 一起容器就会把 ./data 建出来，之后再看就永远是「已有数据」了
@@ -758,6 +780,11 @@ fi
 PANEL_BIND="$(env_get PANEL_BIND)"
 PANEL_AGENT_PORT="$(env_get PANEL_AGENT_PORT)"
 chmod 600 "$INSTALL_DIR/.env"
+if [ -z "$(env_get PANEL_PUBLIC_URL)" ]; then
+  _detected_public_url="$(detect_external_https_url || true)"
+  [ -z "$_detected_public_url" ] || env_set_value PANEL_PUBLIC_URL "$_detected_public_url"
+fi
+PANEL_PUBLIC_URL="$(env_get PANEL_PUBLIC_URL)"
 case "${PANEL_BIND:-}" in
   127.0.0.1|::1|"[::1]") env_set_value PANEL_TRUST_LOCAL_PROXY 1 ;;
   *) env_set_value PANEL_TRUST_LOCAL_PROXY 0 ;;
@@ -788,7 +815,7 @@ TLS=0
 tls_config_present() {
   [ -f "$INSTALL_DIR/Caddyfile.local" ] && return 0
   [ -f "$INSTALL_DIR/.env" ] || return 1
-  grep -Eq '^[[:space:]]*(PANEL_DOMAIN=.+|PANEL_COOKIE_SECURE=1|CADDY_HTTP=.+|CADDY_HTTPS=.+)' \
+  grep -Eq '^[[:space:]]*(PANEL_DOMAIN=.+|CADDY_HTTP=.+|CADDY_HTTPS=.+)' \
     "$INSTALL_DIR/.env"
 }
 if tls_config_present; then
@@ -798,6 +825,10 @@ if docker_cli ps -a --format '{{.Names}}' 2>/dev/null | grep -qx 'linkpilot-cadd
   TLS=1
 fi
 COMPOSE_ARGS=""
+TLS_EXTERNAL=0
+case "$PANEL_PUBLIC_URL" in
+  https://*) TLS_EXTERNAL=1 ;;
+esac
 if [ "$TLS" = "1" ]; then
   COMPOSE_ARGS="--profile tls"
   env_set_value PANEL_HTTPS 1
@@ -838,6 +869,13 @@ if [ "$TLS" = "1" ]; then
         "$INSTALL_DIR/Caddyfile.local"
     fi
   fi
+elif [ "$TLS_EXTERNAL" = "1" ]; then
+  # 系统 Nginx/Caddy 等外部反代终止 TLS：不启动内置 Caddy。
+  env_set_value PANEL_HTTPS 1
+  env_set_value PANEL_COOKIE_SECURE 1
+  env_set_value PANEL_ALLOW_INSECURE_AGENT 0
+  env_set_value PANEL_AGENT_BIND 127.0.0.1
+  info "检测到外部 HTTPS 反代：$PANEL_PUBLIC_URL"
 else
   env_set_value PANEL_HTTPS 0
   env_set_value PANEL_AGENT_BIND 0.0.0.0
@@ -851,7 +889,9 @@ fi
 _pub_ip="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") {print $(i + 1); exit}}')"
 [ -n "${_pub_ip:-}" ] || _pub_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
 [ -n "${_pub_ip:-}" ] || _pub_ip="<面板机IP>"
-if [ -z "$(env_get PANEL_AGENT_URL)" ] && [ "$TLS" = "1" ] && [ -n "${PANEL_DOMAIN:-}" ]; then
+if [ "$TLS_EXTERNAL" = "1" ]; then
+  env_set_value PANEL_AGENT_URL "$PANEL_PUBLIC_URL"
+elif [ -z "$(env_get PANEL_AGENT_URL)" ] && [ "$TLS" = "1" ] && [ -n "${PANEL_DOMAIN:-}" ]; then
   env_set_value PANEL_AGENT_URL "https://$PANEL_DOMAIN"
 else
   case "$_pub_ip" in
@@ -953,7 +993,9 @@ printf '  %s✓ 部署完成%s  %s%s v%s%s\n' "$C_GREEN$C_BOLD" "$C_RESET" \
   "$C_BOLD" "$APP_NAME" "${CODE_VER:-$APP_VERSION}" "$C_RESET"
 _rule '─'
 printf '\n'
-if [ "$TLS" = "1" ] && [ -n "${PANEL_DOMAIN:-}" ]; then
+if [ "$TLS_EXTERNAL" = "1" ]; then
+  printf '  %s面板%s   %s%s%s\n' "$C_BOLD" "$C_RESET" "$C_BOLD$C_CYAN" "$PANEL_PUBLIC_URL" "$C_RESET"
+elif [ "$TLS" = "1" ] && [ -n "${PANEL_DOMAIN:-}" ]; then
   printf '  %s面板%s   %shttps://%s%s\n' "$C_BOLD" "$C_RESET" "$C_BOLD$C_CYAN" "$PANEL_DOMAIN" "$C_RESET"
 elif [ "${PANEL_BIND:-}" = "127.0.0.1" ]; then
   printf '  %s面板%s   %shttp://127.0.0.1:%s%s  %s(SSH 隧道或 HTTPS 反代访问)%s\n' \
