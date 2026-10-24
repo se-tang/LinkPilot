@@ -1434,7 +1434,7 @@ def test_dashboard_interactions_present():
     for key in ('setChartMode', 'toggleChartMachine', 'setChartDirection',
                 'buildTrendChartSvg', 'copyRichText', 'toggleRunGroup', 'run-group',
                 'AbortController', 'skeleton-chart', 'comparisonTableHtml', '生成报告中',
-                '@media (max-width:700px)', 'params-grid', '保存后会立即开始首轮测试',
+                '@media (max-width:700px)', 'params-grid', '保存后立即开始首轮',
                 'showPopconfirm', 'eventStream', 'runSummary', 'ratingCellHtml',
                 'ratingExplanationHtml', 'ratingText',
                 'renderRunEvents', 'rating_diagnostics', 'event-stage',
@@ -1442,7 +1442,9 @@ def test_dashboard_interactions_present():
                 'run-form', 'run-section-label', 'run-submit',
                 '<th>上行 均/低/高</th><th>下行 均/低/高</th>',
                 'ratingText', 'machines-table', 'col-machine', 'machine-actions',
-                'table-layout:fixed', 'function fmtN(', 'fmtN(agg.avg, nd)'):
+                'table-layout:fixed', 'function fmtN(', 'fmtN(agg.avg, nd)',
+                'function renderRuns(', 'LAST_MACHINES_SIG',
+                'data-action="toggleSchedCard"'):
         assert key in html, f'缺少面板交互：{key}'
     assert "confirm('确定删除该测试记录？')" not in html, '测试记录删除不应使用原生确认框'
     assert 'data-pop="confirm"' in html, 'Popconfirm 缺少确认按钮'
