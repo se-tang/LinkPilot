@@ -2,26 +2,16 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
 <title>LinkPilot · 线路测试面板</title>
 <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='logo.svg') }}"/>
+<meta name="theme-color" content="#f7f8fc" id="metaTheme"/>
+<link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="LinkPilot"/>
 <style>
-:root{
-  --bg:#f3f0e8; --card:#fffdf8; --border:#e1dac9; --text:#302c26; --muted:#776f62;
-  --accent:#0d9488; --green:#15803d; --lime:#65a30d; --orange:#ea580c; --red:#dc2626;
-  --btn-bg:#f7f2e7; --btn-border:#ddd3bf; --btn-hover:#eee7d8;
-  --primary:#f97316; --primary-hover:#ea580c;
-  --input-bg:#fffefa; --code-bg:#f5f1e7; --mask:rgba(45,41,34,.48);
-  --surface2:#faf6ed; --shadow:0 10px 28px rgba(74,63,42,.07);
-}
-body[data-theme='dark']{
-  --bg:#181713; --card:#24221d; --border:#3d382f; --text:#f1eadc; --muted:#aaa193;
-  --accent:#2dd4bf; --green:#4ade80; --lime:#a3e635; --orange:#fb923c; --red:#f87171;
-  --btn-bg:#302d26; --btn-border:#494338; --btn-hover:#3b372f;
-  --primary:#f97316; --primary-hover:#ea580c;
-  --input-bg:#1b1a16; --code-bg:#1d1c18; --mask:rgba(0,0,0,.62);
-  --surface2:#201f1a; --shadow:0 12px 32px rgba(0,0,0,.2);
-}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);font:14px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
 header{display:flex;align-items:center;justify-content:space-between;padding:12px 24px;border-bottom:1px solid var(--border);position:sticky;top:0;background:color-mix(in srgb,var(--bg) 92%,transparent);backdrop-filter:blur(12px);z-index:10}
@@ -71,10 +61,10 @@ summary{cursor:pointer;font-weight:600}
 .rating-a{color:var(--lime);font-weight:600}
 .rating-b{color:var(--orange);font-weight:600}
 .rating-c{color:var(--red);font-weight:600}
-.modal-mask{position:fixed;inset:0;background:var(--mask);display:flex;align-items:center;justify-content:center;z-index:50}
+.modal-mask{position:fixed;inset:0;background:var(--mask);display:flex;align-items:center;justify-content:center;z-index:120}
 /* hidden 必须排在 modal-mask 之后并用 !important，否则 display:flex 会覆盖掉隐藏（历史 bug） */
 .hidden{display:none!important}
-.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--primary);color:#fff;padding:10px 18px;border-radius:8px;z-index:99;max-width:80vw;box-shadow:0 6px 20px rgba(0,0,0,.4)}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--primary);color:#fff;padding:10px 18px;border-radius:8px;z-index:150;max-width:80vw;box-shadow:0 6px 20px rgba(0,0,0,.4)}
 .actions{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 .chk{display:flex;align-items:center;gap:6px;font-size:13px}
 .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:middle}
@@ -105,7 +95,7 @@ summary{cursor:pointer;font-weight:600}
 .badge.waiting{color:var(--lime);border-color:var(--lime)}
 .badge.skipped,.badge.interrupted,.badge.expired{color:var(--orange);border-color:var(--orange)}
 .sched-name{font-weight:600;min-width:116px}
-.sched-actions{display:flex;gap:6px;flex-wrap:wrap}
+.sched-actions{min-width:0}
 #sBackendList{display:grid;grid-template-columns:1fr;gap:5px}
 #sBackendList .sched-backend-option{display:grid;
   grid-template-columns:18px minmax(120px,1fr) minmax(190px,1.4fr);
@@ -276,18 +266,21 @@ header h1{font-size:15px;font-weight:800;gap:10px}
 header .actions{gap:7px}
 #meUser{font-size:12px}
 main{max-width:1200px;padding:20px 16px 64px}
+/* 卡片内的按钮一律不画边：默认透明，悬停才垫一层底色，避免按钮自身成为一层框 */
 button{
-  min-height:32px;padding:0 13px;border-radius:10px;border:1px solid var(--border);
-  background:var(--btn-bg);color:var(--text);font:inherit;font-size:13px;font-weight:650;
-  transition:transform .18s,background .18s,border-color .18s,box-shadow .18s;
+  min-height:32px;padding:0 13px;border-radius:10px;border:0;
+  background:transparent;color:var(--text);font:inherit;font-size:13px;font-weight:650;
+  transition:background .18s,box-shadow .18s;
 }
-button:hover{transform:translateY(-1px);background:var(--btn-hover);border-color:color-mix(in srgb,var(--accent) 40%,var(--border))}
+button:hover{background:var(--btn-hover)}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 button.primary{
   background:var(--brand-gradient);border-color:transparent;color:#fff;
   box-shadow:0 5px 16px rgba(79,92,255,.22);
 }
 button.primary:hover{background:var(--brand-gradient);opacity:.94;box-shadow:0 8px 20px rgba(79,92,255,.26)}
 button.danger{color:var(--red)}
+button.danger:hover{background:color-mix(in srgb,var(--red) 10%,transparent)}
 button.small{min-height:26px;padding:0 9px;font-size:12px;border-radius:8px}
 button:disabled{opacity:.5;transform:none;cursor:not-allowed}
 select,input,textarea{
@@ -323,9 +316,9 @@ input[type=checkbox]{min-height:0;width:16px;height:16px;padding:0;accent-color:
   background:linear-gradient(145deg,rgba(255,255,255,.025),transparent 42%),var(--card);
   box-shadow:var(--shadow);overflow:hidden;
 }
+/* 卡片头不再做内嵌色带：卡片本身是唯一的一层框 */
 .card-head{
-  min-height:54px;margin:0 -18px 12px;padding:13px 18px;
-  border-bottom:1px solid var(--border);background:rgba(123,108,246,.035);
+  margin:0 0 10px;padding:14px 0 0;
 }
 .card-head h2{font-size:15px;font-weight:800;letter-spacing:0}
 h3{font-size:13px;color:var(--text);margin:16px 0 8px}
@@ -343,10 +336,12 @@ table{font-size:13px}
 .machines-table th,.machines-table td{padding:9px 8px;vertical-align:top;text-align:left}
 .machines-table .machine-name,.machines-table .machine-address,
 .machines-table .machine-meta{overflow-wrap:anywhere}
-.machines-table .machine-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px}
-.machines-table .machine-actions button{width:100%;min-width:0}
+/* 操作按钮的 flex/grid 必须放在 td 内层 div 上：td 一旦变成 flex/grid 容器就不再随行高拉伸，
+   其他列折行变高时操作列的底部分割线会浮起来错位 */
+.machines-table .btn-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px}
+.machines-table .btn-grid button{width:100%;min-width:0}
 th{
-  padding:10px 11px;background:rgba(123,108,246,.05);color:var(--muted);
+  padding:10px 11px;color:var(--muted);
   font-size:11px;font-weight:750;letter-spacing:0;
 }
 th,td{padding:10px 11px;border-bottom:1px solid var(--border);vertical-align:middle}
@@ -402,7 +397,7 @@ body[data-theme='dark'] .rb.rating-c{background:#452c3b;color:#ffb1bb}
 .diagnostic-item.bad b,.diagnostic-item.critical b{color:var(--red)}
 .diagnostic-item.ok b{color:var(--green)}.diagnostic-item.unknown b{color:var(--muted)}
 .event-stream{
-  background:var(--code-bg);color:var(--text);border:1px solid var(--border);border-radius:14px;
+  background:var(--code-bg);color:var(--text);border-radius:14px;
   padding:13px 14px;max-height:260px;overflow:auto;
   font:12px/1.7 ui-monospace,Menlo,Consolas,monospace;
 }
@@ -417,15 +412,15 @@ body[data-theme='dark'] .rb.rating-c{background:#452c3b;color:#ffb1bb}
 .event-line.running .event-title{color:var(--accent)}
 .raw-log-box{margin:6px 0 12px}.raw-log-box summary{color:var(--muted);font-size:12px}
 .popconfirm{
-  position:fixed;z-index:120;width:min(280px,calc(100vw - 20px));padding:12px;
+  position:fixed;z-index:140;width:min(280px,calc(100vw - 20px));padding:12px;
   border:1px solid var(--border);border-radius:12px;background:var(--card);
   color:var(--text);box-shadow:0 18px 50px rgba(0,0,0,.28);
 }
 .popconfirm h4{margin:0 0 4px;font-size:13px}.popconfirm p{margin:0 0 10px;color:var(--muted);font-size:12px;line-height:1.55;white-space:pre-line}
 .popconfirm .actions{justify-content:flex-end}
-pre,.md-render{background:var(--code-bg);border:1px solid var(--border);border-radius:14px}
+pre,.md-render{background:var(--code-bg);border-radius:14px}
 pre{padding:13px 14px;font-size:12px;line-height:1.7}
-details{border-radius:10px;background:color-mix(in srgb,var(--card) 92%,var(--surface2))}
+details{border:0;border-radius:10px;background:var(--surface2)}
 .quiet{font-size:12px;color:var(--muted)}
 #agentCmd{background:var(--code-bg)}
 .modal-mask{padding:16px;backdrop-filter:blur(6px)}
@@ -437,38 +432,38 @@ details{border-radius:10px;background:color-mix(in srgb,var(--card) 92%,var(--su
 .field{margin-bottom:12px}
 .grid2{gap:12px}
 .field label,.grid2 label{color:var(--muted);font-size:12px}
-#backendList{background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:8px 10px}
+#backendList{background:transparent;border:0;border-radius:0;padding:2px 0}
 #backendList .chk{padding:3px 0}
 .run-form{display:flex;flex-direction:column;gap:9px}
 .run-section-label{display:flex;flex-direction:column;gap:4px;color:var(--muted);font-size:12px}
 .run-section-label>select{width:100%;color:var(--text);font-size:13px}
-.run-backend-list{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:7px 10px;display:flex;flex-direction:column;gap:3px}
+.run-backend-list{background:transparent;border:0;border-radius:0;padding:2px 0;display:flex;flex-direction:column;gap:3px}
 .run-options{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--text)}
 .run-options .chk{font-size:12px}
 .run-hint{color:var(--muted);font-size:11px;min-height:16px;line-height:1.45}
 .run-params-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin:0}
 .run-params-grid>.field{width:auto!important;margin:0!important}
 .run-submit{width:100%;min-height:36px;margin-top:2px}
-#sBackendList{border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--surface2)}
+#sBackendList{border:0;border-radius:0;overflow:visible;background:transparent}
 #sBackendList .sched-backend-option{padding:8px 10px;border-bottom:1px solid var(--border);border-radius:0}
 #sBackendList .sched-backend-option:last-child{border-bottom:0}
 .sched-backend-option:hover{background:rgba(123,108,246,.07)}
-.sched-lifetime-row{background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:8px 10px}
+.sched-lifetime-row{background:transparent;border:0;border-radius:0;padding:2px 0}
 .toast{background:#111015;border-radius:10px;padding:8px 14px;box-shadow:0 12px 34px rgba(0,0,0,.3)}
 .chart-toolbar{margin-bottom:10px}
 .chips{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:8px 0}
 .chart-control-label{color:var(--muted);font-size:12px;margin-right:2px}
 .chip{
-  min-height:28px;padding:2px 9px;border:1px solid var(--border);border-radius:8px;
-  background:var(--bg);color:var(--text);font-size:12px;box-shadow:none;
+  min-height:28px;padding:2px 9px;border:0;border-radius:8px;
+  background:transparent;color:var(--text);font-size:12px;box-shadow:none;
 }
-.chip:hover{transform:none;background:var(--btn-hover);border-color:var(--border)}
-.chip.on,.chip.active{background:var(--btn-hover);border-color:transparent;color:var(--accent);font-weight:700}
+.chip:hover{transform:none;background:var(--btn-hover)}
+.chip.on,.chip.active{background:var(--btn-hover);color:var(--accent);font-weight:700}
 .chip i{display:inline-block;width:14px;height:3px;margin-right:6px;vertical-align:middle;border-radius:2px}
-.segmented{border-radius:9px;background:var(--surface2);padding:3px}
+.segmented{border:0;border-radius:9px;background:transparent;padding:0;gap:2px}
 .segmented button{min-height:28px;border:0;background:transparent;box-shadow:none;color:var(--muted)}
-.segmented button:hover{transform:none;background:rgba(123,108,246,.08);border-color:transparent}
-.segmented button.active{background:var(--card);color:var(--text);box-shadow:0 2px 8px rgba(38,43,77,.09)}
+.segmented button:hover{transform:none;background:var(--btn-hover);border-color:transparent}
+.segmented button.active{background:var(--btn-hover);color:var(--accent);font-weight:700;box-shadow:none}
 .chart-picker{gap:6px}
 .chart-chip{
   min-height:28px;border-radius:8px;background:var(--surface2);color:var(--text);
@@ -476,7 +471,7 @@ details{border-radius:10px;background:color-mix(in srgb,var(--card) 92%,var(--su
 }
 .chart-chip:hover{transform:none;background:var(--btn-hover)}
 .chart-chip.active{border-color:transparent;background:var(--btn-hover);color:var(--accent)}
-#chartWrap{background:var(--surface2);border:1px solid var(--border);border-radius:14px;padding:0}
+#chartWrap{background:var(--surface2);border-radius:14px;padding:0}
 #chartWrap svg{min-width:660px}
 .legend{color:var(--muted)}
 .run-group td{background:rgba(123,108,246,.09);border-top:1px solid var(--border)}
@@ -504,7 +499,7 @@ details{border-radius:10px;background:color-mix(in srgb,var(--card) 92%,var(--su
   .stat span{font-size:11px}
   .dashboard-grid{gap:12px}
   .card{padding:0 12px 12px;margin-bottom:12px;border-radius:14px}
-  .card-head{min-height:48px;margin:0 -12px 10px;padding:11px 12px;border-radius:14px 14px 0 0;flex-wrap:wrap}
+  .card-head{margin:0 0 8px;padding:12px 0 0;flex-wrap:wrap}
   .card-head h2{font-size:14px}
   .tbl-wrap{margin:0 -2px}
   th,td{padding:7px 7px}
@@ -542,6 +537,134 @@ details{border-radius:10px;background:color-mix(in srgb,var(--card) 92%,var(--su
   .params-grid{grid-template-columns:1fr}
   .run-params-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
+/* ---- 成品2：微交互与图表增强 ---- */
+/* 运行中/等待中徽章呼吸点 */
+.badge.running::before,.badge.waiting::before{
+  content:'';display:inline-block;width:6px;height:6px;border-radius:50%;
+  background:currentColor;margin-right:5px;vertical-align:1px;
+  animation:badgePulse 1.6s ease-in-out infinite;
+}
+@keyframes badgePulse{0%,100%{opacity:.3}50%{opacity:1}}
+/* 弹窗 / Popconfirm 出场 */
+.modal-mask{animation:fadeIn .18s ease}
+.modal{animation:popIn .24s cubic-bezier(.34,1.4,.64,1)}
+.popconfirm{animation:popIn .18s ease}
+@keyframes fadeIn{from{opacity:0}}
+@keyframes popIn{from{opacity:0;transform:scale(.95) translateY(10px)}}
+/* toast 滑入淡出 */
+.toast{animation:toastIn .26s ease;transition:opacity .3s ease}
+@keyframes toastIn{from{opacity:0;transform:translate(-50%,12px)}}
+/* 统计卡迷你趋势线 */
+.stat{position:relative}
+.stat-spark{position:absolute;right:14px;bottom:14px;width:64px;height:22px;overflow:visible}
+.stat-spark polyline{fill:none;stroke:var(--accent);stroke-width:1.6;opacity:.6;stroke-linecap:round;stroke-linejoin:round}
+.stat-spark circle{fill:var(--accent);opacity:.85}
+/* 图表 hover 十字线与数值气泡 */
+.chart-box{position:relative}
+.chart-cross{position:absolute;top:8px;bottom:30px;width:1px;background:var(--accent);opacity:.45;pointer-events:none;z-index:2}
+.chart-tip{position:absolute;top:10px;z-index:5;pointer-events:none;background:var(--card);
+  border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);
+  padding:8px 11px;font-size:11px;line-height:1.55;min-width:150px;max-width:250px;max-height:215px;overflow:auto}
+.chart-tip[hidden],.chart-cross[hidden]{display:none}
+.chart-tip .tip-head{font-weight:750;margin-bottom:4px}
+.chart-tip .tip-row{padding:3px 0;border-top:1px solid var(--border)}
+.chart-tip .tip-row:first-of-type{border-top:0;padding-top:0}
+.chart-tip .tip-row b{display:block;margin-bottom:1px}
+.chart-tip .tip-v{display:inline-flex;align-items:center;gap:4px;margin-right:10px;color:var(--text)}
+.chart-tip .tip-v i{width:8px;height:8px;border-radius:2px;display:inline-block}
+/* 空状态插画 */
+.empty-state{text-align:center;padding:26px 10px 20px}
+.empty-state svg{width:58px;height:58px;display:block;margin:0 auto 10px;opacity:.4;color:var(--muted)}
+.empty-state b{display:block;font-size:13px}
+.empty-state .muted{display:block;font-size:12px;margin:3px 0 12px}
+
+/* 手机端 App 化：底部悬浮导航（毛玻璃圆角条）+ 标签页切换，详情页整页覆盖 */
+#appNav{display:none}
+#homeQuick{display:none}
+#homeFeed{display:none}
+.app-back{display:none}
+@media (max-width:720px){
+  #appNav{
+    position:fixed;left:12px;right:12px;bottom:calc(10px + env(safe-area-inset-bottom,0px));
+    z-index:108;display:flex;justify-content:space-around;align-items:stretch;gap:2px;
+    padding:6px;border-radius:24px;
+    background:color-mix(in srgb,var(--card) 80%,transparent);
+    border:1px solid var(--border);
+    backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+    box-shadow:0 12px 40px rgba(20,22,58,.24);
+  }
+  #appNav button{
+    position:relative;z-index:1;
+    flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+    min-height:54px;min-width:0;padding:7px 2px 6px;border-radius:18px;background:transparent;
+    color:var(--muted);font-size:11px;font-weight:600;
+    transition:color .25s ease,background .25s ease;
+  }
+  #appNav button svg{width:23px;height:23px;display:block}
+  #appNav button:not(.active):hover{background:var(--btn-hover);color:var(--text)}
+  #appNav button.active{background:transparent;color:var(--accent)}
+  /* 滑动指示条：淡紫圆角胶囊在按钮间平移，替代按钮自身底色切换，避免方形闪块 */
+  #appNav .nav-ind{
+    position:absolute;top:6px;bottom:6px;left:0;width:0;border-radius:18px;
+    background:var(--btn-hover);
+    transition:transform .3s cubic-bezier(.35,0,.2,1),width .3s cubic-bezier(.35,0,.2,1);
+  }
+  /* tab 切换：新页面淡入上移（prefers-reduced-motion 下全局禁用动画） */
+  @keyframes tabIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  main.tab-anim .overview,
+  main.tab-anim .dashboard-grid > .card,
+  main.tab-anim > .card,
+  main.tab-anim #homeFeed > .card{animation:tabIn .26s ease}
+  main{padding-bottom:112px}
+  /* 记录页头部窄屏改纵向：标题一行，筛选+刷新一行 */
+  #runsCard .card-head{flex-direction:column;align-items:stretch;gap:6px}
+  #runsCard .card-head .actions{justify-content:space-between}
+  .empty-cell{grid-column:1/-1}
+  .stat-spark{right:10px;bottom:9px;width:54px;height:18px}
+  body[data-app-tab='home'] #homeQuick{display:flex;gap:8px;margin:0 0 14px}
+  body[data-app-tab='home'] #homeQuick .primary{flex:1;min-height:46px}
+  *{-webkit-tap-highlight-color:transparent}
+  /* 总览页信息卡（仅手机端首页显示） */
+  body[data-app-tab='home'] #homeFeed{display:block}
+  .home-row{display:flex;align-items:center;gap:10px;width:100%;min-height:54px;padding:9px 6px;border-radius:12px;background:transparent;text-align:left}
+  .home-row:hover{background:var(--btn-hover)}
+  .home-row-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+  .home-row-main b{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .home-row-chev{color:var(--muted);flex:none}
+  .home-empty{margin:4px 2px 8px;font-size:12px}
+  body[data-app-tab='home'] .dashboard-grid,
+  body[data-app-tab='home'] #schedulesCard,
+  body[data-app-tab='home'] #runsCard{display:none}
+  body[data-app-tab='machines'] .overview,
+  body[data-app-tab='machines'] #homeQuick,
+  body[data-app-tab='machines'] #runCard,
+  body[data-app-tab='machines'] #schedulesCard,
+  body[data-app-tab='machines'] #runsCard{display:none}
+  body[data-app-tab='run'] .overview,
+  body[data-app-tab='run'] #homeQuick,
+  body[data-app-tab='run'] #machinesCard,
+  body[data-app-tab='run'] #schedulesCard,
+  body[data-app-tab='run'] #runsCard{display:none}
+  body[data-app-tab='tasks'] .overview,
+  body[data-app-tab='tasks'] #homeQuick,
+  body[data-app-tab='tasks'] .dashboard-grid,
+  body[data-app-tab='tasks'] #runsCard{display:none}
+  body[data-app-tab='records'] .overview,
+  body[data-app-tab='records'] #homeQuick,
+  body[data-app-tab='records'] .dashboard-grid,
+  body[data-app-tab='records'] #schedulesCard{display:none}
+  /* 详情类卡片在手机端变成整页覆盖层（底部导航保持可见可切换） */
+  #runDetail:not(.hidden),#schedDetail:not(.hidden){
+    position:fixed;inset:0;z-index:107;margin:0;border:0;border-radius:0;box-shadow:none;
+    overflow:auto;overscroll-behavior:contain;background:var(--card);
+    padding:0 12px calc(96px + env(safe-area-inset-bottom,0px));
+  }
+  #runDetail:not(.hidden) .card-head,#schedDetail:not(.hidden) .card-head{
+    position:sticky;top:0;z-index:2;margin:0 -12px 10px;padding:12px 12px 8px;background:var(--card);
+  }
+  #runDetail:not(.hidden) .app-back{display:inline-flex}
+  body.app-detail-open{overflow:hidden}
+}
 @media (prefers-reduced-motion:reduce){
   *{transition:none!important;scroll-behavior:auto!important}
 }
@@ -560,11 +683,26 @@ details{border-radius:10px;background:color-mix(in srgb,var(--card) 92%,var(--su
 </header>
 <main>
   <section class="overview">
-    <div class="stat"><b id="statOnline">—</b><span>在线机器</span></div>
-    <div class="stat"><b id="statBackends">—</b><span>可用后端</span></div>
-    <div class="stat"><b id="statSchedules">—</b><span>启用中的定时任务</span></div>
-    <div class="stat"><b id="statRuns">—</b><span>最近测试记录</span></div>
+    <div class="stat"><b id="statOnline">—</b><span>在线机器</span><svg class="stat-spark" id="sparkStatOnline" viewBox="0 0 64 22" preserveAspectRatio="none" aria-hidden="true"></svg></div>
+    <div class="stat"><b id="statBackends">—</b><span>可用后端</span><svg class="stat-spark" id="sparkStatBackends" viewBox="0 0 64 22" preserveAspectRatio="none" aria-hidden="true"></svg></div>
+    <div class="stat"><b id="statSchedules">—</b><span>启用中的定时任务</span><svg class="stat-spark" id="sparkStatSchedules" viewBox="0 0 64 22" preserveAspectRatio="none" aria-hidden="true"></svg></div>
+    <div class="stat"><b id="statRuns">—</b><span>最近测试记录</span><svg class="stat-spark" id="sparkStatRuns" viewBox="0 0 64 22" preserveAspectRatio="none" aria-hidden="true"></svg></div>
   </section>
+  <div id="homeQuick" class="home-quick">
+    <button class="primary" data-action="setAppTab" data-tab="run">⚡ 发起一次测试</button>
+  </div>
+  <div id="homeFeed">
+    <section class="card" id="homeRunsCard">
+      <div class="card-head"><h2>最近测试</h2>
+        <button class="small" data-action="setAppTab" data-tab="records">全部 ›</button></div>
+      <div id="homeRunsList"></div>
+    </section>
+    <section class="card" id="homeSchedCard">
+      <div class="card-head"><h2>定时任务动态</h2>
+        <button class="small" data-action="setAppTab" data-tab="tasks">管理 ›</button></div>
+      <div id="homeSchedList"></div>
+    </section>
+  </div>
   <div class="dashboard-grid">
   <section class="card" id="machinesCard">
     <div class="card-head">
@@ -659,8 +797,12 @@ details{border-radius:10px;background:color-mix(in srgb,var(--card) 92%,var(--su
       </div>
     </div>
     <div class="chips" id="chartPicker"></div>
-    <h3>吞吐趋势（Mbit/s）</h3>
-    <div id="chartWrap"></div>
+    <h3>吞吐趋势（Mbit/s）<span class="quiet" style="font-weight:400;font-size:11px;margin-left:8px">悬停查看每轮数值</span></h3>
+    <div class="chart-box" id="chartBox">
+      <div id="chartWrap"></div>
+      <div id="chartCross" class="chart-cross" hidden></div>
+      <div id="chartTip" class="chart-tip" hidden></div>
+    </div>
     <div class="legend" id="chartLegend"></div>
     <h3>跨轮汇总（全部轮次的均值 / 极值）</h3>
     <div class="tbl-wrap">
@@ -689,7 +831,11 @@ details{border-radius:10px;background:color-mix(in srgb,var(--card) 92%,var(--su
     <div class="card-head">
       <h2>测试记录</h2>
       <div class="actions">
-        <label class="chk" title="只显示定时任务触发的测试"><input type="checkbox" id="onlyScheduled"> 只看定时任务</label>
+        <div class="segmented" id="runsFilter" role="group" aria-label="记录筛选">
+          <button class="active" data-action="setRunsFilter" data-filter="manual">手动测试</button>
+          <button data-action="setRunsFilter" data-filter="schedule">定时任务</button>
+          <button data-action="setRunsFilter" data-filter="all">全部</button>
+        </div>
         <button data-action="loadRuns">刷新</button>
       </div>
     </div>
@@ -705,6 +851,7 @@ details{border-radius:10px;background:color-mix(in srgb,var(--card) 92%,var(--su
     <div class="card-head">
       <h2 id="runDetailTitle">测试</h2>
       <div class="actions">
+        <button class="small app-back" data-action="closeRunDetail">‹ 返回</button>
         <button class="small" data-action="copyReport">📋 复制 Markdown 报告</button>
         <button class="small" data-action="downloadReport">⬇ 下载 .md</button>
         <button class="small danger" data-action="stopCurrentRun">⏹ 停止</button>
@@ -735,6 +882,30 @@ details{border-radius:10px;background:color-mix(in srgb,var(--card) 92%,var(--su
     <div id="reportRender" class="md-render hidden"></div>
   </section>
 </main>
+
+<nav id="appNav" aria-label="主导航">
+  <span class="nav-ind" aria-hidden="true"></span>
+  <button data-action="setAppTab" data-tab="home" class="active" aria-current="page">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10.8 12 4l8 6.8V20a1 1 0 0 1-1 1h-4.4v-6.4H9.4V21H5a1 1 0 0 1-1-1z"/></svg>
+    <span>总览</span>
+  </button>
+  <button data-action="setAppTab" data-tab="machines">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>
+    <span>机器</span>
+  </button>
+  <button data-action="setAppTab" data-tab="run">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2.5 5.2 13.4h5.6l-0.6 8.1 8.8-11.9H15.2z"/></svg>
+    <span>测试</span>
+  </button>
+  <button data-action="setAppTab" data-tab="tasks">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.6"/><path d="M12 7.4V12l3.2 1.9"/></svg>
+    <span>任务</span>
+  </button>
+  <button data-action="setAppTab" data-tab="records">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 3.5h7.4l4 4v13H6.5z"/><path d="M13.6 3.5v4.2h4.3"/><path d="M9.6 12.6h5M9.6 16.1h5"/></svg>
+    <span>记录</span>
+  </button>
+</nav>
 
 <div id="modal" class="modal-mask hidden">
   <div class="modal">
@@ -867,6 +1038,8 @@ let agentTimer = null;
 let agentMachine = null;
 let runFormInit = false;
 let EXPANDED_RUN_GROUPS = new Set();
+let RUNS_FILTER = 'manual';  // 测试记录默认只看手动，定时任务记录单独一档，避免混排杂乱
+let ALL_RUNS = [];           // 全量测试记录缓存，供总览页「最近测试」使用
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -888,7 +1061,69 @@ function toast(msg, ms = 3500) {
   t.className = 'toast';
   t.textContent = msg;
   document.body.appendChild(t);
+  setTimeout(() => { t.style.opacity = '0'; }, Math.max(0, ms - 300));
   setTimeout(() => t.remove(), ms);
+}
+
+/* 统计卡数字滚动（系统开启"减少动态效果"时直接落值） */
+function setStat(id, target) {
+  const el = $(id);
+  if (!el) return;
+  target = Number(target) || 0;
+  const from = Number(el.dataset.v || 0);
+  el.dataset.v = String(target);
+  if (from === target) { el.textContent = String(target); return; }
+  if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    el.textContent = String(target);
+    return;
+  }
+  cancelAnimationFrame(el._raf);
+  const t0 = performance.now(), dur = 550;
+  const step = t => {
+    const p = Math.min(1, (t - t0) / dur);
+    el.textContent = Math.round(from + (target - from) * (1 - Math.pow(1 - p, 3)));
+    if (p < 1) el._raf = requestAnimationFrame(step);
+  };
+  el._raf = requestAnimationFrame(step);
+}
+
+/* 统计卡 sparkline：在线/后端/任务用会话内历史，记录数用按日统计 */
+const SPARK_HIST = {sparkStatOnline: [], sparkStatBackends: [], sparkStatSchedules: []};
+function drawSpark(id, data) {
+  const svg = $(id);
+  if (!svg) return;
+  const vals = (data || []).filter(v => Number.isFinite(v));
+  if (!vals.length) { svg.innerHTML = ''; return; }
+  const W = 64, H = 22, pad = 2;
+  const min = Math.min(...vals), max = Math.max(...vals);
+  const x = i => vals.length === 1 ? W - 4 : pad + (W - pad * 2) * (i / (vals.length - 1));
+  const y = v => (max === min ? H / 2 : pad + (H - pad * 2) * (1 - (v - min) / (max - min)));
+  const pts = vals.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`);
+  const last = pts[pts.length - 1].split(',');
+  svg.innerHTML = `<polyline points="${pts.join(' ')}"/><circle cx="${last[0]}" cy="${last[1]}" r="2.4"/>`;
+}
+function pushSpark(id, v) {
+  const arr = SPARK_HIST[id];
+  if (!arr) return;
+  arr.push(Number(v) || 0);
+  if (arr.length > 24) arr.shift();
+  drawSpark(id, arr);
+}
+
+/* 触觉反馈：支持的设备轻微震动，其余环境静默跳过 */
+function buzz(ms = 8) {
+  try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) {}
+}
+
+/* 空状态插画 */
+const EMPTY_ICONS = {
+  server: '<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="10" y="12" width="44" height="16" rx="4"/><rect x="10" y="36" width="44" height="16" rx="4"/><path d="M18 20h.5M18 44h.5M28 20h16M28 44h16"/></svg>',
+  runs: '<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 8h24l10 10v38H16z"/><path d="M40 8v10h10M24 30h18M24 40h18M24 50h10"/></svg>',
+  clock: '<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="32" cy="36" r="18"/><path d="M32 27v9l6 4M24 8h16M48 10l5 5"/></svg>',
+};
+function emptyState(icon, title, sub, action) {
+  return `<tr><td colspan="99" class="empty-cell"><div class="empty-state">${icon}`
+    + `<b>${esc(title)}</b><span class="muted">${esc(sub)}</span>${action || ''}</div></td></tr>`;
 }
 
 function statusText(s) {
@@ -1029,10 +1264,20 @@ async function loadMachines() {
 
 function renderMachines() {
   const tb = $('machinesBody');
-  if ($('statOnline')) $('statOnline').textContent = MACHINES.filter(m => m.online).length;
-  if ($('statBackends')) $('statBackends').textContent = MACHINES.filter(m => m.role === 'backend' && m.online).length;
+  const onlineCount = MACHINES.filter(m => m.online).length;
+  const backendCount = MACHINES.filter(m => m.role === 'backend' && m.online).length;
+  setStat('statOnline', onlineCount);
+  setStat('statBackends', backendCount);
+  pushSpark('sparkStatOnline', onlineCount);
+  pushSpark('sparkStatBackends', backendCount);
+  if ($('machinesSummary')) {
+    $('machinesSummary').textContent = MACHINES.length
+      ? `${MACHINES.length} 台机器 · ${onlineCount} 在线 · ${MACHINES.filter(m => m.role === 'backend').length} 后端`
+      : '暂无机器';
+  }
   if (!MACHINES.length) {
-    tb.innerHTML = '<tr><td colspan="4" class="muted">暂无机器，点击右上角「添加机器」开始</td></tr>';
+    tb.innerHTML = emptyState(EMPTY_ICONS.server, '还没有机器', '添加目标机与后端机后，就能发起线路测试',
+      '<button class="small" data-action="openMachineForm">＋ 添加机器</button>');
     return;
   }
   tb.innerHTML = MACHINES.map(m => `
@@ -1043,12 +1288,12 @@ function renderMachines() {
         <div class="quiet">${addrCell(m)}</div></td>
       <td class="machine-meta">${esc(m.region) || '—'} · ${esc(m.bandwidth) || '—'}
         <div class="quiet">${esc(m.hostname) || '—'}</div></td>
-      <td class="actions machine-actions">
+      <td class="machine-actions"><div class="btn-grid">
         <button class="small" data-action="showAgentCmd" data-id="${m.id}">接入</button>
         <button class="small" data-action="discoverMachine" data-id="${m.id}" title="重新探测本机 IPv4 / IPv6 地址">探测</button>
         <button class="small" data-action="editMachine" data-id="${m.id}">编辑</button>
         <button class="small danger" data-action="deleteMachine" data-id="${m.id}">删除</button>
-      </td>
+      </div></td>
     </tr>`).join('');
 }
 
@@ -1205,17 +1450,22 @@ async function regenToken() {
   }
 }
 
-async function deleteMachine(id) {
+function deleteMachine(id, anchor) {
   const m = MACHINES.find(x => x.id === Number(id));
   if (!m) return;
-  if (!confirm(`确定删除机器「${m.name}」？\n面板会自动向它下发 Agent 卸载指令（在线机器下次心跳时执行）。`)) return;
-  try {
-    await api(`/api/machines/${id}`, {method: 'DELETE'});
-    await loadMachines();
-    toast('已删除；卸载指令将在 Agent 下次心跳时自动执行');
-  } catch (e) {
-    alert('删除失败: ' + e.message);
-  }
+  // 与测试记录/定时任务的删除保持一致：走 Popconfirm，而不是原生 confirm
+  showPopconfirm(anchor, {
+    title: '删除机器',
+    message: `确定删除机器「${m.name}」？\n面板会自动向它下发 Agent 卸载指令（在线机器下次心跳时执行）。`,
+    confirmText: '删除',
+    danger: true,
+    errorPrefix: '删除失败',
+    onConfirm: async () => {
+      await api(`/api/machines/${id}`, {method: 'DELETE'});
+      await loadMachines();
+      toast('已删除；卸载指令将在 Agent 下次心跳时自动执行');
+    },
+  });
 }
 
 async function discoverMachine(id) {
@@ -1404,12 +1654,29 @@ function startRun(anchor) {
 async function loadRuns() {
   let runs = [];
   try { runs = await api('/api/runs'); } catch (e) { return; }
-  if ($('statRuns')) $('statRuns').textContent = runs.length;
-  const onlySched = $('onlyScheduled') && $('onlyScheduled').checked;
-  if (onlySched) runs = runs.filter(r => r.source === 'schedule' || r.schedule_id);
+  setStat('statRuns', runs.length);
+  const byDay = {};
+  runs.forEach(r => { const d = String(r.created_at || '').slice(0, 10); if (d) byDay[d] = (byDay[d] || 0) + 1; });
+  drawSpark('sparkStatRuns', Object.keys(byDay).sort().slice(-8).map(d => byDay[d]));
+  if ($('runsSummary')) {
+    const latest = runs.reduce((acc, r) => (String(r.created_at || '') > acc ? String(r.created_at) : acc), '');
+    $('runsSummary').textContent = runs.length
+      ? `${runs.length} 条记录${latest ? ` · 最近 ${latest}` : ''}` : '暂无测试记录';
+  }
+  ALL_RUNS = runs;
+  renderHome();
+  const isSched = (r) => r.source === 'schedule' || r.schedule_id;
+  if (RUNS_FILTER === 'manual') runs = runs.filter(r => !isSched(r));
+  else if (RUNS_FILTER === 'schedule') runs = runs.filter(isSched);
   const tb = $('runsBody');
   if (!runs.length) {
-    tb.innerHTML = `<tr><td colspan="7" class="muted">${onlySched ? '暂无定时任务触发的测试记录' : '暂无测试记录'}</td></tr>`;
+    const emptyCfg = {
+      manual: ['还没有手动测试', '选好目标机与后端机，发起第一轮线路测试',
+        '<button class="small primary" data-action="gotoRun">⚡ 去发起测试</button>'],
+      schedule: ['暂无定时任务记录', '在「任务」页开启定时任务后，逐轮结果会出现在这里', ''],
+      all: ['暂无测试记录', '发起一轮测试后，结果会汇总在这里', ''],
+    }[RUNS_FILTER] || ['暂无测试记录', '', ''];
+    tb.innerHTML = emptyState(EMPTY_ICONS.runs, emptyCfg[0], emptyCfg[1], emptyCfg[2]);
     return;
   }
   const groups = new Map();
@@ -1439,10 +1706,10 @@ async function loadRuns() {
       <td>${r.done_count}/${r.backend_total}${r.fail_count ? ` · <span style="color:var(--red)">${r.fail_count} 失败</span>` : ''}</td>
       <td><span class="badge ${r.status}">${statusText(r.status)}</span></td>
       <td class="muted">${r.created_at}</td>
-      <td class="actions">
+      <td class="run-actions"><div class="actions">
         <button class="small" data-action="openRun" data-id="${r.id}">查看</button>
         <button class="small danger" data-action="removeRun" data-id="${r.id}">删除</button>
-      </td>
+      </div></td>
     </tr>`;
   };
 
@@ -1469,6 +1736,14 @@ async function loadRuns() {
     const children = open ? entry.runs.map(r => runRow(r, true)).join('') : '';
     return group + children;
   }).join('');
+}
+
+function setRunsFilter(filter) {
+  RUNS_FILTER = ['manual', 'schedule', 'all'].includes(filter) ? filter : 'manual';
+  document.querySelectorAll('#runsFilter button').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.filter === RUNS_FILTER);
+  });
+  loadRuns();
 }
 
 function toggleRunGroup(sid) {
@@ -1533,6 +1808,7 @@ function renderRunEvents(events) {
 
 function openRun(id) {
   CURRENT_RUN = Number(id);
+  document.body.classList.add('app-detail-open');
   $('runDetail').classList.remove('hidden');
   $('runDetail').scrollIntoView({behavior: 'smooth'});
   $('runDetailTitle').textContent = `测试 #${CURRENT_RUN}`;
@@ -1721,6 +1997,9 @@ function applyTheme(t) {
   document.body.dataset.theme = t;
   try { localStorage.setItem('fleet-theme', t); } catch (e) {}
   $('themeBtn').textContent = t === 'light' ? '🌙 深色' : '☀️ 浅色';
+  // 手机状态栏/浏览器 chrome 跟随主题色
+  const meta = $('metaTheme');
+  if (meta) meta.setAttribute('content', t === 'dark' ? '#0b0b12' : '#f7f8fc');
 }
 
 function toggleTheme() {
@@ -1800,6 +2079,7 @@ function showPopconfirm(anchor, {
   bubble.querySelector('[data-pop="cancel"]').addEventListener('click', closePopconfirm);
   bubble.querySelector('[data-pop="confirm"]').addEventListener('click', async (event) => {
     const btn = event.currentTarget;
+    buzz(8);
     btn.disabled = true;
     btn.textContent = busyText;
     try {
@@ -1889,16 +2169,20 @@ function schedStatusText(s) {
 
 async function loadSchedules() {
   try { SCHEDULES = await api('/api/schedules?_=' + Date.now()); } catch (e) { return; }
-  if ($('statSchedules')) $('statSchedules').textContent = SCHEDULES.filter(s => s.enabled).length;
+  const enabledCount = SCHEDULES.filter(s => s.enabled).length;
+  setStat('statSchedules', enabledCount);
+  pushSpark('sparkStatSchedules', enabledCount);
   renderSchedules();
   renderScheduleForm();
+  renderHome();
 }
 
 function renderSchedules() {
   const tb = $('schedulesBody');
   if (!tb) return;
   if (!SCHEDULES.length) {
-    tb.innerHTML = '<tr><td colspan="9" class="muted">暂无定时任务，点右上角「新建定时任务」挂一个长期对比</td></tr>';
+    tb.innerHTML = emptyState(EMPTY_ICONS.clock, '暂无定时任务', '挂一个长期对比，吞吐和丢包趋势会自动沉淀',
+      '<button class="small primary" data-action="openScheduleForm">＋ 新建定时任务</button>');
     return;
   }
   tb.innerHTML = SCHEDULES.map(s => {
@@ -1933,16 +2217,55 @@ function renderSchedules() {
       <td>${okCount} / ${s.fail_count} / ${s.skip_count}
         <br><span class="muted" style="font-size:11px">共 ${s.run_count} 轮完成</span></td>
       <td style="font-size:12px">${last}</td>
-      <td class="sched-actions">
+      <td class="sched-actions"><div class="actions">
         <button class="small" data-action="compareSchedule" data-id="${s.id}">汇总对比</button>
         <button class="small" data-action="runScheduleNow" data-id="${s.id}"
           ${expired ? 'disabled title="请先延长运行时长"' : ''}>立即跑一轮</button>
         ${expired ? '' : `<button class="small" data-action="toggleSchedule" data-id="${s.id}">${s.enabled ? '停用' : '启用'}</button>`}
         <button class="small" data-action="editSchedule" data-id="${s.id}">${expired ? '延长时间' : '编辑'}</button>
         <button class="small danger" data-action="deleteSchedule" data-id="${s.id}">删除</button>
-      </td>
+      </div></td>
     </tr>`;
   }).join('');
+}
+
+/* 总览页（手机端首页）信息卡：最近测试 + 定时任务动态，行可点直达 */
+function renderHome() {
+  const runsBox = $('homeRunsList');
+  if (runsBox) {
+    const runs = ALL_RUNS.slice(0, 3);
+    runsBox.innerHTML = runs.length ? runs.map(r => `
+      <button class="home-row" data-action="openRun" data-id="${r.id}">
+        <span class="badge ${r.status}">${statusText(r.status)}</span>
+        <span class="home-row-main">
+          <b>${esc(r.target_name)}</b>
+          <span class="quiet">${(r.source === 'schedule' || r.schedule_id) ? '定时' : '手动'} #${r.id} · ${esc(String(r.created_at || '').slice(5, 16))} · ${r.done_count}/${r.backend_total}</span>
+        </span>
+        <span class="home-row-chev">›</span>
+      </button>`).join('')
+      : '<p class="muted home-empty">还没有测试记录，点上方「发起一次测试」跑一轮</p>';
+  }
+  const schedBox = $('homeSchedList');
+  if (schedBox) {
+    const list = SCHEDULES.filter(s => s.enabled).slice(0, 3);
+    schedBox.innerHTML = list.length ? list.map(s => {
+      const expired = !!s.expired || s.last_status === 'expired';
+      const st = expired ? 'expired' : (s.last_status || '');
+      const sub = expired
+        ? '已到期'
+        : `下次 ${s.next_run_in || '—'} · 成功 ${Math.max(0, s.run_count - s.fail_count)}/${s.run_count}`;
+      return `
+      <button class="home-row" data-action="compareSchedule" data-id="${s.id}">
+        <span class="badge ${st === 'finished' ? 'done' : st}">${schedStatusText(st)}</span>
+        <span class="home-row-main">
+          <b>${esc(s.name)}</b>
+          <span class="quiet">${esc(sub)}</span>
+        </span>
+        <span class="home-row-chev">›</span>
+      </button>`;
+    }).join('')
+      : '<p class="muted home-empty">暂无启用中的定时任务，去「任务」页新建一个长期对比</p>';
+  }
 }
 
 function renderScheduleForm() {
@@ -2177,6 +2500,7 @@ function runScheduleNow(id, anchor) {
 /* --- 对比视图 --- */
 
 async function compareSchedule(id) {
+  document.body.classList.add('app-detail-open');
   const s = SCHEDULES.find(x => x.id === Number(id)) || {};
   if (COMPARE_ABORT) COMPARE_ABORT.abort();
   COMPARE_ABORT = new AbortController();
@@ -2206,31 +2530,91 @@ function closeSchedDetail() {
   CURRENT_SCHED = null;
   CURRENT_COMPARISON = null;
   CHART_STATE.scheduleId = null;
+  document.body.classList.remove('app-detail-open');
+}
+
+function schedTrendText(st) {
+  if (st.trend_pct === null || st.trend_pct === undefined) return '样本不足';
+  const v = Number(st.trend_pct);
+  return (v > 0 ? '+' : '') + fmtN(v, 1) + '%';
+}
+
+/* 精简版长期报告：时间节点必须保留，抖动/重传/轮次编号等细节留在面板里看 */
+function buildSchedReportText(d) {
+  const s = d.schedule || {};
+  const rounds = d.rounds || [];
+  const lines = [];
+  lines.push(`# LinkPilot 长期对比：${s.name || '未命名任务'}`);
+  lines.push('');
+  lines.push(`- 目标机：${s.target_name || '—'}（${s.backend_count ?? (d.machines || []).length} 台后端）`);
+  lines.push(`- 节奏：每 ${s.interval_text || '—'}，共 ${d.total_rounds ?? rounds.length} 轮`);
+  lines.push(`- 时间范围：${rounds.length ? `${rounds[0].created_at} ~ ${rounds[rounds.length - 1].created_at}` : '暂无数据'}`);
+
+  const stats = d.stats || [];
+  if (stats.length) {
+    lines.push('');
+    lines.push('## 汇总');
+    lines.push('| 机器 | 上行 均/低/高 Mbit/s | 下行 均/低/高 Mbit/s | 丢包 | RTT | 趋势 | 评级 |');
+    lines.push('|---|---|---|---|---|---|---|');
+    const tri = (agg, nd) => agg ? `${fmtN(agg.avg, nd)}/${fmtN(agg.min, nd)}/${fmtN(agg.max, nd)}` : '—';
+    for (const st of stats) {
+      const ratings = [st.best_rating, st.worst_rating].filter(Boolean).map(ratingText).join(' / ') || '—';
+      lines.push(`| ${st.name} | ${tri(st.up, 1)} | ${tri(st.down, 1)}`
+        + ` | ${st.loss ? fmtN(st.loss.avg, 2) + '%' : '—'} | ${st.rtt ? fmtN(st.rtt.avg, 1) + ' ms' : '—'}`
+        + ` | ${schedTrendText(st)} | ${ratings} |`);
+    }
+  }
+
+  if (rounds.length) {
+    lines.push('');
+    lines.push('## 逐轮记录');
+    lines.push('| 时间 | 机器 | 上行 Mbit/s | 下行 Mbit/s | 丢包 | 评级 |');
+    lines.push('|---|---|---|---|---|---|');
+    const byRound = {};
+    (d.machines || []).forEach(m => (m.series || []).forEach(pt => {
+      (byRound[pt.run_id] = byRound[pt.run_id] || []).push({name: m.name, pt});
+    }));
+    for (const r of rounds) {
+      const pts = byRound[r.run_id] || [];
+      if (!pts.length) {
+        lines.push(`| ${r.created_at} | — | — | — | — | 本轮无数据 |`);
+        continue;
+      }
+      for (const {name, pt} of pts) {
+        const at = pt.at || r.created_at;
+        if (pt.status === 'done') {
+          lines.push(`| ${at} | ${name} | ${fmt(pt.up)} | ${fmt(pt.down)} | ${fmt(pt.loss, '%')} | ${pt.rating ? ratingText(pt.rating) : '—'} |`);
+        } else {
+          const err = String(pt.error || pt.status || '失败').replace(/\|/g, '/').slice(0, 40);
+          lines.push(`| ${at} | ${name} | — | — | — | 失败（${err}）|`);
+        }
+      }
+    }
+  }
+  return lines.join('\n');
 }
 
 async function copySchedReport() {
-  if (!CURRENT_SCHED) return;
+  if (!CURRENT_COMPARISON) return alert('对比数据还没有加载完成');
   const btn = document.querySelector('[data-action="copySchedReport"]');
   const old = btn ? btn.textContent : '';
   if (btn) { btn.disabled = true; btn.textContent = '生成报告中…'; }
   try {
-    const res = await fetch(`/api/schedules/${CURRENT_SCHED}/report`);
-    if (!res.ok) throw new Error(res.statusText);
-    const text = await res.text();
-    const built = CURRENT_COMPARISON ? buildTrendChartSvg(CURRENT_COMPARISON, true) : {svg: '', legend: ''};
-    const html = `<div style="font-family:-apple-system,'Segoe UI','Microsoft YaHei',sans-serif;color:#302c26;line-height:1.65">
+    const text = buildSchedReportText(CURRENT_COMPARISON);
+    const built = buildTrendChartSvg(CURRENT_COMPARISON, true);
+    const html = `<div style="font-family:-apple-system,'Segoe UI','Microsoft YaHei',sans-serif;color:#202238;line-height:1.65">
       <style>
         table{border-collapse:collapse;width:100%;font-size:13px;margin:10px 0}
-        th,td{border:1px solid #e1dac9;padding:7px 8px;text-align:left}
-        th{background:#f5f1e7;color:#776f62}
-        h1{font-size:22px}h2{font-size:17px;margin-top:20px}h3{font-size:15px}
-        blockquote{border-left:3px solid #0d9488;margin:10px 0;padding:2px 12px;color:#776f62}
-        svg{max-width:100%;height:auto;border:1px solid #e1dac9;border-radius:8px;background:#fffdf8}
+        th,td{border:1px solid #e3e4f0;padding:6px 9px;text-align:left}
+        th{background:#f4f5fb;color:#6d7187}
+        h1{font-size:20px}h2{font-size:16px;margin-top:18px}
+        p{margin:4px 0}
+        svg{max-width:100%;height:auto;border:1px solid #e3e4f0;border-radius:8px;background:#fff}
       </style>
       ${renderMarkdown(text)}
-      ${built.svg ? `<h2>吞吐趋势</h2>${built.svg}<p style="color:#776f62;font-size:12px">${built.legend}</p>` : ''}
+      ${built.svg ? `<h2>吞吐趋势</h2>${built.svg}<p style="color:#6d7187;font-size:12px">${built.legend}</p>` : ''}
     </div>`;
-    await copyRichText(text, html, '长期报告与吞吐图已复制');
+    await copyRichText(text, html, '长期对比报告已复制');
   } catch (e) {
     alert('复制失败: ' + e.message);
   } finally {
@@ -2239,7 +2623,17 @@ async function copySchedReport() {
 }
 
 function downloadSchedReport() {
-  if (CURRENT_SCHED) window.open(`/api/schedules/${CURRENT_SCHED}/report`);
+  if (!CURRENT_COMPARISON) return alert('对比数据还没有加载完成');
+  const s = CURRENT_COMPARISON.schedule || {};
+  const safe = String(s.name || '长期对比').replace(/[\\/:*?"<>|]/g, '_');
+  const blob = new Blob([buildSchedReportText(CURRENT_COMPARISON)], {type: 'text/markdown;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `LinkPilot-长期对比-${safe}.md`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
 
 function comparisonRows(d) {
@@ -2281,7 +2675,7 @@ function comparisonTableHtml(d) {
   const th = headers.map(h => `<th>${esc(h)}</th>`).join('');
   const body = rows.map(row => `<tr>${row.map(v => `<td>${esc(v)}</td>`).join('')}</tr>`).join('');
   return `<table style="border-collapse:collapse;width:100%;font-size:12px">
-    <thead><tr style="background:#f5f1e7">${th}</tr></thead><tbody>${body}</tbody></table>`;
+    <thead><tr style="background:#f4f5fb">${th}</tr></thead><tbody>${body}</tbody></table>`;
 }
 
 function copySchedTable() {
@@ -2364,12 +2758,9 @@ function renderScheduleComparison(d) {
       </tr>`);
     });
   });
-  $('schedRoundsBody').innerHTML = rows.length
+    $('schedRoundsBody').innerHTML = rows.length
     ? rows.join('') : '<tr><td colspan="9" class="muted">暂无数据</td></tr>';
 }
-
-const CHART_COLORS = ['#f97316', '#0d9488', '#eab308', '#e11d48', '#65a30d', '#c2410c',
-                      '#7c3aed', '#0891b2', '#be123c', '#4d7c0f'];
 
 function renderChartControls(d) {
   const machines = (d.machines || []).filter(m => (m.series || []).length);
@@ -2427,19 +2818,80 @@ function toggleChartMachine(key) {
   if (CURRENT_COMPARISON) drawTrendChart(CURRENT_COMPARISON);
 }
 
+const CHART_COLORS = ['#4f5cff', '#8b5cf6', '#0ea5a4', '#e05a8b', '#f59e0b',
+                      '#6366f1', '#14b8a6', '#d946ef', '#f43f5e', '#84cc16'];
+
+/* Catmull-Rom 转三次贝塞尔：折线平滑但仍保留转折趋势 */
+function smoothPath(pts) {
+  if (pts.length < 2) return '';
+  if (pts.length === 2) return `M ${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)} L ${pts[1][0].toFixed(1)} ${pts[1][1].toFixed(1)}`;
+  let d = `M ${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[Math.max(0, i - 1)], p1 = pts[i], p2 = pts[i + 1], p3 = pts[Math.min(pts.length - 1, i + 2)];
+    const c1x = p1[0] + (p2[0] - p0[0]) / 6, c1y = p1[1] + (p2[1] - p0[1]) / 6;
+    const c2x = p2[0] - (p3[0] - p1[0]) / 6, c2y = p2[1] - (p3[1] - p1[1]) / 6;
+    d += ` C ${c1x.toFixed(1)} ${c1y.toFixed(1)}, ${c2x.toFixed(1)} ${c2y.toFixed(1)}, ${p2[0].toFixed(1)} ${p2[1].toFixed(1)}`;
+  }
+  return d;
+}
+
+let CHART_CTX = null;   // 当前图的数据上下文，供 hover 十字线 / 数值气泡读取
+
+function hideChartTip() {
+  const tip = $('chartTip'), cross = $('chartCross');
+  if (tip) tip.hidden = true;
+  if (cross) cross.hidden = true;
+}
+
+function chartTipMove(e) {
+  if (!CHART_CTX) return;
+  const svg = $('chartWrap').querySelector('svg'), box = $('chartBox');
+  if (!svg || !box) return;
+  const svgRect = svg.getBoundingClientRect(), boxRect = box.getBoundingClientRect();
+  if (e.clientX < svgRect.left || e.clientX > svgRect.right) { hideChartTip(); return; }
+  const {W, PL, PR, xs, dirs, series, roundIds, roundAt} = CHART_CTX;
+  const ratio = svgRect.width / W;
+  const vx = (e.clientX - svgRect.left) / ratio;
+  if (vx < PL - 8 || vx > W - PR + 8) { hideChartTip(); return; }
+  let best = 0, bestD = Infinity;
+  xs.forEach((xv, i) => { const d2 = Math.abs(xv - vx); if (d2 < bestD) { bestD = d2; best = i; } });
+  const cross = $('chartCross'), tip = $('chartTip');
+  if (!cross || !tip) return;
+  const screenX = svgRect.left + xs[best] * ratio - boxRect.left;
+  cross.hidden = false;
+  cross.style.left = screenX + 'px';
+  const rows = series.map(s => {
+    const parts = dirs.map(dir => {
+      const v = s[dir][best];
+      return v === undefined ? '' : `<span class="tip-v"><i style="background:${s.color}"></i>`
+        + `${dir === 'up' ? '↑ 上行' : '↓ 下行'} ${fmt(v)} Mbit/s</span>`;
+    }).join('');
+    return parts ? `<div class="tip-row"><b>${esc(s.name)}</b>${parts}</div>` : '';
+  }).join('');
+  const t = String(roundAt[roundIds[best]] || '');
+  tip.innerHTML = `<div class="tip-head">第 ${best + 1} 轮${t ? ` · ${esc(t.slice(5, 16))}` : ''}</div>`
+    + (rows || '<div class="tip-row muted">该轮无可绘制数据</div>');
+  tip.hidden = false;
+  const tipW = tip.offsetWidth;
+  let left = screenX + 10;
+  if (left + tipW > boxRect.width - 4) left = screenX - tipW - 10;
+  tip.style.left = Math.max(4, left) + 'px';
+  tip.style.top = '10px';
+}
+
 function buildTrendChartSvg(d, forClipboard = false) {
   const allMachines = d.machines || [];
   const selected = allMachines.filter(m => CHART_STATE.selected.has(String(m.key)));
   const roundIds = (d.rounds || []).map(r => r.run_id);
   const roundAt = Object.fromEntries((d.rounds || []).map(r => [r.run_id, r.created_at]));
-  if (!selected.length || !roundIds.length) return {svg: '', legend: ''};
+  if (!selected.length || !roundIds.length) { CHART_CTX = null; return {svg: '', legend: ''}; }
   const dirs = CHART_STATE.direction === 'both' ? ['up', 'down'] : [CHART_STATE.direction];
   const values = [];
   selected.forEach(m => m.series.forEach(p => dirs.forEach(k => {
     if (p.status === 'done' && p[k] !== null && p[k] !== undefined) values.push(p[k]);
   })));
-  if (!values.length) return {svg: '', legend: ''};
-  const W = 720, H = 250, PL = 44, PR = 12, PT = 18, PB = 24;
+  if (!values.length) { CHART_CTX = null; return {svg: '', legend: ''}; }
+  const W = 720, H = 250, PL = 44, PR = 12, PT = 18, PB = 26;
   let max = Math.max(...values), min = Math.min(...values);
   max = max * 1.08;
   min = Math.max(0, min * 0.9);
@@ -2450,9 +2902,20 @@ function buildTrendChartSvg(d, forClipboard = false) {
   const y = v => PT + (H - PT - PB) * (1 - (v - min) / (max - min));
   const roundIndex = new Map(roundIds.map((rid, i) => [rid, i]));
   const idxOf = rid => roundIndex.has(rid) ? roundIndex.get(rid) : -1;
-  const grid = forClipboard ? '#ddd5bd' : 'var(--border)';
-  const text = forClipboard ? '#776f62' : 'var(--muted)';
-  let g = '';
+  const grid = forClipboard ? '#e3e4f0' : 'var(--border)';
+  const text = forClipboard ? '#6d7187' : 'var(--muted)';
+  // 单机视图给线下渐变面积；多机叠加只画线，避免颜色糊在一起
+  const area = selected.length === 1;
+  const clip = forClipboard ? 'c' : 's';
+  let defs = '', g = '';
+  if (area) {
+    const acolor = CHART_COLORS[allMachines.findIndex(m => String(m.key) === String(selected[0].key)) % CHART_COLORS.length];
+    dirs.forEach(dir => {
+      defs += `<linearGradient id="ga-${dir}-${clip}" x1="0" y1="0" x2="0" y2="1">`
+        + `<stop offset="0%" stop-color="${acolor}" stop-opacity="${forClipboard ? 0.22 : 0.16}"/>`
+        + `<stop offset="100%" stop-color="${acolor}" stop-opacity="0"/></linearGradient>`;
+    });
+  }
   for (let k = 0; k <= 4; k++) {
     const v = min + (max - min) * k / 4;
     const yy = y(v).toFixed(1);
@@ -2466,21 +2929,25 @@ function buildTrendChartSvg(d, forClipboard = false) {
   });
 
   selected.forEach(m => {
-    const color = CHART_COLORS[allMachines.findIndex(x => String(x.key) === String(m.key)) % CHART_COLORS.length];
+    const color = CHART_COLORS[allMachines.findIndex(x0 => String(x0.key) === String(m.key)) % CHART_COLORS.length];
     const pts = m.series.map(p => ({i: idxOf(p.run_id), pt: p})).filter(p => p.i >= 0);
     dirs.forEach(dir => {
       const dash = dir === 'down' && CHART_STATE.direction === 'both' ? ' stroke-dasharray="6 4"' : '';
       let cur = [];
       const flush = () => {
         if (cur.length > 1) {
-          g += `<polyline points="${cur.join(' ')}" fill="none" stroke="${color}" stroke-width="2"${dash}/>`;
+          if (area && cur.length > 2) {
+            g += `<path d="${smoothPath(cur)} L ${cur[cur.length - 1][0].toFixed(1)} ${H - PB} L ${cur[0][0].toFixed(1)} ${H - PB} Z"`
+              + ` fill="url(#ga-${dir}-${clip})" stroke="none"/>`;
+          }
+          g += `<path d="${smoothPath(cur)}" fill="none" stroke="${color}" stroke-width="2.2" stroke-linecap="round"${dash}/>`;
         }
         cur = [];
       };
       pts.forEach(({i, pt}) => {
         const v = pt.status === 'done' ? pt[dir] : null;
         if (v === null || v === undefined) { flush(); return; }
-        cur.push(`${x(i).toFixed(1)},${y(v).toFixed(1)}`);
+        cur.push([x(i), y(v)]);
         g += `<circle cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="4" fill="${color}" opacity="0">`
           + `<title>${esc(m.name)} · ${dir === 'up' ? '上行' : '下行'} ${fmt(v)} Mbit/s · ${esc(pt.at || '')}</title></circle>`;
       });
@@ -2488,17 +2955,39 @@ function buildTrendChartSvg(d, forClipboard = false) {
     });
   });
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="吞吐趋势折线图">`
-    + `<rect width="${W}" height="${H}" fill="${forClipboard ? '#fffdf8' : 'transparent'}"/>${g}</svg>`;
+    + `<rect width="${W}" height="${H}" fill="${forClipboard ? '#ffffff' : 'transparent'}"/>`
+    + (defs ? `<defs>${defs}</defs>` : '') + `${g}</svg>`;
   const legend = selected.map(m => {
-    const color = CHART_COLORS[allMachines.findIndex(x => String(x.key) === String(m.key)) % CHART_COLORS.length];
+    const color = CHART_COLORS[allMachines.findIndex(x0 => String(x0.key) === String(m.key)) % CHART_COLORS.length];
     return `<span><i style="background:${color}"></i>${esc(m.name)}</span>`;
   }).join('') + (CHART_STATE.direction === 'both'
     ? '<span class="quiet">实线=上行 · 虚线=下行</span>' : '');
+  if (!forClipboard) {
+    // 记录数据上下文，供图表 hover 十字线 / 气泡读取
+    CHART_CTX = {
+      W, PL, PR, dirs, roundIds, roundAt,
+      xs: roundIds.map((_, i) => x(i)),
+      series: selected.map(m => ({
+        name: m.name,
+        color: CHART_COLORS[allMachines.findIndex(x0 => String(x0.key) === String(m.key)) % CHART_COLORS.length],
+        up: {}, down: {},
+      })),
+    };
+    selected.forEach((m, mi) => m.series.forEach(p => {
+      const i = idxOf(p.run_id);
+      if (i < 0) return;
+      dirs.forEach(dir => {
+        const v = p.status === 'done' ? p[dir] : null;
+        if (v !== null && v !== undefined) CHART_CTX.series[mi][dir][i] = v;
+      });
+    }));
+  }
   return {svg, legend};
 }
 
 function drawTrendChart(d) {
   renderChartControls(d);
+  hideChartTip();
   const built = buildTrendChartSvg(d, false);
   const wrap = $('chartWrap'), legend = $('chartLegend');
   if (!built.svg) {
@@ -2512,6 +3001,73 @@ function drawTrendChart(d) {
 
 
 
+/* ---------------- 手机端 App 底部导航（标签页切换） ---------------- */
+
+const APP_TABS = ['home', 'machines', 'run', 'tasks', 'records'];
+
+function moveNavInd() {
+  const nav = $('appNav');
+  const ind = nav && nav.querySelector('.nav-ind');
+  const btn = nav && nav.querySelector('button.active');
+  if (!ind || !btn) return;
+  ind.style.width = btn.offsetWidth + 'px';
+  ind.style.transform = `translateX(${btn.offsetLeft}px)`;
+}
+window.addEventListener('resize', moveNavInd);
+
+function setAppTab(tab) {
+  if (!APP_TABS.includes(tab)) return;
+  buzz(6);
+  document.body.dataset.appTab = tab;
+  document.querySelectorAll('#appNav button').forEach(btn => {
+    const on = btn.dataset.tab === tab;
+    btn.classList.toggle('active', on);
+    if (on) btn.setAttribute('aria-current', 'page');
+    else btn.removeAttribute('aria-current');
+  });
+  moveNavInd();
+  // 重新触发新页面卡片的淡入动画
+  const mainEl = document.querySelector('main');
+  mainEl.classList.remove('tab-anim');
+  void mainEl.offsetWidth;
+  mainEl.classList.add('tab-anim');
+  // 切换标签页时收起打开中的详情整页
+  if (!$('runDetail').classList.contains('hidden')) closeRunDetail();
+  if (!$('schedDetail').classList.contains('hidden')) closeSchedDetail();
+  window.scrollTo(0, 0);
+}
+
+/* 手机端左右滑动切换标签页（避开输入框、横向滚动区与弹层） */
+let swipeX = 0, swipeY = 0, swipeT = 0;
+document.addEventListener('touchstart', e => {
+  swipeT = 0;
+  if (window.innerWidth > 720 || !e.touches || e.touches.length !== 1) return;
+  if (!$('modal').classList.contains('hidden') || !$('schedModal').classList.contains('hidden')) return;
+  if (document.body.classList.contains('app-detail-open')) return;
+  if (e.target.closest && e.target.closest('input,textarea,select,.tbl-wrap,#chartWrap,.chart-picker,.segmented,#appNav,a')) return;
+  const t = e.touches[0];
+  swipeX = t.clientX;
+  swipeY = t.clientY;
+  swipeT = Date.now();
+}, {passive: true});
+document.addEventListener('touchend', e => {
+  if (!swipeT || Date.now() - swipeT > 700) { swipeT = 0; return; }
+  const t = e.changedTouches[0];
+  const dx = t.clientX - swipeX, dy = t.clientY - swipeY;
+  swipeT = 0;
+  if (Math.abs(dx) < 56 || Math.abs(dx) < Math.abs(dy) * 1.6) return;
+  const idx = APP_TABS.indexOf(document.body.dataset.appTab || 'home');
+  const next = dx < 0 ? idx + 1 : idx - 1;
+  if (next >= 0 && next < APP_TABS.length) setAppTab(APP_TABS[next]);
+}, {passive: true});
+
+function closeRunDetail() {
+  $('runDetail').classList.add('hidden');
+  CURRENT_RUN = null;
+  clearTimeout(pollTimer);
+  document.body.classList.remove('app-detail-open');
+}
+
 /* ---------------- 事件委托（所有按钮统一走这里，弹窗取消/关闭稳定可用） ---------------- */
 
 const ACTIONS = {
@@ -2520,13 +3076,14 @@ const ACTIONS = {
   saveMachine,
   showAgentCmd: (d) => showAgentCmd(d.id),
   editMachine: (d) => editMachine(d.id),
-  deleteMachine: (d) => deleteMachine(d.id),
+  deleteMachine: (d, el) => deleteMachine(d.id, el),
   discoverMachine: (d) => discoverMachine(d.id),
   regenToken,
   copyAgentCmd: () => copyText($('agentCmd').textContent, '已复制接入命令'),
   logout,
   startRun: (d, el) => startRun(el),
   loadRuns: () => loadRuns(),
+  setRunsFilter: (d) => setRunsFilter(d.filter),
   openRun: (d) => openRun(d.id),
   removeRun: (d, el) => removeRun(d.id, el),
   toggleRunGroup: (d) => toggleRunGroup(d.id),
@@ -2550,6 +3107,12 @@ const ACTIONS = {
   copySchedReport,
   copySchedTable,
   downloadSchedReport,
+  setAppTab: (d) => setAppTab(d.tab),
+  gotoRun: () => {
+    if (window.innerWidth <= 720) setAppTab('run');
+    else $('runCard').scrollIntoView({behavior: 'smooth'});
+  },
+  closeRunDetail,
 };
 
 document.addEventListener('click', e => {
@@ -2573,6 +3136,8 @@ document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
   if (!$('schedModal').classList.contains('hidden')) closeSchedModal();
   else if (!$('modal').classList.contains('hidden')) closeModal();
+  else if (!$('runDetail').classList.contains('hidden')) closeRunDetail();
+  else if (!$('schedDetail').classList.contains('hidden')) closeSchedDetail();
 });
 
 $('agentPanelUrl').addEventListener('input', () => {
@@ -2616,6 +3181,17 @@ $('backendList').addEventListener('input', e => {
   if (t && t.classList && t.classList.contains('item-port')) RUN_PORTS[t.dataset.id] = t.value;
 });
 
+/* 图表 hover 十字线 / 数值气泡（pointermove 同时覆盖鼠标与触屏拖动） */
+const chartBox = $('chartBox');
+if (chartBox) {
+  chartBox.addEventListener('pointermove', chartTipMove);
+  chartBox.addEventListener('pointerleave', hideChartTip);
+  chartBox.addEventListener('pointercancel', hideChartTip);
+  chartBox.addEventListener('pointerup', e => {
+    if (e.pointerType !== 'mouse') setTimeout(hideChartTip, 1400);
+  });
+}
+
 $('cfgPort').addEventListener('input', () => {
   // 改「默认端口」时，把还没单独改过的机器一起带过去
   const nv = $('cfgPort').value;
@@ -2645,13 +3221,13 @@ $('sLifetimeEnabled').addEventListener('change', () => {
   syncLifetimeControls();
 });
 
-$('onlyScheduled').addEventListener('change', () => loadRuns());
-
 /* ---------------- 初始化 ---------------- */
 
 async function init() {
   try {
-    applyTheme(localStorage.getItem('fleet-theme') || 'light');
+    applyTheme(localStorage.getItem('fleet-theme')
+      || (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+    setAppTab('home');
     syncUdpControls('cfgUdp', 'cfgUdpBw');
     syncUdpControls('sUdp', 'sUdpBw');
     const me = await api('/api/me');

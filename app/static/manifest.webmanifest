@@ -1,0 +1,18 @@
+{
+  "name": "LinkPilot 线路测试面板",
+  "short_name": "LinkPilot",
+  "description": "多机线路测试面板：发起测试、定时任务与长期趋势对比",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0b0b12",
+  "theme_color": "#0b0b12",
+  "icons": [
+    {
+      "src": "/static/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
