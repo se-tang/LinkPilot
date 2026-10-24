@@ -1639,6 +1639,7 @@ def test_dashboard_interactions_present():
                 'data-action="toggleSchedCard"',
                 'document.startViewTransition', 'themeCircleReveal',
                 'revealThemeWithSnapshot', 'theme-reveal-overlay',
+                'revealThemeLightweight', 'theme-wash-overlay',
                 'data-machine-id', 'machine-drag-ghost',
                 'machine-row-shifting', '/api/machines/order',
                 'requestAnimationFrame(machineDragFrame)',
