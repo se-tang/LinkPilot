@@ -80,4 +80,21 @@ grep -qx 'PANEL_BIND=127.0.0.1' "$INSTALL_DIR/.env"
 test "$(cat "$INSTALL_DIR/Caddyfile.local")" = "legacy-caddy"
 test "$(cat "$INSTALL_DIR/certs/origin.pem")" = "legacy-cert"
 
-printf 'install.sh dirty-worktree update OK\n'
+# 非交互日志只打印一次步骤开始，不能随着内部计时循环反复刷屏。
+sed -n '/^run_spinner() {/,/^}/p' "$ROOT/install.sh" >"$TMP/run_spinner.sh"
+(
+  C_RESET=""; C_CYAN=""; C_GREEN=""; C_RED=""; C_BOLD=""; C_DIM=""
+  FANCY=0
+  VERBOSE=0
+  LOG_FILE="$TMP/spinner.log"
+  log_file() { :; }
+  step() { :; }
+  step_done() { :; }
+  warn() { :; }
+  # shellcheck disable=SC1091
+  . "$TMP/run_spinner.sh"
+  SPIN_OUT="$(run_spinner 'spinner-test' sleep 5)"
+  test "$(printf '%s\n' "$SPIN_OUT" | grep -c '▸ spinner-test ...')" -eq 2
+)
+
+printf 'install.sh update / non-interactive log OK\n'

@@ -154,6 +154,7 @@ run_spinner() {
   _job=$!
   _frames='/-\|'
   _i=0
+  _plain_printed=0
   _t0="$(date +%s 2>/dev/null || echo 0)"
   while kill -0 "$_job" 2>/dev/null; do
     _i=$(( (_i + 1) % 4 ))
@@ -162,8 +163,9 @@ run_spinner() {
       _el=$(( $(date +%s 2>/dev/null || echo 0) - _t0 ))
       printf '\r  %s%s%s %s ... %s%ss%s\033[K' \
         "$C_CYAN" "$_ch" "$C_RESET" "$_label" "$C_DIM" "$_el" "$C_RESET"
-    elif [ "$_i" = "1" ]; then
+    elif [ "$_plain_printed" = "0" ]; then
       printf '  %s▸%s %s ...\n' "$C_CYAN" "$C_RESET" "$_label"
+      _plain_printed=1
     fi
     sleep 1
   done
@@ -362,16 +364,12 @@ fi
 printf '\n'
 # 版本号优先取「当前代码里的」（app.py 是唯一权威），取不到才用脚本内置值
 _ver_hdr="$(sed -n "s/^APP_VERSION = '\(.*\)'/\1/p" "$INSTALL_DIR/app/app.py" 2>/dev/null | head -n1)"
-printf '  %s%s%s %s%s 面板一键部署%s\n' "$C_BOLD$C_MAGENTA" "$APP_NAME" "$C_RESET" \
+printf '  %s%s%s %s%s%s\n' "$C_BOLD$C_MAGENTA" "$APP_NAME" "$C_RESET" \
   "$C_DIM" "v${_ver_hdr:-$APP_VERSION}" "$C_RESET"
-printf '  %s多机 iperf3 线路质量测试：目标机 + 后端机，逐台测速并生成评价报告%s\n' "$C_DIM" "$C_RESET"
+printf '  %s多机 iperf3 线路质量测试%s\n' "$C_DIM" "$C_RESET"
+# 主机元数据只进日志：屏幕保持极简，出问题时日志里有完整现场
+log_file "host=$(hostname 2>/dev/null || echo '-') os=$OS_PRETTY arch=$ARCH dir=$INSTALL_DIR log=$LOG_FILE"
 _rule '─'
-printf '  %s主机%s   %s%s%s (%s)\n' "$C_DIM" "$C_RESET" "$C_BOLD" "$(hostname 2>/dev/null || echo '-')" "$C_RESET" "$OS_PRETTY"
-printf '  %s架构%s   %s\n' "$C_DIM" "$C_RESET" "$ARCH"
-printf '  %s目录%s   %s\n' "$C_DIM" "$C_RESET" "$INSTALL_DIR"
-printf '  %s日志%s   %s%s（失败时自动回显末尾）%s\n' "$C_DIM" "$C_RESET" "$C_DIM" "$LOG_FILE" "$C_RESET"
-_rule '─'
-printf '\n'
 
 # ---------------------------------------------------------------------------
 # 自检 1/5：下载工具与证书
@@ -418,7 +416,7 @@ elif [ "$PKG" = "none" ]; then
 else
   run_quiet pm_update || true
   if run_quiet pm_install git && have git; then
-    step_done "已安装 $(git --version 2>/dev/null | awk '{print $3}')"
+    step_done "$(git --version 2>/dev/null | awk '{print $3}')"
   else
     step_done "跳过（改用源码包获取代码）"
     step_note "git 装不上不影响部署，只是后续升级不便"
@@ -507,21 +505,20 @@ start_docker_daemon() {
 }
 
 if ! have docker; then
-  printf '  %s·%s 未检测到 Docker → 自动安装（官方脚本 → 发行版仓库，逐级兜底）\n' "$C_DIM" "$C_RESET"
-  if ! run_spinner "安装 Docker Engine" bash -c 'install_docker_official || install_docker_distro'; then
+  if ! run_spinner "安装 Docker" bash -c 'install_docker_official || install_docker_distro'; then
     die "Docker 自动安装失败。请手动安装后重试（参考 https://docs.docker.com/engine/install/）"
   fi
 fi
-DOCKER_VER="$(docker --version 2>/dev/null | sed 's/^Docker version //;s/,.*//')"
+DOCKER_VER="$(docker --version 2>/dev/null | sed 's/^Docker version //;s/,.*//;s/+dfsg.*//')"
 
 step "Docker 守护进程"
 if start_docker_daemon; then
-  step_done "运行中（Engine ${DOCKER_VER:-?}）"
+  step_done "运行中 · ${DOCKER_VER:-?}"
 else
   die "Docker 守护进程启动失败：请手动执行 systemctl start docker 后重试（OpenVZ/LXC 类容器化 VPS 通常无法运行 Docker）"
 fi
 
-step "Docker Compose v2"
+step "Docker Compose"
 if compose version >/dev/null 2>&1; then
   step_done "$(compose version 2>/dev/null | head -n1 | sed 's/^Docker Compose version //')"
 else
@@ -636,7 +633,7 @@ fetch_repo() {
 
 CODE_STATE=unknown
 if [ -d "$INSTALL_DIR/.git" ] && [ "$SELF_DIR" = "$INSTALL_DIR" ]; then
-  step_note "脚本位于仓库目录内，直接使用：$INSTALL_DIR"
+  step_note "仓库目录内直接执行"
 fi
 
 if ! run_quiet fetch_repo; then
@@ -648,17 +645,17 @@ code_version() {
 }
 CODE_VER="$(code_version)"
 case "$CODE_STATE" in
-  fresh)   step_done "已克隆仓库${CODE_VER:+（v$CODE_VER）} → $INSTALL_DIR" ;;
-  tarball) step_done "已下载源码包${CODE_VER:+（v$CODE_VER）} → $INSTALL_DIR" ;;
-  current) step_done "已是最新${CODE_VER:+（v$CODE_VER）}（远端无新提交）" ;;
-  updated) step_done "发现新版本 → 已自动更新${CODE_VER:+（v$CODE_VER）}"
+  fresh)   step_done "已克隆 → $INSTALL_DIR" ;;
+  tarball) step_done "已下载源码包 → $INSTALL_DIR" ;;
+  current) step_done "已是最新" ;;
+  updated) step_done "已更新到最新"
            if [ -n "$LOCAL_BACKUP" ]; then
              step_note "本地改动已备份到 stash ${LOCAL_BACKUP:0:12}"
            fi ;;
-  dirty)   step_done "本地改动备份失败，未自动更新${CODE_VER:+（按当前代码 v$CODE_VER 部署）}"
-           step_note "请先执行 git -C $INSTALL_DIR stash push -u，再重跑本脚本" ;;
-  plain)   step_done "使用现有目录${CODE_VER:+（v$CODE_VER）}（非 git 仓库，不支持自动更新）" ;;
-  *)       step_done "就绪${CODE_VER:+（v$CODE_VER）} → $INSTALL_DIR" ;;
+  dirty)   step_done "本地有改动未更新 · 按当前代码部署"
+           step_note "先执行 git -C $INSTALL_DIR stash push -u 再重跑" ;;
+  plain)   step_done "使用现有目录（非 git，不支持自动更新）" ;;
+  *)       step_done "就绪 → $INSTALL_DIR" ;;
 esac
 
 # 走管道那条命令（curl | bash）时，脚本本体是「旧的那一份」：更新完代码后
@@ -696,7 +693,7 @@ else
 fi
 
 if [ -f "$INSTALL_DIR/.env" ]; then
-  step_done "沿用已有 .env（端口 / 绑定 / 域名不变）"
+  step_done "沿用已有 .env"
 else
   _p=""
   _i=0
@@ -708,7 +705,7 @@ else
   done
   [ -n "$_p" ] || _p="$(rand_port)"
   printf 'PANEL_PORT=%s\n' "$_p" > "$INSTALL_DIR/.env"
-  step_done "已生成 .env（随机端口 $_p）"
+  step_done "随机端口 $_p"
 fi
 PANEL_PORT="$(sed -n 's/^PANEL_PORT=//p' "$INSTALL_DIR/.env" | tail -n1)"
 PANEL_BIND="$(sed -n 's/^PANEL_BIND=//p' "$INSTALL_DIR/.env" | tail -n1)"
@@ -763,14 +760,9 @@ if [ "$TLS" = "1" ]; then
   fi
 fi
 
-printf '\n'
-printf '  %s%s%s\n' "$C_BOLD" "部署面板" "$C_RESET"
-printf '  %s%s%s\n' "$C_DIM" "首次部署需要构建镜像 + 拉取依赖，通常 1–3 分钟；升级会快很多" "$C_RESET"
-printf '\n'
-
 cd "$INSTALL_DIR" || die "无法进入 $INSTALL_DIR"
 # shellcheck disable=SC2086
-if ! run_spinner "构建并启动容器（docker compose up -d --build）" \
+if ! run_spinner "构建并启动" \
     compose $COMPOSE_ARGS up -d --build; then
   die "docker compose 启动失败。常见原因：磁盘空间不足、拉取基础镜像超时（可配 Docker 镜像加速）"
 fi
@@ -778,7 +770,11 @@ fi
 # ---------------------------------------------------------------------------
 # 等待面板就绪
 # ---------------------------------------------------------------------------
-step "等待面板就绪"
+if [ "$FANCY" = "1" ]; then
+  step "等待面板就绪"
+else
+  printf '  %s▸%s 等待面板就绪 ...\n' "$C_CYAN" "$C_RESET"
+fi
 CID="$(compose ps -q linkpilot 2>/dev/null | head -n1)"
 HEALTHY=0
 _i=0
@@ -795,8 +791,6 @@ while [ "$_i" -lt 90 ]; do
     _ch="$(printf '/-\|' | cut -c$(( (_i % 4) + 1 )))"
     printf '\r  %s%s%s 健康检查 ... %s%ss%s\033[K' "$C_CYAN" "$_ch" "$C_RESET" "$C_DIM" \
       "$(( $(date +%s 2>/dev/null || echo 0) - _t0 ))" "$C_RESET"
-  elif [ "$_i" = "1" ]; then
-    printf '    %s等待容器健康检查（最长约 3 分钟）…%s\n' "$C_DIM" "$C_RESET"
   fi
   sleep 2
 done
@@ -808,8 +802,13 @@ if [ "$HEALTHY" != "1" ]; then
   compose $COMPOSE_ARGS logs --tail 30 linkpilot 2>/dev/null | sed 's/^/      /'
   die "部署未成功。常见原因：端口 $PANEL_PORT 被占用（改 .env 后重跑）、磁盘空间不足、拉取镜像超时"
 fi
-printf '  %s▸%s 等待面板就绪 ... %s已就绪%s %s(%ss)%s\n' "$C_CYAN" "$C_RESET" \
-  "$C_GREEN" "$C_RESET" "$C_DIM" "$(( $(date +%s 2>/dev/null || echo 0) - _t0 ))" "$C_RESET"
+if [ "$FANCY" = "1" ]; then
+  printf '  %s▸%s 等待面板就绪 ... %s就绪%s %s(%ss)%s\n' "$C_CYAN" "$C_RESET" \
+    "$C_GREEN" "$C_RESET" "$C_DIM" "$(( $(date +%s 2>/dev/null || echo 0) - _t0 ))" "$C_RESET"
+else
+  printf '  %s✓%s 面板健康检查通过 %s(%ss)%s\n' "$C_GREEN" "$C_RESET" "$C_DIM" \
+    "$(( $(date +%s 2>/dev/null || echo 0) - _t0 ))" "$C_RESET"
+fi
 
 # 抓取容器横幅（含一次性初始登录密码）：只取我们真正要展示的那几行
 BANNER=""
@@ -831,49 +830,49 @@ _banner_field() { # $1=字段名
 }
 PANEL_USER="$(_banner_field '登录账号')"
 PANEL_PW="$(_banner_field '登录密码')"
+if [ -z "${PANEL_USER:-}" ] && [ -f "$INSTALL_DIR/data/auth.json" ]; then
+  PANEL_USER="$(sed -n 's/.*"user"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+    "$INSTALL_DIR/data/auth.json" | head -n1)"
+fi
 
 # ---------------------------------------------------------------------------
 # 收尾：一屏给全「地址 / 账号 / 下一步 / 维护命令」
 # ---------------------------------------------------------------------------
 printf '\n'
 _rule '─'
-printf '  %s%s✓ 部署完成%s\n' "$C_BOLD" "$C_GREEN" "$C_RESET"
-printf '  %s%s v%s · 面板已就绪并随 Docker 自启%s\n' "$C_DIM" "$APP_NAME" "${CODE_VER:-$APP_VERSION}" "$C_RESET"
+printf '  %s✓ 部署完成%s  %s%s v%s%s\n' "$C_GREEN$C_BOLD" "$C_RESET" \
+  "$C_BOLD" "$APP_NAME" "${CODE_VER:-$APP_VERSION}" "$C_RESET"
 _rule '─'
 printf '\n'
-printf '  %s面板地址%s  %s%shttp://%s:%s%s\n' "$C_BOLD" "$C_RESET" "$C_BOLD$C_CYAN" "" "$PANEL_IP" "$PANEL_PORT" "$C_RESET"
 if [ -n "${PANEL_DOMAIN:-}" ]; then
-  printf '  %sHTTPS 域名%s  https://%s\n' "$C_BOLD" "$C_RESET" "$PANEL_DOMAIN"
+  printf '  %s面板%s   %shttps://%s%s\n' "$C_BOLD" "$C_RESET" "$C_BOLD$C_CYAN" "$PANEL_DOMAIN" "$C_RESET"
+else
+  printf '  %s面板%s   %shttp://%s:%s%s\n' "$C_BOLD" "$C_RESET" "$C_BOLD$C_CYAN" "$PANEL_IP" "$PANEL_PORT" "$C_RESET"
 fi
-printf '  %s登录账号%s  %s\n' "$C_BOLD" "$C_RESET" "${PANEL_USER:-（见 $INSTALL_DIR/data/auth.json）}"
+printf '  %s账号%s   %s\n' "$C_BOLD" "$C_RESET" "${PANEL_USER:-见 data/auth.json}"
 if [ -n "${PANEL_PW:-}" ] && [ "$FRESH_INSTALL" = "1" ]; then
-  printf '  %s登录密码%s  %s%s%s  %s（仅本次显示，请立即保存）%s\n' "$C_BOLD" "$C_RESET" \
+  printf '  %s密码%s   %s%s%s  %s(仅显示一次，请保存)%s\n' "$C_BOLD" "$C_RESET" \
     "$C_BOLD$C_YELLOW" "$PANEL_PW" "$C_RESET" "$C_DIM" "$C_RESET"
 elif [ "$FRESH_INSTALL" = "1" ]; then
-  printf '  %s登录密码%s  %s未从容器日志中取到，请执行：docker compose logs linkpilot | grep 密码%s\n' \
+  printf '  %s密码%s   %s见容器日志：docker compose logs linkpilot | grep 密码%s\n' \
     "$C_BOLD" "$C_RESET" "$C_DIM" "$C_RESET"
 else
-  printf '  %s登录密码%s  %s沿用已有账号（忘记密码：删除 data/auth.json 后重启容器会重新生成）%s\n' \
+  printf '  %s密码%s   沿用原密码  %s(重置：删除 data/auth.json 后重启)%s\n' \
     "$C_BOLD" "$C_RESET" "$C_DIM" "$C_RESET"
 fi
 printf '\n'
-printf '  %s下一步%s\n' "$C_BOLD" "$C_RESET"
-printf '    1. 打开上面的面板地址，用账号密码登录\n'
-printf '    2. 「添加机器」填名称 / 角色（目标机或后端机）/ 地区 / 带宽\n'
-printf '    3. 复制生成的接入命令，到对应机器的 root 下执行，等它上线\n'
-printf '    4. 回到面板选择目标机与后端机 → 开始测试，或在「定时任务」里挂长期对比\n'
+printf '  %s上手%s   登录面板 → 添加机器 → 复制接入命令到目标机执行\n' "$C_BOLD" "$C_RESET"
+printf '  %s%s%s   选目标机与后端机开始测试；长期对比挂「定时任务」\n' "" "$C_DIM" "$C_RESET"
 printf '\n'
-printf '  %s维护命令%s\n' "$C_BOLD" "$C_RESET"
-printf '    %s升级%s  重跑本脚本即可（自动检查更新，有新版本会自己更新并重建）：\n' "$C_DIM" "$C_RESET"
-printf '          curl -fsSL https://raw.githubusercontent.com/se-tang/%s/main/install.sh | bash\n' "$REPO_SLUG"
-printf '    %s日志%s  cd %s && docker compose %slogs -f --tail 100 linkpilot\n' \
+printf '  %s升级%s   curl -fsSL https://raw.githubusercontent.com/se-tang/%s/main/install.sh | bash\n' \
+  "$C_DIM" "$C_RESET" "$REPO_SLUG"
+printf '  %s日志%s   cd %s && docker compose %slogs -f linkpilot\n' \
   "$C_DIM" "$C_RESET" "$INSTALL_DIR" "$COMPOSE_ARGS"
-printf '    %s卸载%s  cd %s && docker compose %sdown && rm -rf data .env\n' \
+printf '  %s卸载%s   cd %s && docker compose %sdown && rm -rf data .env\n' \
   "$C_DIM" "$C_RESET" "$INSTALL_DIR" "$COMPOSE_ARGS"
-printf '    %s安装日志%s  %s\n' "$C_DIM" "$C_RESET" "$LOG_FILE"
 if [ -n "$LOCAL_BACKUP" ]; then
-  printf '    %s本地备份%s  %s（查看：git -C %s stash list；恢复：git -C %s stash show -p %s）\n' \
-    "$C_DIM" "$C_RESET" "${LOCAL_BACKUP:0:12}" "$INSTALL_DIR" "$INSTALL_DIR" "${LOCAL_BACKUP:0:12}"
+  printf '  %s备份%s   git -C %s stash list（本次改动已存入 %s）\n' \
+    "$C_DIM" "$C_RESET" "$INSTALL_DIR" "${LOCAL_BACKUP:0:12}"
 fi
 printf '\n'
 _rule '─'
