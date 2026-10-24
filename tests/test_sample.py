@@ -139,15 +139,20 @@ def test_report():
          'machine_host': '5.6.7.8', 'status': 'done', 'error': '',
          'metrics': __import__('json').dumps(mt, ensure_ascii=False)},
         {'machine_name': 'JP-02', 'machine_region': '东京', 'machine_bandwidth': '200M',
-         'machine_host': '9.9.9.9', 'status': 'failed', 'error': 'SSH 连接失败', 'metrics': ''},
+         'machine_host': '9.9.9.9', 'status': 'failed', 'error': 'SSH 连接失败', 'metrics': '',
+         'up_raw': 'iperf3: error - unable to connect'},
     ]
     report = quality.build_report(run, {'name': '目标VPS', 'host': '1.2.3.4', 'region': '洛杉矶', 'bandwidth': '1G'}, items)
     assert ('| HK-01 | 香港 | 500M | 0% | 144.4 ms | 0.26 ms | 137 Mbit/s '
             '| 108 Mbit/s | 0 | **C 较差** | 上下行吞吐偏低 |') in report
     assert '| JP-02 | 东京 | 200M | — | — | — | — | — | — | **F 失败** | SSH 连接失败 |' in report
     assert '目标机器' not in report and '测试协议' not in report and '测试参数' not in report
-    assert '诊断详情' not in report and '原始数据' not in report
-    assert 'rtt min/avg/max/mdev' not in report
+    assert '## LinkPilot 测试结果' in report
+    assert '### 原始数据' in report
+    assert '#### 后端机器1：HK-01（香港 · 500M · 5.6.*.* · 连接端口 5201）' in report
+    assert 'rtt min/avg/max/mdev = 144.239/144.402/146.898/0.255 ms' in report
+    assert 'iperf3: error - unable to connect' in report
+    assert '诊断详情' not in report
     print('---- 报告预览 ----')
     print(report)
     return report
@@ -269,12 +274,13 @@ def test_test_protocol():
         assert 'IPv6' in str(e), e
     assert runner.active_run_id() is None
 
-    # 6) 简洁报告不包含目标机地址、协议或参数
+    # 6) 汇总报告不包含目标机地址、协议或参数，但仍保留原始数据段
     run6 = {'created_at': 't0', 'finished_at': 't1', 'ip_version': 6, 'error': '',
             'target_name': 'only6', 'target_host': '2606:4700:4700::1111'}
     rep = quality.build_report(run6, {'name': 'only6', 'host': '2606:4700:4700::1111',
                                       'region': '洛杉矶', 'bandwidth': '1G'}, [])
-    assert '# LinkPilot 测试结果' in rep and '测试协议' not in rep, rep
+    assert '## LinkPilot 测试结果' in rep and '测试协议' not in rep, rep
+    assert '### 原始数据' in rep, rep
     assert '2606:4700' not in rep and '1111' not in rep, rep
     run4 = dict(run6, ip_version=4, target_host='93.184.216.34')
     rep4 = quality.build_report(run4, {'name': 'v4', 'host': '93.184.216.34',
@@ -676,7 +682,7 @@ def test_report_params_and_udp_columns():
     rep = quality.build_report(run, {'name': 'T', 'host': '1.2.3.4', 'region': '', 'bandwidth': ''}, items)
     assert '| UDP丢包 |' in rep, rep
     assert '| 重传 |' not in rep, rep
-    assert '测试参数' not in rep and '原始数据' not in rep, rep
+    assert '测试参数' not in rep and '### 原始数据' in rep, rep
     assert '各机连接端口' not in rep, rep
 
     # 只有一台机器、端口一致时不出现「各机连接端口」这一行
@@ -689,7 +695,8 @@ def test_report_params_and_udp_columns():
                    udp_bandwidth='100M', ping_count=200)
     rep4 = quality.build_report(nat_run, {'name': 'T', 'host': '1.2.3.4', 'region': '', 'bandwidth': ''},
                                 [dict(items[0], port=0)])
-    assert '测试参数' not in rep4 and '43343' not in rep4, rep4
+    assert '测试参数' not in rep4, rep4
+    assert '#### 后端机器1：HK-01（香港 · 500M · 5.6.*.* · 连接端口 43343）' in rep4, rep4
 
     # 旧记录（没有参数列）退回默认参数，TCP 表头保留重传列
     old = {'created_at': 't0', 'finished_at': 't1', 'ip_version': 4, 'error': '',
@@ -1517,11 +1524,11 @@ def test_run_list_returns_summary_only():
     assert resp.status_code == 200
     assert len(resp.get_data()) < 50000, len(resp.get_data())
     detail = c.get(f'/api/runs/{rid}').get_json()
-    assert detail['run']['report'].startswith('# LinkPilot 测试结果'), detail['run']['report'][:80]
-    assert '诊断详情' not in detail['run']['report'] and '原始数据' not in detail['run']['report']
+    assert detail['run']['report'].startswith('## LinkPilot 测试结果'), detail['run']['report'][:80]
+    assert '诊断详情' not in detail['run']['report'] and '### 原始数据' in detail['run']['report']
     report_resp = c.get(f'/api/runs/{rid}/report')
     assert report_resp.status_code == 200
-    assert '# LinkPilot 测试结果' in report_resp.get_data(as_text=True)
+    assert '## LinkPilot 测试结果' in report_resp.get_data(as_text=True)
     print('测试记录列表摘要接口体积 OK')
 
 

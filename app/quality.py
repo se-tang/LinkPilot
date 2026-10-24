@@ -461,7 +461,7 @@ def mask_report_text(text):
 
 
 def build_report(run, target, items):
-    """生成简洁 Markdown：只保留每台后端的核心结果和评级说明。"""
+    """生成 Markdown：保留汇总表，并附上每台后端与目标机之间的原始测试输出。"""
     udp = bool(int(run.get('udp') or 0))
 
     def cell(value):
@@ -471,7 +471,7 @@ def build_report(run, target, items):
         return '—' if value is None else f'{fmt_num(value, digits)} {unit}'
 
     lines = [
-        '# LinkPilot 测试结果',
+        '## LinkPilot 测试结果',
         '',
         f"| 机器 | 地区 | 带宽 | 丢包 | RTT | 抖动 | 上行 | 下行 | {'UDP丢包' if udp else '重传'} | 评级 | 说明 |",
         '|---|---|---|---|---|---|---|---|---|---|---|',
@@ -507,4 +507,33 @@ def build_report(run, target, items):
             lines.append(
                 f"| {name} | {region} | {bandwidth} | — | — | — | — | — | — "
                 f"| **F 失败** | {err} |")
+
+    lines.extend(['', '### 原始数据'])
+    default_port = int(run.get('port') or 5201)
+    for idx, it in enumerate(items, 1):
+        port = int(it.get('port') or default_port)
+        lines.extend([
+            '',
+            f"#### 后端机器{idx}：{cell(it['machine_name'])}"
+            f"（{cell(it['machine_region'] or '未标记')} · "
+            f"{cell(it['machine_bandwidth'] or '未标记')} · "
+            f"{mask_ip(it.get('machine_host') or '')} · 连接端口 {port}）",
+            '',
+            '```',
+        ])
+
+        blocks = []
+        if it.get('status') == 'done' and it.get('metrics'):
+            mt = json.loads(it['metrics'])
+            blocks = [mt.get('ping_block'), mt.get('up_block'), mt.get('down_block')]
+        if not any(blocks):
+            if it.get('status') != 'done':
+                blocks.append(f"测试失败：{it.get('error') or it.get('status') or '未知错误'}")
+            for label, field in (('Ping', 'ping_raw'), ('上行', 'up_raw'), ('下行', 'down_raw')):
+                raw = str(it.get(field) or '').strip()
+                if raw:
+                    blocks.append(f'{label}原文：\n{raw}')
+        body = '\n\n'.join(str(block).strip() for block in blocks if block)
+        lines.extend([body or '（无输出）', '```'])
+
     return mask_report_text('\n'.join(lines))
