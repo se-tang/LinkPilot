@@ -19,7 +19,7 @@ from . import db, job_types, quality, runner, scheduler
 
 # 版本号：这是唯一权威（面板页面、部署横幅、install.sh 都从/沿用它取）。
 # 还在测试阶段，因此用 0.x 版本号。
-APP_VERSION = '0.7.14'
+APP_VERSION = '0.7.15'
 
 app = Flask(__name__)
 app.json.ensure_ascii = False
@@ -461,16 +461,14 @@ def agent_heartbeat():
                     f"payload_b64={payload_b64}\nsig={tomb['sig']}\n")
             return Response(body, mimetype='text/plain; charset=utf-8')
         return jsonify({'error': 'invalid token'}), 403
-    m = db.touch_machine(m['id'], request.headers.get('X-Agent-Host', ''),
-                         _client_ip())
     if request.headers.get('X-Agent-Protocol') != '2':
-        try:
-            db.set_machine_probe(
-                m['id'], 'Agent 协议版本过旧；请重新生成接入码并重跑 Agent 安装脚本')
-        except Exception:
-            pass
+        db.mark_agent_incompatible(
+            m['id'],
+            'Agent 协议版本过旧；请重新生成接入码并重跑 Agent 安装脚本')
         return Response('status=upgrade_required\nprotocol=2\n',
                         mimetype='text/plain; charset=utf-8')
+    m = db.touch_machine(m['id'], request.headers.get('X-Agent-Host', ''),
+                         _client_ip())
     job = db.next_queued_job(m['id'])
     lines = ['status=ok', 'protocol=2']
     if job:

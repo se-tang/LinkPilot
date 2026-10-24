@@ -750,6 +750,21 @@ def touch_machine_seen(mid, hostname=''):
     get_db().commit()
 
 
+def mark_agent_incompatible(mid, reason):
+    """Stop an old-protocol Agent from appearing online or holding work items."""
+    db = get_db()
+    db.execute(
+        "UPDATE machines SET last_seen=0, probe_error=?, "
+        "probe_error_at=datetime('now','localtime') WHERE id=?",
+        (str(reason)[:300], mid))
+    db.execute(
+        "UPDATE jobs SET status='failed', exit_code=-1, "
+        "output=output || ?, finished_at=datetime('now','localtime') "
+        "WHERE machine_id=? AND status IN ('queued','running')",
+        ('\n[面板] Agent 协议版本过旧，任务已取消\n', mid))
+    db.commit()
+
+
 def set_machine_ips(mid, values, force=False):
     """写回面板探测到的地址。默认只补空缺（心跳观测到的地址更可信，不覆盖），
     force=True 用于用户手动「探测地址」时的强制刷新。"""

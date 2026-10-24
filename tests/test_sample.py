@@ -171,6 +171,7 @@ def test_xff_and_limiter():
     m = db.create_machine({'name': 'xff', 'role': 'backend', 'region': '', 'bandwidth': ''})
     c.post('/api/agent/heartbeat',
            headers={'X-Agent-Token': m['token'],
+                    'X-Agent-Protocol': '2',
                     'CF-Connecting-IP': '203.0.113.7',
                     'X-Forwarded-For': '1.2.3.4'},
            environ_base={'REMOTE_ADDR': '172.70.0.5'})
@@ -180,6 +181,7 @@ def test_xff_and_limiter():
     m1b = db.create_machine({'name': 'xff-caddy', 'role': 'backend', 'region': '', 'bandwidth': ''})
     c.post('/api/agent/heartbeat',
            headers={'X-Agent-Token': m1b['token'],
+                    'X-Agent-Protocol': '2',
                     'CF-Connecting-IP': '9.9.9.9',
                     'X-Forwarded-For': '203.0.113.7'},
            environ_base={'REMOTE_ADDR': '127.0.0.1'})
@@ -191,6 +193,7 @@ def test_xff_and_limiter():
     m1c = db.create_machine({'name': 'xff-cfchain', 'role': 'backend', 'region': '', 'bandwidth': ''})
     c.post('/api/agent/heartbeat',
            headers={'X-Agent-Token': m1c['token'],
+                    'X-Agent-Protocol': '2',
                     'X-LinkPilot-Proxy-Secret': 'test-proxy-secret',
                     'CF-Connecting-IP': '173.245.48.5',
                     'X-Forwarded-For': '203.0.113.77'},
@@ -201,6 +204,7 @@ def test_xff_and_limiter():
     m1d = db.create_machine({'name': 'xff-cfedge', 'role': 'target', 'region': '', 'bandwidth': ''})
     c.post('/api/agent/heartbeat',
            headers={'X-Agent-Token': m1d['token'],
+                    'X-Agent-Protocol': '2',
                     'X-LinkPilot-Proxy-Secret': 'wrong',
                     'CF-Connecting-IP': '203.0.113.10',
                     'X-Forwarded-For': '172.67.131.196'},
@@ -216,6 +220,7 @@ def test_xff_and_limiter():
                              'region': '', 'bandwidth': ''})
     c.post('/api/agent/heartbeat',
            headers={'X-Agent-Token': m1e['token'],
+                    'X-Agent-Protocol': '2',
                     'X-Forwarded-For': '203.0.113.88'},
            environ_base={'REMOTE_ADDR': '127.0.0.1'})
     assert db.get_machine(m1e['id'])['agent_ip'] == '203.0.113.88'
@@ -224,7 +229,8 @@ def test_xff_and_limiter():
     # 3) 公网直连伪造 XFF/CF 头 → 一律不采信，取 remote_addr
     m2 = db.create_machine({'name': 'xff2', 'role': 'backend', 'region': '', 'bandwidth': ''})
     c.post('/api/agent/heartbeat',
-           headers={'X-Agent-Token': m2['token'], 'X-Forwarded-For': '6.6.6.6',
+           headers={'X-Agent-Token': m2['token'], 'X-Agent-Protocol': '2',
+                    'X-Forwarded-For': '6.6.6.6',
                     'CF-Connecting-IP': '7.7.7.7'},
            environ_base={'REMOTE_ADDR': '93.184.216.34'})
     assert db.get_machine(m2['id'])['agent_ip'] == '93.184.216.34'
@@ -1531,6 +1537,21 @@ def test_security_hardening():
     late = c.post('/api/agent/output', headers={'X-Agent-Token': secrets_json['token']},
                   data={'job_id': jid, 'text': 'tamper', 'done': '1', 'exit_code': '0'})
     assert late.status_code == 410
+
+    # 旧协议心跳不能继续显示在线或挂住任务
+    old_m = db.create_machine({'name': 'old-agent', 'role': 'backend',
+                               'region': '', 'bandwidth': ''})
+    old_job = db.create_job(
+        old_m['id'], 'report_ips', {}, 10)
+    old_hb = c.post('/api/agent/heartbeat', headers={
+        'X-Agent-Token': old_m['token'],
+        'X-Agent-Host': 'old-agent',
+    }, environ_base={'REMOTE_ADDR': '127.0.0.1'})
+    assert 'upgrade_required' in old_hb.get_data(as_text=True)
+    old_state = db.get_machine(old_m['id'])
+    assert old_state['online'] is False and old_state['last_seen'] == 0, old_state
+    assert '协议版本过旧' in old_state['probe_error'], old_state
+    assert db.get_job(old_job)['status'] == 'failed', db.get_job(old_job)
 
     login_page = app_mod.app.test_client().get('/login')
     csp = login_page.headers.get('Content-Security-Policy', '')
