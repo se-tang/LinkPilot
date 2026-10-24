@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS machines (
     ip4 TEXT NOT NULL DEFAULT '',
     ip6 TEXT NOT NULL DEFAULT '',
     addr_override TEXT NOT NULL DEFAULT '',
+    sort_order INTEGER NOT NULL DEFAULT 0,
     probe_error TEXT NOT NULL DEFAULT '',
     probe_error_at TEXT,
     last_seen INTEGER,
@@ -219,6 +220,10 @@ def init_db():
     # 手动指定测试地址（NAT / 反代后面板观测到的地址不对时兜底；留空 = 自动）
     if cols_m and 'addr_override' not in cols_m:
         db.execute("ALTER TABLE machines ADD COLUMN addr_override TEXT NOT NULL DEFAULT ''")
+    # 机器列表顺序由用户拖动决定；旧库按原 id 顺序生成首批位置。
+    if cols_m and 'sort_order' not in cols_m:
+        db.execute('ALTER TABLE machines ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0')
+        db.execute('UPDATE machines SET sort_order=id WHERE sort_order=0')
     cols_r = [r['name'] for r in db.execute('PRAGMA table_info(runs)').fetchall()]
     if cols_r and 'ip_version' not in cols_r:
         db.execute('ALTER TABLE runs ADD COLUMN ip_version INTEGER NOT NULL DEFAULT 4')
@@ -500,7 +505,8 @@ def _fill_sign_key(m):
 
 
 def get_machines():
-    rows = get_db().execute('SELECT * FROM machines ORDER BY id').fetchall()
+    rows = get_db().execute(
+        'SELECT * FROM machines ORDER BY sort_order, id').fetchall()
     active_jobs = active_job_machine_ids()
     out = []
     for r in rows:
@@ -548,13 +554,40 @@ def public_machine(m):
 def create_machine(f):
     db = get_db()
     cur = db.execute(
-        'INSERT INTO machines (name, role, region, bandwidth, addr_override, token, sign_key) '
-        'VALUES (?,?,?,?,?,?,?)',
+        'INSERT INTO machines '
+        '(name, role, region, bandwidth, addr_override, token, sign_key, sort_order) '
+        'VALUES (?,?,?,?,?,?,?,'
+        ' (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM machines))',
         (f['name'], f['role'], f['region'], f['bandwidth'],
          (f.get('addr_override') or '').strip(),
          secrets.token_hex(32), secrets.token_hex(32)))
     db.commit()
     return get_machine(cur.lastrowid)
+
+
+def reorder_machines(ids):
+    """Persist a complete machine order supplied by the dashboard."""
+    db = get_db()
+    existing = [r['id'] for r in db.execute(
+        'SELECT id FROM machines ORDER BY sort_order, id').fetchall()]
+    seen = set()
+    order = []
+    for raw in ids:
+        try:
+            mid = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if mid in existing and mid not in seen:
+            order.append(mid)
+            seen.add(mid)
+    # A stale browser may not know about a just-added machine. Keep it instead
+    # of dropping it from the list; append unknown rows in their previous order.
+    order.extend(mid for mid in existing if mid not in seen)
+    db.executemany(
+        'UPDATE machines SET sort_order=? WHERE id=?',
+        [(index, mid) for index, mid in enumerate(order)])
+    db.commit()
+    return get_machines()
 
 
 def update_machine(mid, f):

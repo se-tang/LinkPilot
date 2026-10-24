@@ -19,7 +19,7 @@ from . import db, job_types, quality, runner, scheduler
 
 # 版本号：这是唯一权威（面板页面、部署横幅、install.sh 都从/沿用它取）。
 # 还在测试阶段，因此用 0.x 版本号。
-APP_VERSION = '0.7.16'
+APP_VERSION = '0.7.17'
 
 app = Flask(__name__)
 app.json.ensure_ascii = False
@@ -343,6 +343,21 @@ def api_machine_update(mid):
     data = request.get_json(force=True, silent=True) or {}
     fields = _machine_fields(data)
     return jsonify(db.public_machine(db.update_machine(mid, fields)))
+
+
+@app.put('/api/machines/order')
+def api_machine_order():
+    data = request.get_json(force=True, silent=True) or {}
+    ids = data.get('ids')
+    if not isinstance(ids, list) or not ids:
+        return jsonify({'error': '机器顺序不能为空'}), 400
+    if len(ids) > 500:
+        return jsonify({'error': '机器数量超出限制'}), 400
+    machines = db.reorder_machines(ids)
+    return jsonify({
+        'ok': True,
+        'machines': [db.public_machine(m) for m in machines],
+    })
 
 
 @app.post('/api/machines/<int:mid>/registration-code')

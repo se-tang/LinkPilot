@@ -241,7 +241,7 @@ kbd{background:var(--code-bg);border:1px solid var(--border);border-radius:4px;p
   --shadow:0 12px 36px rgba(31,34,66,.08); --glow:rgba(123,108,246,.09);
   --brand-gradient:linear-gradient(135deg,#4f5cff,#7b6cf6);
 }
-body[data-theme='dark']{
+:is(body,.theme-reveal-page)[data-theme='dark']{
   --bg:#0b0b12; --card:#131321; --border:rgba(232,227,255,.13); --text:#f7f6ff; --muted:#a4a2bd;
   --accent:#8f9cff; --green:#7ad3a4; --lime:#9ddfb9; --orange:#ffe27a; --red:#ff929b;
   --btn-bg:rgba(255,255,255,.045); --btn-border:rgba(232,227,255,.14); --btn-hover:#302c55;
@@ -250,7 +250,34 @@ body[data-theme='dark']{
   --shadow:0 14px 42px rgba(0,0,0,.22); --glow:rgba(123,108,246,.15);
 }
 html{color-scheme:light}
-body[data-theme='dark']{color-scheme:dark}
+:is(body,.theme-reveal-page)[data-theme='dark']{color-scheme:dark}
+::view-transition-old(root),
+::view-transition-new(root){animation:none;mix-blend-mode:normal}
+::view-transition-new(root){
+  clip-path:circle(0 at var(--theme-origin-x,50vw) var(--theme-origin-y,50vh));
+  animation:themeCircleReveal .58s cubic-bezier(.2,.72,.25,1) forwards;
+}
+@keyframes themeCircleReveal{
+  from{clip-path:circle(0 at var(--theme-origin-x,50vw) var(--theme-origin-y,50vh))}
+  to{clip-path:circle(var(--theme-radius,120vmax) at var(--theme-origin-x,50vw) var(--theme-origin-y,50vh))}
+}
+.theme-reveal-overlay{
+  position:fixed;inset:0;z-index:160;overflow:auto;overscroll-behavior:contain;
+  margin:0;color:var(--text);
+  background:
+    radial-gradient(900px 520px at 90% -10%,var(--glow),transparent 65%),
+    radial-gradient(700px 420px at -15% 35%,var(--glow),transparent 60%),
+    var(--bg);
+  font:14px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+  clip-path:circle(0 at var(--theme-origin-x,50vw) var(--theme-origin-y,50vh));
+  will-change:clip-path;
+  scrollbar-width:none;
+}
+.theme-reveal-overlay::-webkit-scrollbar{width:0;height:0}
+.theme-reveal-page{
+  position:relative;width:100%;min-height:100vh;margin:0;
+  color:var(--text);font-family:Inter,"PingFang SC","Noto Sans SC","Microsoft YaHei",system-ui,sans-serif;
+}
 body{
   min-height:100vh;
   background:
@@ -272,6 +299,27 @@ header h1{font-size:15px;font-weight:800;gap:10px}
 .brand-product{color:var(--muted);font-size:12px;font-weight:500}
 header .actions{gap:7px}
 #meUser{font-size:12px}
+.theme-toggle{
+  display:inline-flex;align-items:center;gap:7px;padding:0 9px;
+  color:var(--muted);
+}
+.theme-toggle:hover{color:var(--text)}
+.theme-toggle-track{
+  position:relative;width:30px;height:17px;flex:none;border-radius:99px;
+  background:var(--surface2);border:1px solid var(--border);
+  box-shadow:inset 0 1px 2px rgba(18,20,42,.08);
+}
+.theme-toggle-knob{
+  position:absolute;left:2px;top:2px;width:11px;height:11px;border-radius:50%;
+  background:var(--accent);box-shadow:0 1px 4px rgba(33,31,72,.24);
+  transition:transform .28s cubic-bezier(.34,1.45,.64,1);
+}
+:is(body,.theme-reveal-page)[data-theme='dark'] .theme-toggle-knob{transform:translateX(13px)}
+.theme-toggle .theme-sun{display:none}
+:is(body,.theme-reveal-page)[data-theme='dark'] .theme-toggle .theme-sun{display:block}
+:is(body,.theme-reveal-page)[data-theme='dark'] .theme-toggle .theme-moon{display:none}
+.theme-toggle svg{width:14px;height:14px;display:block;flex:none}
+.theme-toggle-label{min-width:2em;text-align:left}
 main{max-width:1200px;padding:20px 16px 64px}
 /* 卡片内的按钮一律不画边：默认透明，悬停才垫一层底色，避免按钮自身成为一层框 */
 button{
@@ -347,6 +395,37 @@ table{font-size:13px}
    其他列折行变高时操作列的底部分割线会浮起来错位 */
 .machines-table .btn-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px}
 .machines-table .btn-grid button{width:100%;min-width:0}
+.machines-table tbody tr[data-machine-id]{cursor:grab;position:relative;user-select:none;-webkit-user-select:none}
+.machine-drag-handle{
+  display:inline-flex;width:14px;height:20px;margin-right:4px;align-items:center;
+  justify-content:center;vertical-align:-5px;color:var(--muted);opacity:.55;
+}
+.machine-drag-handle svg{width:10px;height:16px;display:block}
+.machines-table tbody tr[data-machine-id]:hover .machine-drag-handle{opacity:1;color:var(--accent)}
+.machines-table tbody tr.machine-row-shifting{
+  z-index:1;will-change:transform;
+  transition:transform .46s cubic-bezier(.2,.82,.25,1);
+  transition-timing-function:linear(0,.12 8%,.34 17%,.61 27%,.84 38%,.98 50%,1.04 61%,1.02 72%,1 100%);
+}
+.machines-table tbody tr.machine-drag-placeholder{z-index:2;cursor:grabbing}
+.machines-table tbody tr.machine-drag-placeholder td{
+  background:color-mix(in srgb,var(--accent) 6%,var(--card));
+  border-bottom:1px dashed color-mix(in srgb,var(--accent) 58%,transparent);
+}
+.machines-table tbody tr.machine-drag-placeholder td>*{visibility:hidden}
+body.machine-dragging{cursor:grabbing}
+body.machine-dragging *{cursor:grabbing!important}
+.machine-drag-ghost{
+  position:fixed;left:0;top:0;z-index:135;margin:0;pointer-events:none;
+  table-layout:fixed;border-collapse:collapse;border-spacing:0;
+  border:1px solid color-mix(in srgb,var(--accent) 40%,var(--border));
+  border-radius:12px;background:var(--card);overflow:hidden;
+  box-shadow:0 22px 55px rgba(23,20,58,.28),0 5px 14px rgba(23,20,58,.16);
+  transform-origin:50% 45%;
+}
+.machine-drag-ghost tbody,.machine-drag-ghost tr,.machine-drag-ghost td{background:var(--card)}
+.machine-drag-ghost td{border-bottom:0!important}
+.machine-drag-ghost button{pointer-events:none}
 th{
   padding:10px 11px;color:var(--muted);
   font-size:11px;font-weight:750;letter-spacing:0;
@@ -364,7 +443,7 @@ tbody tr:not(.run-group):hover{background:rgba(123,108,246,.05)}
 .badge.partial,.badge.skipped,.badge.interrupted,.badge.expired{color:var(--orange)}
 .badge.failed,.badge.stopped{color:var(--red)}
 .badge.scheduled{color:var(--accent)}
-body[data-theme='dark'] .badge.target{background:#302c55;color:#e6e2ff;border-color:#514a88}
+:is(body,.theme-reveal-page)[data-theme='dark'] .badge.target{background:#302c55;color:#e6e2ff;border-color:#514a88}
 .dot{width:8px;height:8px;margin-right:6px;box-shadow:none}
 .dot.on{background:var(--green);box-shadow:0 0 0 3px color-mix(in srgb,var(--green) 14%,transparent)}
 .dot.off{background:var(--muted)}
@@ -377,10 +456,10 @@ body[data-theme='dark'] .badge.target{background:#302c55;color:#e6e2ff;border-co
 .rb.rating-a{background:#e5f3f8;border-color:transparent;color:#17505f}
 .rb.rating-b{background:#f6e7c4;border-color:transparent;color:#7a4c06}
 .rb.rating-c{background:#fbe8eb;border-color:transparent;color:#8a2b2b}
-body[data-theme='dark'] .rb.rating-s{background:#173a32;color:#a5ebca}
-body[data-theme='dark'] .rb.rating-a{background:#1d3c4b;color:#9cdbe8}
-body[data-theme='dark'] .rb.rating-b{background:#493a18;color:#ffe27a}
-body[data-theme='dark'] .rb.rating-c{background:#452c3b;color:#ffb1bb}
+:is(body,.theme-reveal-page)[data-theme='dark'] .rb.rating-s{background:#173a32;color:#a5ebca}
+:is(body,.theme-reveal-page)[data-theme='dark'] .rb.rating-a{background:#1d3c4b;color:#9cdbe8}
+:is(body,.theme-reveal-page)[data-theme='dark'] .rb.rating-b{background:#493a18;color:#ffe27a}
+:is(body,.theme-reveal-page)[data-theme='dark'] .rb.rating-c{background:#452c3b;color:#ffb1bb}
 .rb.rating-f{background:#fbe8eb;border-color:transparent;color:#8a2b2b}
 .rb.rating-unknown{background:var(--surface2);border-color:var(--border);color:var(--muted)}
 .run-summary{
@@ -502,6 +581,11 @@ details{border:0;border-radius:10px;background:var(--surface2)}
   .brand-mark{width:38px;height:28px}
   .brand-product{display:none}
   #meUser{display:none}
+  .theme-toggle{padding:0 4px;gap:4px}
+  .theme-toggle-label{display:none}
+  .theme-toggle-track{width:31px;height:18px}
+  .theme-toggle-knob{width:12px;height:12px}
+  :is(body,.theme-reveal-page)[data-theme='dark'] .theme-toggle-knob{transform:translateX(13px)}
   header .actions{gap:4px}
   header .actions button{min-height:28px;padding:0 8px;font-size:11px}
   main{padding:12px 12px 48px}
@@ -538,6 +622,15 @@ details{border:0;border-radius:10px;background:var(--surface2)}
   .event-line .event-time{margin-right:6px}
   .event-summary{display:block;padding-left:0}
   .quality-cell{min-width:210px}
+  .machine-drag-ghost tbody{display:block}
+  .machine-drag-ghost tr{
+    display:grid!important;grid-template-columns:minmax(0,1fr) auto;
+    gap:5px 10px;padding:10px 2px;
+  }
+  .machine-drag-ghost td{border:0!important;padding:2px!important}
+  .machine-drag-ghost td:nth-child(1){grid-column:1}
+  .machine-drag-ghost td:nth-child(2){grid-column:2;text-align:right}
+  .machine-drag-ghost td:nth-child(3),.machine-drag-ghost td:nth-child(4){grid-column:1/3}
 }
 @media (max-width:420px){
   .brand-mark{width:34px;height:26px}
@@ -634,38 +727,38 @@ details{border:0;border-radius:10px;background:var(--surface2)}
   #runsCard .card-head .actions{justify-content:space-between}
   .empty-cell{grid-column:1/-1}
   .stat-spark{right:10px;bottom:9px;width:54px;height:18px}
-  body[data-app-tab='home'] #homeQuick{display:flex;gap:8px;margin:0 0 14px}
-  body[data-app-tab='home'] #homeQuick .primary{flex:1;min-height:46px}
+  :is(body,.theme-reveal-page)[data-app-tab='home'] #homeQuick{display:flex;gap:8px;margin:0 0 14px}
+  :is(body,.theme-reveal-page)[data-app-tab='home'] #homeQuick .primary{flex:1;min-height:46px}
   *{-webkit-tap-highlight-color:transparent}
   /* 总览页信息卡（仅手机端首页显示） */
-  body[data-app-tab='home'] #homeFeed{display:block}
+  :is(body,.theme-reveal-page)[data-app-tab='home'] #homeFeed{display:block}
   .home-row{display:flex;align-items:center;gap:10px;width:100%;min-height:54px;padding:9px 6px;border-radius:12px;background:transparent;text-align:left}
   .home-row:hover{background:var(--btn-hover)}
   .home-row-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
   .home-row-main b{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .home-row-chev{color:var(--muted);flex:none}
   .home-empty{margin:4px 2px 8px;font-size:12px}
-  body[data-app-tab='home'] .dashboard-grid,
-  body[data-app-tab='home'] #schedulesCard,
-  body[data-app-tab='home'] #runsCard{display:none}
-  body[data-app-tab='machines'] .overview,
-  body[data-app-tab='machines'] #homeQuick,
-  body[data-app-tab='machines'] #runCard,
-  body[data-app-tab='machines'] #schedulesCard,
-  body[data-app-tab='machines'] #runsCard{display:none}
-  body[data-app-tab='run'] .overview,
-  body[data-app-tab='run'] #homeQuick,
-  body[data-app-tab='run'] #machinesCard,
-  body[data-app-tab='run'] #schedulesCard,
-  body[data-app-tab='run'] #runsCard{display:none}
-  body[data-app-tab='tasks'] .overview,
-  body[data-app-tab='tasks'] #homeQuick,
-  body[data-app-tab='tasks'] .dashboard-grid,
-  body[data-app-tab='tasks'] #runsCard{display:none}
-  body[data-app-tab='records'] .overview,
-  body[data-app-tab='records'] #homeQuick,
-  body[data-app-tab='records'] .dashboard-grid,
-  body[data-app-tab='records'] #schedulesCard{display:none}
+  :is(body,.theme-reveal-page)[data-app-tab='home'] .dashboard-grid,
+  :is(body,.theme-reveal-page)[data-app-tab='home'] #schedulesCard,
+  :is(body,.theme-reveal-page)[data-app-tab='home'] #runsCard{display:none}
+  :is(body,.theme-reveal-page)[data-app-tab='machines'] .overview,
+  :is(body,.theme-reveal-page)[data-app-tab='machines'] #homeQuick,
+  :is(body,.theme-reveal-page)[data-app-tab='machines'] #runCard,
+  :is(body,.theme-reveal-page)[data-app-tab='machines'] #schedulesCard,
+  :is(body,.theme-reveal-page)[data-app-tab='machines'] #runsCard{display:none}
+  :is(body,.theme-reveal-page)[data-app-tab='run'] .overview,
+  :is(body,.theme-reveal-page)[data-app-tab='run'] #homeQuick,
+  :is(body,.theme-reveal-page)[data-app-tab='run'] #machinesCard,
+  :is(body,.theme-reveal-page)[data-app-tab='run'] #schedulesCard,
+  :is(body,.theme-reveal-page)[data-app-tab='run'] #runsCard{display:none}
+  :is(body,.theme-reveal-page)[data-app-tab='tasks'] .overview,
+  :is(body,.theme-reveal-page)[data-app-tab='tasks'] #homeQuick,
+  :is(body,.theme-reveal-page)[data-app-tab='tasks'] .dashboard-grid,
+  :is(body,.theme-reveal-page)[data-app-tab='tasks'] #runsCard{display:none}
+  :is(body,.theme-reveal-page)[data-app-tab='records'] .overview,
+  :is(body,.theme-reveal-page)[data-app-tab='records'] #homeQuick,
+  :is(body,.theme-reveal-page)[data-app-tab='records'] .dashboard-grid,
+  :is(body,.theme-reveal-page)[data-app-tab='records'] #schedulesCard{display:none}
   /* 详情类卡片在手机端变成整页覆盖层（底部导航保持可见可切换） */
   #runDetail:not(.hidden),#schedDetail:not(.hidden){
     position:fixed;inset:0;z-index:107;margin:0;border:0;border-radius:0;box-shadow:none;
@@ -679,7 +772,7 @@ details{border:0;border-radius:10px;background:var(--surface2)}
   body.app-detail-open{overflow:hidden}
 }
 @media (prefers-reduced-motion:reduce){
-  *{transition:none!important;scroll-behavior:auto!important}
+  *{transition:none!important;scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important}
 }
 </style>
 </head>
@@ -690,7 +783,20 @@ details{border:0;border-radius:10px;background:var(--surface2)}
       <span class="muted" style="font-size:12px;font-weight:400">v{{ version }}</span></span></h1>
   <div class="actions">
     <span id="meUser" class="muted" style="font-size:12px"></span>
-    <button class="small" data-action="toggleTheme" id="themeBtn">🌙 深色</button>
+    <button class="small theme-toggle" data-action="toggleTheme" id="themeBtn"
+            aria-label="切换到深色模式" title="切换到深色模式">
+      <svg class="theme-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M20.4 14.2A8.4 8.4 0 0 1 9.8 3.6 8.5 8.5 0 1 0 20.4 14.2Z"/>
+      </svg>
+      <svg class="theme-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="3.6"/>
+        <path d="M12 2.2v2M12 19.8v2M4.1 4.1l1.4 1.4M18.5 18.5l1.4 1.4M2.2 12h2M19.8 12h2M4.1 19.9l1.4-1.4M18.5 5.5l1.4-1.4"/>
+      </svg>
+      <span class="theme-toggle-track" aria-hidden="true"><span class="theme-toggle-knob"></span></span>
+      <span class="theme-toggle-label" id="themeLabel">深色</span>
+    </button>
     <button class="small" data-action="logout">退出登录</button>
   </div>
 </header>
@@ -1055,6 +1161,12 @@ let EXPANDED_RUN_GROUPS = new Set();
 let EXPANDED_SCHED_CARDS = new Set();   // 手机端定时任务卡片默认收起，记住展开的id
 let RUNS_FILTER = 'manual';  // 测试记录默认只看手动，定时任务记录单独一档，避免混排杂乱
 let ALL_RUNS = [];           // 全量测试记录缓存，供总览页「最近测试」使用
+const MACHINE_DRAG = {
+  state: 'idle', mode: '', source: null, rows: [], items: [], oldRows: [],
+  finalRows: [], startClientX: 0, startClientY: 0, pointerX: 0, pointerY: 0,
+  layoutTop: 0, ghost: null, raf: 0, holdTimer: 0, suppressClickUntil: 0,
+};
+let MACHINE_ORDER_SAVING = false;
 // 数据指纹：后台轮询拿到相同数据时直接跳过重绘，避免与用户操作撞车造成卡顿
 let LAST_MACHINES_SIG = '', LAST_SCHEDULES_SIG = '', LAST_RUNS_SIG = '', LAST_CMP_SIG = '';
 const DEFAULT_AGENT_URL = {{ agent_url|tojson }};
@@ -1274,12 +1386,15 @@ function copyFallback(text, done) {
 
 /* ---------------- 机器管理 ---------------- */
 
-async function loadMachines() {
+async function loadMachines(force = false) {
+  // 拖拽期间跳过后台刷新，避免机器行被整体重绘打断手势。
+  if (MACHINE_DRAG.state !== 'idle' || MACHINE_ORDER_SAVING) return;
   // 时间戳参数防缓存：即使浏览器忽略 no-cache 头，也不会用到升级前的旧数据；
   // 数据指纹没变就跳过全部重绘（8 秒一轮的刷新在静态数据下是零开销）
   const list = await api('/api/machines?_=' + Date.now());
   const sig = JSON.stringify(list);
-  if (sig === LAST_MACHINES_SIG) return;
+  if (!force && sig === LAST_MACHINES_SIG) return;
+  if (MACHINE_DRAG.state !== 'idle' || MACHINE_ORDER_SAVING) return;
   LAST_MACHINES_SIG = sig;
   MACHINES = list;
   renderMachines();
@@ -1306,8 +1421,9 @@ function renderMachines() {
     return;
   }
   tb.innerHTML = MACHINES.map(m => `
-    <tr>
-      <td class="machine-name"><span class="dot ${m.online ? 'on' : 'off'}"></span><b>${esc(m.name)}</b>
+    <tr data-machine-id="${m.id}">
+      <td class="machine-name"><span class="machine-drag-handle" aria-hidden="true"
+          title="按住拖动排序"><svg viewBox="0 0 10 16" fill="currentColor"><circle cx="3" cy="3" r="1.2"/><circle cx="7" cy="3" r="1.2"/><circle cx="3" cy="8" r="1.2"/><circle cx="7" cy="8" r="1.2"/><circle cx="3" cy="13" r="1.2"/><circle cx="7" cy="13" r="1.2"/></svg></span><span class="dot ${m.online ? 'on' : 'off'}"></span><b>${esc(m.name)}</b>
         <div class="quiet">${m.active_job ? '执行中' : (m.online ? '在线' : '离线')}</div></td>
       <td class="machine-address"><span class="badge ${m.role}">${m.role === 'target' ? '目标' : '后端'}</span>
         <div class="quiet">${addrCell(m)}</div></td>
@@ -1321,6 +1437,292 @@ function renderMachines() {
       </div></td>
     </tr>`).join('');
 }
+
+function machineDragControl(target) {
+  return !!(target.closest && target.closest(
+    'button,a,input,select,textarea,label,summary,[contenteditable="true"]'));
+}
+
+function clearMachineDragPending() {
+  clearTimeout(MACHINE_DRAG.holdTimer);
+  MACHINE_DRAG.holdTimer = 0;
+  if (MACHINE_DRAG.state === 'pending') {
+    if (MACHINE_DRAG.source) MACHINE_DRAG.source.classList.remove('machine-drag-pending');
+    MACHINE_DRAG.state = 'idle';
+    MACHINE_DRAG.source = null;
+  }
+}
+
+function prepareMachineDrag(row, clientX, clientY, mode) {
+  if (!row || MACHINE_DRAG.state !== 'idle' || MACHINE_ORDER_SAVING ||
+      machineDragControl(row)) return;
+  const rows = [...$('machinesBody').querySelectorAll('tr[data-machine-id]')];
+  if (rows.length < 2) return;
+  Object.assign(MACHINE_DRAG, {
+    state: 'pending', mode, source: row, pointerX: clientX, pointerY: clientY,
+    startClientX: clientX, startClientY: clientY,
+  });
+  row.classList.add('machine-drag-pending');
+  // 触屏必须短暂按住才开始拖拽，否则会与页面纵向滚动争抢手势。
+  if (mode === 'touch') {
+    MACHINE_DRAG.holdTimer = setTimeout(() => {
+      if (MACHINE_DRAG.state === 'pending') activateMachineDrag();
+    }, 220);
+  }
+}
+
+function activateMachineDrag() {
+  if (MACHINE_DRAG.state !== 'pending') return;
+  const source = MACHINE_DRAG.source;
+  if (!source || !source.isConnected) return clearMachineDragPending();
+  clearTimeout(MACHINE_DRAG.holdTimer);
+  const rows = [...$('machinesBody').querySelectorAll('tr[data-machine-id]')];
+  const scrollY = window.scrollY;
+  const rect = source.getBoundingClientRect();
+  const items = rows.map(row => {
+    const r = row.getBoundingClientRect();
+    return {
+      row,
+      id: Number(row.dataset.machineId),
+      top: r.top + scrollY,
+      height: r.height,
+    };
+  });
+  Object.assign(MACHINE_DRAG, {
+    state: 'active', source, rows, items,
+    oldRows: rows.slice(), finalRows: rows.slice(),
+    layoutTop: Math.min(...items.map(item => item.top)),
+    ghost: null, raf: 0,
+  });
+  source.classList.remove('machine-drag-pending');
+  source.classList.add('machine-drag-placeholder');
+  source.setAttribute('aria-grabbed', 'true');
+  rows.forEach(row => row.classList.add('machine-row-shifting'));
+
+  // 操作按钮留在原行但不参与拖动；浮起来的是一份无交互的视觉副本。
+  const ghost = document.createElement('table');
+  ghost.className = 'machines-table machine-drag-ghost';
+  const colgroup = document.querySelector('#machinesCard table.machines-table > colgroup');
+  if (colgroup) ghost.appendChild(colgroup.cloneNode(true));
+  const tbody = document.createElement('tbody');
+  tbody.appendChild(source.cloneNode(true));
+  ghost.appendChild(tbody);
+  ghost.style.width = `${rect.width}px`;
+  ghost.style.height = `${rect.height}px`;
+  ghost.style.left = `${rect.left}px`;
+  ghost.style.top = `${rect.top}px`;
+  const ghostRow = ghost.querySelector('tr');
+  ghostRow.removeAttribute('data-machine-id');
+  ghostRow.removeAttribute('aria-grabbed');
+  ghostRow.classList.remove('machine-drag-placeholder', 'machine-row-shifting',
+    'machine-drag-pending');
+  ghost.querySelectorAll('[id]').forEach(node => node.removeAttribute('id'));
+  document.body.appendChild(ghost);
+  MACHINE_DRAG.ghost = ghost;
+  document.body.classList.add('machine-dragging');
+  MACHINE_DRAG.raf = requestAnimationFrame(machineDragFrame);
+}
+
+function machineDragFrame() {
+  if (MACHINE_DRAG.state !== 'active') return;
+  const viewportY = MACHINE_DRAG.pointerY;
+  const topEdge = 64;
+  const bottomEdge = window.innerHeight - (window.innerWidth <= 720 ? 108 : 24);
+  let scrollStep = 0;
+  if (viewportY < topEdge) scrollStep = -Math.ceil((topEdge - viewportY) / 4);
+  else if (viewportY > bottomEdge) scrollStep = Math.ceil((viewportY - bottomEdge) / 4);
+  if (scrollStep) window.scrollBy(0, Math.max(-18, Math.min(18, scrollStep)));
+
+  const pointerDocumentY = MACHINE_DRAG.pointerY + window.scrollY;
+  const remaining = MACHINE_DRAG.items.filter(item => item.row !== MACHINE_DRAG.source);
+  let insertIndex = 0;
+  while (insertIndex < remaining.length &&
+         pointerDocumentY > remaining[insertIndex].top + remaining[insertIndex].height / 2) {
+    insertIndex += 1;
+  }
+  const sourceItem = MACHINE_DRAG.items.find(item => item.row === MACHINE_DRAG.source);
+  const finalItems = remaining.slice(0, insertIndex).concat(sourceItem, remaining.slice(insertIndex));
+  let cursor = MACHINE_DRAG.layoutTop;
+  for (const item of finalItems) {
+    const offset = cursor - item.top;
+    if (item.row.classList.contains('machine-drag-placeholder')) {
+      item.row.style.transform = `translate3d(0,${offset}px,0)`;
+    } else {
+      item.row.style.transform = `translate3d(0,${offset.toFixed(2)}px,0)`;
+    }
+    cursor += item.height;
+  }
+  MACHINE_DRAG.finalRows = finalItems.map(item => item.row);
+  if (MACHINE_DRAG.ghost) {
+    const dx = MACHINE_DRAG.pointerX - MACHINE_DRAG.startClientX;
+    const dy = MACHINE_DRAG.pointerY - MACHINE_DRAG.startClientY;
+    MACHINE_DRAG.ghost.style.transform =
+      `translate3d(${dx}px,${dy}px,0) rotate(.45deg) scale(1.012)`;
+  }
+  MACHINE_DRAG.raf = requestAnimationFrame(machineDragFrame);
+}
+
+async function saveMachineOrder(ids) {
+  MACHINE_ORDER_SAVING = true;
+  try {
+    const result = await api('/api/machines/order', {
+      method: 'PUT',
+      body: JSON.stringify({ids}),
+    });
+    if (MACHINE_DRAG.state === 'idle' && Array.isArray(result.machines)) {
+      MACHINES = result.machines;
+      LAST_MACHINES_SIG = JSON.stringify(result.machines);
+    }
+  } catch (e) {
+    errorToast('机器顺序保存失败：' + e.message);
+    LAST_MACHINES_SIG = '';
+    MACHINE_ORDER_SAVING = false;
+    try { await loadMachines(true); } catch (ignored) {}
+    return;
+  }
+  MACHINE_ORDER_SAVING = false;
+}
+
+function finishMachineDrag(cancel = false) {
+  if (MACHINE_DRAG.state === 'pending') {
+    clearMachineDragPending();
+    return;
+  }
+  if (MACHINE_DRAG.state !== 'active') return;
+  cancelAnimationFrame(MACHINE_DRAG.raf);
+  MACHINE_DRAG.raf = 0;
+  const rows = MACHINE_DRAG.rows;
+  const targetRows = cancel ? MACHINE_DRAG.oldRows : MACHINE_DRAG.finalRows;
+  const beforeTop = new Map(rows.map(row => [row, row.getBoundingClientRect().top]));
+  const reduced = window.matchMedia &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  if (MACHINE_DRAG.ghost) MACHINE_DRAG.ghost.remove();
+  document.body.classList.remove('machine-dragging');
+  rows.forEach(row => {
+    row.style.transition = 'none';
+    row.style.transform = '';
+    row.classList.remove('machine-drag-placeholder', 'machine-row-shifting',
+      'machine-drag-pending');
+    row.removeAttribute('aria-grabbed');
+  });
+  const tb = $('machinesBody');
+  targetRows.forEach(row => tb.appendChild(row));
+  rows.forEach(row => { row.style.transition = ''; });
+
+  if (!reduced) {
+    rows.forEach(row => {
+      const delta = beforeTop.get(row) - row.getBoundingClientRect().top;
+      if (Math.abs(delta) < .5) return;
+      row.animate(
+        [{transform: `translate3d(0,${delta}px,0)`}, {transform: 'translate3d(0,0,0)'}],
+        {
+          duration: 480,
+          easing: 'cubic-bezier(.2,1.3,.3,1)',
+        });
+    });
+  }
+
+  const byId = new Map(MACHINES.map(machine => [Number(machine.id), machine]));
+  MACHINES = targetRows.map(row => byId.get(Number(row.dataset.machineId))).filter(Boolean);
+  LAST_MACHINES_SIG = '';
+  renderRunForm();
+  renderScheduleForm();
+  const oldIds = MACHINE_DRAG.oldRows.map(row => Number(row.dataset.machineId));
+  const newIds = targetRows.map(row => Number(row.dataset.machineId));
+  const changed = oldIds.some((id, index) => id !== newIds[index]);
+  MACHINE_DRAG.suppressClickUntil = Date.now() + 360;
+  MACHINE_DRAG.state = 'idle';
+  MACHINE_DRAG.source = null;
+  MACHINE_DRAG.rows = [];
+  MACHINE_DRAG.items = [];
+  MACHINE_DRAG.oldRows = [];
+  MACHINE_DRAG.finalRows = [];
+  if (!cancel && changed) saveMachineOrder(newIds);
+}
+
+function updateMachineDragPoint(clientX, clientY) {
+  MACHINE_DRAG.pointerX = clientX;
+  MACHINE_DRAG.pointerY = clientY;
+}
+
+$('machinesBody').addEventListener('pointerdown', e => {
+  if (e.pointerType === 'touch' || (e.pointerType === 'mouse' && e.button !== 0)) return;
+  const row = e.target.closest('tr[data-machine-id]');
+  if (!row || machineDragControl(e.target)) return;
+  prepareMachineDrag(row, e.clientX, e.clientY, e.pointerType || 'mouse');
+});
+
+document.addEventListener('pointermove', e => {
+  if (MACHINE_DRAG.state === 'pending' && MACHINE_DRAG.mode !== 'touch') {
+    const dx = e.clientX - MACHINE_DRAG.startClientX;
+    const dy = e.clientY - MACHINE_DRAG.startClientY;
+    if (Math.hypot(dx, dy) >= 5) activateMachineDrag();
+  }
+  if (MACHINE_DRAG.state !== 'active' || MACHINE_DRAG.mode === 'touch') return;
+  e.preventDefault();
+  updateMachineDragPoint(e.clientX, e.clientY);
+});
+
+document.addEventListener('pointerup', () => {
+  if (MACHINE_DRAG.mode === 'touch') return;
+  if (MACHINE_DRAG.state === 'active') finishMachineDrag();
+  else clearMachineDragPending();
+});
+
+document.addEventListener('pointercancel', () => {
+  if (MACHINE_DRAG.mode === 'touch') return;
+  if (MACHINE_DRAG.state === 'active') finishMachineDrag(true);
+  else clearMachineDragPending();
+});
+
+$('machinesBody').addEventListener('touchstart', e => {
+  if (!e.touches || e.touches.length !== 1) return;
+  const row = e.target.closest('tr[data-machine-id]');
+  if (!row || machineDragControl(e.target)) return;
+  const touch = e.touches[0];
+  prepareMachineDrag(row, touch.clientX, touch.clientY, 'touch');
+}, {passive: true});
+
+document.addEventListener('touchmove', e => {
+  if (MACHINE_DRAG.state === 'pending') {
+    const touch = e.touches[0];
+    if (!touch) return;
+    const dx = touch.clientX - MACHINE_DRAG.startClientX;
+    const dy = touch.clientY - MACHINE_DRAG.startClientY;
+    if (Math.hypot(dx, dy) > 8) clearMachineDragPending();
+    return;
+  }
+  if (MACHINE_DRAG.state !== 'active' || MACHINE_DRAG.mode !== 'touch') return;
+  const touch = e.touches[0];
+  if (!touch) return;
+  e.preventDefault();
+  updateMachineDragPoint(touch.clientX, touch.clientY);
+}, {passive: false});
+
+document.addEventListener('touchend', () => {
+  if (MACHINE_DRAG.mode !== 'touch') return;
+  if (MACHINE_DRAG.state === 'active') finishMachineDrag();
+  else clearMachineDragPending();
+}, {passive: true});
+
+document.addEventListener('touchcancel', () => {
+  if (MACHINE_DRAG.mode !== 'touch') return;
+  if (MACHINE_DRAG.state === 'active') finishMachineDrag(true);
+  else clearMachineDragPending();
+}, {passive: true});
+
+document.addEventListener('contextmenu', e => {
+  if ((MACHINE_DRAG.state === 'pending' || MACHINE_DRAG.state === 'active') &&
+      e.target.closest('#machinesBody tr[data-machine-id]')) {
+    e.preventDefault();
+  }
+});
+
+window.addEventListener('blur', () => {
+  if (MACHINE_DRAG.state === 'active') finishMachineDrag(true);
+  else clearMachineDragPending();
+});
 
 function testAddr(m, ver) {
   // 与后端 db.machine_test_ip 同一套规则：手动指定优先，其次自动探测到的该协议族地址
@@ -2048,17 +2450,195 @@ function renderMarkdown(src) {
   return html;
 }
 
-function applyTheme(t) {
-  document.body.dataset.theme = t;
-  try { localStorage.setItem('fleet-theme', t); } catch (e) {}
-  $('themeBtn').textContent = t === 'light' ? '🌙 深色' : '☀️ 浅色';
-  // 手机状态栏/浏览器 chrome 跟随主题色
-  const meta = $('metaTheme');
-  if (meta) meta.setAttribute('content', t === 'dark' ? '#0b0b12' : '#f7f8fc');
+let THEME_TRANSITIONING = false;
+const THEME_PRESS_ORIGIN = {x: 0, y: 0, t: 0};
+
+function rememberThemePress(event) {
+  const button = event.target && event.target.closest &&
+    event.target.closest('#themeBtn');
+  if (!button) return;
+  const point = event.touches ? event.touches[0] : event;
+  if (!point) return;
+  THEME_PRESS_ORIGIN.x = point.clientX;
+  THEME_PRESS_ORIGIN.y = point.clientY;
+  THEME_PRESS_ORIGIN.t = Date.now();
+}
+document.addEventListener('pointerdown', rememberThemePress, {capture: true, passive: true});
+document.addEventListener('touchstart', rememberThemePress, {capture: true, passive: true});
+
+function revealThemeWithSnapshot(nextTheme, origin, finish) {
+  const overlay = document.createElement('div');
+  const page = document.createElement('div');
+  overlay.className = 'theme-reveal-overlay';
+  overlay.setAttribute('aria-hidden', 'true');
+  overlay.inert = true;
+  page.className = `theme-reveal-page ${document.body.className}`.trim();
+  Object.entries(document.body.dataset).forEach(([key, value]) => {
+    page.dataset[key] = value;
+  });
+  page.dataset.theme = nextTheme;
+
+  // 读取目标主题的计算变量，仅用于这一帧的视觉副本；不改变当前页面状态。
+  const previousTheme = document.body.dataset.theme;
+  document.body.dataset.theme = nextTheme;
+  const themed = getComputedStyle(document.body);
+  const variables = {};
+  for (let i = 0; i < themed.length; i += 1) {
+    const name = themed[i];
+    if (name.startsWith('--')) variables[name] = themed.getPropertyValue(name);
+  }
+  if (previousTheme) document.body.dataset.theme = previousTheme;
+  else document.body.removeAttribute('data-theme');
+  Object.entries(variables).forEach(([name, value]) => overlay.style.setProperty(name, value));
+  overlay.style.colorScheme = nextTheme;
+
+  [...document.body.children].forEach(child => {
+    if (child.tagName === 'SCRIPT') return;
+    page.appendChild(child.cloneNode(true));
+  });
+  page.querySelectorAll('script').forEach(node => node.remove());
+  // cloneNode 不复制用户当前输入值，单独同步，避免揭示时看到旧表单内容。
+  const sourceFields = document.body.querySelectorAll('input,textarea,select');
+  const clonedFields = page.querySelectorAll('input,textarea,select');
+  sourceFields.forEach((source, index) => {
+    const cloned = clonedFields[index];
+    if (!cloned) return;
+    if ('value' in cloned) cloned.value = source.value;
+    if (cloned.type === 'checkbox' || cloned.type === 'radio') cloned.checked = source.checked;
+    if (cloned.tagName === 'SELECT') cloned.selectedIndex = source.selectedIndex;
+  });
+  ['#eventStream', '.md-render', '.tbl-wrap', '#chartWrap', 'pre'].forEach(selector => {
+    const sourceNodes = document.body.querySelectorAll(selector);
+    const clonedNodes = page.querySelectorAll(selector);
+    sourceNodes.forEach((source, index) => {
+      if (!clonedNodes[index]) return;
+      clonedNodes[index].scrollTop = source.scrollTop;
+      clonedNodes[index].scrollLeft = source.scrollLeft;
+    });
+  });
+  const clonedLabel = page.querySelector('#themeLabel');
+  const clonedButton = page.querySelector('#themeBtn');
+  const nextLabel = nextTheme === 'light' ? '深色' : '浅色';
+  const nextAction = nextTheme === 'light' ? '切换到深色模式' : '切换到浅色模式';
+  if (clonedLabel) clonedLabel.textContent = nextLabel;
+  if (clonedButton) {
+    clonedButton.setAttribute('aria-label', nextAction);
+    clonedButton.setAttribute('title', nextAction);
+  }
+
+  overlay.appendChild(page);
+  ['pointerdown', 'touchstart', 'click', 'contextmenu'].forEach(type => {
+    overlay.addEventListener(type, event => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }, {capture: true, passive: false});
+  });
+  document.body.appendChild(overlay);
+  overlay.scrollTop = window.scrollY;
+  const x = Math.max(0, Math.min(window.innerWidth, origin.x));
+  const y = Math.max(0, Math.min(window.innerHeight, origin.y));
+  const radius = Math.hypot(Math.max(x, window.innerWidth - x),
+    Math.max(y, window.innerHeight - y)) + 48;
+  let animation;
+  try {
+    animation = overlay.animate([
+      {clipPath: `circle(0px at ${x}px ${y}px)`},
+      {clipPath: `circle(${radius}px at ${x}px ${y}px)`},
+    ], {
+      duration: 580,
+      easing: 'cubic-bezier(.2,.72,.25,1)',
+      fill: 'forwards',
+    });
+  } catch (e) {
+    finish();
+    overlay.remove();
+    THEME_TRANSITIONING = false;
+    const button = $('themeBtn');
+    if (button) button.removeAttribute('aria-busy');
+    return;
+  }
+  animation.finished.catch(() => {}).finally(() => {
+    finish();
+    overlay.remove();
+    THEME_TRANSITIONING = false;
+    const button = $('themeBtn');
+    if (button) button.removeAttribute('aria-busy');
+  });
 }
 
-function toggleTheme() {
-  applyTheme(document.body.dataset.theme === 'dark' ? 'light' : 'dark');
+function applyTheme(t, origin = null) {
+  t = t === 'dark' ? 'dark' : 'light';
+  const change = () => {
+    document.body.dataset.theme = t;
+    try { localStorage.setItem('fleet-theme', t); } catch (e) {}
+    const label = t === 'light' ? '深色' : '浅色';
+    const action = t === 'light' ? '切换到深色模式' : '切换到浅色模式';
+    const labelNode = $('themeLabel');
+    const button = $('themeBtn');
+    if (labelNode) labelNode.textContent = label;
+    if (button) {
+      button.setAttribute('aria-label', action);
+      button.setAttribute('title', action);
+    }
+    // 手机状态栏/浏览器 chrome 跟随主题色
+    const meta = $('metaTheme');
+    if (meta) meta.setAttribute('content', t === 'dark' ? '#0b0b12' : '#f7f8fc');
+  };
+  const reduced = window.matchMedia &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (!origin || reduced || THEME_TRANSITIONING) {
+    change();
+    return;
+  }
+  if (!document.startViewTransition) {
+    THEME_TRANSITIONING = true;
+    const button = $('themeBtn');
+    if (button) button.setAttribute('aria-busy', 'true');
+    revealThemeWithSnapshot(t, origin, change);
+    return;
+  }
+  const x = Math.max(0, Math.min(window.innerWidth, origin.x));
+  const y = Math.max(0, Math.min(window.innerHeight, origin.y));
+  const radius = Math.hypot(Math.max(x, window.innerWidth - x),
+    Math.max(y, window.innerHeight - y)) + 48;
+  const root = document.documentElement;
+  root.style.setProperty('--theme-origin-x', `${x}px`);
+  root.style.setProperty('--theme-origin-y', `${y}px`);
+  root.style.setProperty('--theme-radius', `${radius}px`);
+  THEME_TRANSITIONING = true;
+  const button = $('themeBtn');
+  if (button) button.setAttribute('aria-busy', 'true');
+  let transition;
+  try {
+    transition = document.startViewTransition(change);
+  } catch (e) {
+    THEME_TRANSITIONING = false;
+    if (button) button.removeAttribute('aria-busy');
+    change();
+    return;
+  }
+  transition.finished.catch(() => {}).finally(() => {
+    THEME_TRANSITIONING = false;
+    if (button) button.removeAttribute('aria-busy');
+  });
+}
+
+function toggleTheme(anchor) {
+  const next = document.body.dataset.theme === 'dark' ? 'light' : 'dark';
+  let origin = {x: window.innerWidth / 2, y: window.innerHeight / 2};
+  if (anchor) {
+    const rect = anchor.getBoundingClientRect();
+    origin = {x: rect.left + rect.width / 2, y: rect.top + rect.height / 2};
+    if (Date.now() - THEME_PRESS_ORIGIN.t < 2000) {
+      origin = {x: THEME_PRESS_ORIGIN.x, y: THEME_PRESS_ORIGIN.y};
+      THEME_PRESS_ORIGIN.t = 0;
+    } else if (LAST_CLICK && Date.now() - LAST_CLICK.t < 1200 &&
+        LAST_CLICK.x >= rect.left && LAST_CLICK.x <= rect.right &&
+        LAST_CLICK.y >= rect.top && LAST_CLICK.y <= rect.bottom) {
+      origin = {x: LAST_CLICK.x, y: LAST_CLICK.y};
+    }
+  }
+  applyTheme(next, origin);
 }
 
 function toggleReportView() {
@@ -3173,7 +3753,7 @@ const ACTIONS = {
   toggleRunGroup: (d) => toggleRunGroup(d.id),
   copyReport,
   toggleReportView,
-  toggleTheme,
+  toggleTheme: (d, el) => toggleTheme(el),
   downloadReport,
   stopCurrentRun: (d, el) => stopCurrentRun(el),
   openScheduleForm: () => openScheduleForm(null),
@@ -3203,6 +3783,12 @@ const ACTIONS = {
 let LAST_CLICK = null;   // 最近一次点击落点，用于把确认键贴到鼠标旁边
 
 document.addEventListener('click', e => {
+  if (Date.now() < MACHINE_DRAG.suppressClickUntil &&
+      e.target.closest('#machinesBody')) {
+    e.preventDefault();
+    e.stopPropagation();
+    return;
+  }
   const el = e.target.closest('[data-action]');
   if (!el) return;
   LAST_CLICK = { x: e.clientX, y: e.clientY, t: Date.now() };

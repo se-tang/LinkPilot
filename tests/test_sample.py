@@ -766,6 +766,32 @@ def test_machine_addr_override():
     print('手动测试地址 OK')
 
 
+def test_machine_order_persisted():
+    """机器列表顺序由面板拖拽保存，刷新和多端看到同一顺序。"""
+    from app import db
+    from app.app import app as flask_app
+    db.init_db()
+    c = flask_app.test_client()
+    _login(c)
+
+    before = db.get_machines()
+    while len(before) < 3:
+        db.create_machine({
+            'name': f'order-{len(before)}', 'role': 'backend',
+            'region': '', 'bandwidth': '', 'addr_override': '',
+        })
+        before = db.get_machines()
+    wanted = [before[-1]['id']] + [m['id'] for m in before[:-1]]
+    response = c.put('/api/machines/order', json={'ids': wanted})
+    assert response.status_code == 200, response.get_json()
+    assert [m['id'] for m in response.get_json()['machines']] == wanted
+    assert [m['id'] for m in db.get_machines()] == wanted
+
+    bad = c.put('/api/machines/order', json={'ids': []})
+    assert bad.status_code == 400
+    print('机器拖拽顺序持久化 OK')
+
+
 def test_server_lifecycle():
     """iperf3 server 生命周期：存活上限按本轮时长收敛 + 任何退出路径都关闭。
 
@@ -1610,7 +1636,14 @@ def test_dashboard_interactions_present():
                 'ratingText', 'machines-table', 'col-machine', 'machine-actions',
                 'table-layout:fixed', 'function fmtN(', 'fmtN(agg.avg, nd)',
                 'function renderRuns(', 'LAST_MACHINES_SIG',
-                'data-action="toggleSchedCard"'):
+                'data-action="toggleSchedCard"',
+                'document.startViewTransition', 'themeCircleReveal',
+                'revealThemeWithSnapshot', 'theme-reveal-overlay',
+                'data-machine-id', 'machine-drag-ghost',
+                'machine-row-shifting', '/api/machines/order',
+                'requestAnimationFrame(machineDragFrame)',
+                "addEventListener('touchmove'",
+                "addEventListener('pointermove'"):
         assert key in html, f'缺少面板交互：{key}'
     assert "confirm('确定删除该测试记录？')" not in html, '测试记录删除不应使用原生确认框'
     assert 'alert(' not in html and 'prompt(' not in html and \
