@@ -12,7 +12,7 @@ import time
 
 from werkzeug.security import generate_password_hash
 
-from . import job_types
+from . import job_types, quality
 
 _DATA_DIR = os.environ.get('DATA_DIR')
 if not _DATA_DIR:
@@ -993,7 +993,8 @@ def delete_run(rid):
 
 def get_run_items(rid):
     rows = get_db().execute('SELECT * FROM run_items WHERE run_id=? ORDER BY id', (rid,)).fetchall()
-    return [dict(r) for r in rows]
+    run = get_run(rid) or {}
+    return [quality.refresh_item_rating(dict(r), run) for r in rows]
 
 
 def get_run_item(iid):
@@ -1045,18 +1046,30 @@ def create_job(machine_id, kind, params, timeout):
     clean = job_types.normalize(kind, params)
     params_json = json.dumps(clean, ensure_ascii=False, sort_keys=True)
     db = get_db()
+    # 升级旧库时 cmd TEXT NOT NULL 仍然存在；它不再用于执行，但插入必须满足旧约束。
+    legacy_cmd = any(row['name'] == 'cmd'
+                     for row in db.execute('PRAGMA table_info(jobs)'))
+    columns = 'id, machine_id, kind, params, timeout'
+    placeholders = '?,?,?,?,?'
+    if legacy_cmd:
+        columns += ', cmd'
+        placeholders += ',?'
     with _job_id_lock:            # 编号分配 + 插入必须原子，否则并发会撞主键
         for _ in range(20):
             jid = _alloc_job_id(db)
             try:
-                db.execute(
-                    'INSERT INTO jobs (id, machine_id, kind, params, timeout) '
-                    'VALUES (?,?,?,?,?)',
-                    (jid, machine_id, kind, params_json, int(timeout)))
+                values = (jid, machine_id, kind, params_json, int(timeout))
+                if legacy_cmd:
+                    values += ('',)
+                db.execute(f'INSERT INTO jobs ({columns}) VALUES ({placeholders})', values)
                 db.commit()
                 return jid
-            except sqlite3.IntegrityError:
+            except sqlite3.IntegrityError as exc:
                 db.rollback()
+                # 只有编号主键冲突可重试；NOT NULL/CHECK 等错误必须保留真实原因。
+                if (getattr(exc, 'sqlite_errorcode', None) != sqlite3.SQLITE_CONSTRAINT_PRIMARYKEY
+                        or str(exc) != 'UNIQUE constraint failed: jobs.id'):
+                    raise
                 time.sleep(0.005)
     raise RuntimeError('任务编号分配失败，请重试')
 
@@ -1332,6 +1345,7 @@ def schedule_run_window(sid, limit=10000):
             'SELECT * FROM runs WHERE schedule_id=? ORDER BY id DESC LIMIT ?',
             (sid, limit)).fetchall()
     runs = [dict(r) for r in rows][::-1]
+    runs_by_id = {run['id']: run for run in runs}
     items_by_run = {run['id']: [] for run in runs}
     ids = list(items_by_run)
     # 长测可能有几千轮，分块取明细，避免 N+1 查询以及 SQLite 变量数上限
@@ -1341,6 +1355,7 @@ def schedule_run_window(sid, limit=10000):
         for row in db.execute(
                 f'SELECT * FROM run_items WHERE run_id IN ({marks}) ORDER BY id', chunk):
             it = dict(row)
+            quality.refresh_item_rating(it, runs_by_id[it['run_id']])
             try:
                 it['metrics_obj'] = json.loads(it['metrics']) if it['metrics'] else None
             except (TypeError, ValueError):

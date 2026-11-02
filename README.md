@@ -39,3 +39,4 @@ curl -fsSL https://raw.githubusercontent.com/se-tang/LinkPilot/main/install.sh |
 - [参数与使用说明](docs/usage.md)
 - [常见问题](docs/troubleshooting.md)
 - [开发说明](docs/development.md)
+- [更新记录](docs/changelog.md)

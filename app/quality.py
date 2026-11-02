@@ -282,19 +282,30 @@ def evaluate(mt, machine, run=None):
         add('丢包率', sev, f'丢包 {fmt_num(loss, 2)}%',
             '存在丢包' if sev != 'ok' else None, loss)
 
-    labeled = parse_bw(machine.get('bandwidth') or machine.get('machine_bandwidth'))
+    backend_bw = parse_bw(machine.get('machine_bandwidth') or machine.get('bandwidth'))
+    target_bw = parse_bw(run.get('target_bandwidth'))
+    known = [v for v in (backend_bw, target_bw) if v and v > 0]
+    labeled = min(known) if known else None
+    if backend_bw and backend_bw > 0 and target_bw and target_bw > 0:
+        baseline_text = (f'后端标称 {backend_bw:g}M、目标标称 {target_bw:g}M，'
+                         f'取两端较小值 {labeled:g}M 为瓶颈基准')
+    elif labeled:
+        side = '后端' if backend_bw and backend_bw > 0 else '目标'
+        baseline_text = f'仅{side}标称带宽可用，暂以 {labeled:g}M 为参考，另一端带宽未知'
+    else:
+        baseline_text = '两端均未标记有效带宽，按绝对吞吐评估'
     for direction, val in (('上行', up), ('下行', down)):
         if val is None or float(val) <= 0:
             continue
         if labeled:
             pct = float(val) / labeled * 100.0
             sev = _higher_better_severity(pct, RATING_THRESHOLDS['throughput_pct'])
-            text = f'{direction} {fmt_num(val)} Mbit/s，约为标称 {labeled:g}M 的 {pct:.0f}%'
+            text = f'{direction} {fmt_num(val)} Mbit/s（{baseline_text}），达成率 {pct:.1f}%'
             metric_value = pct
         else:
             sev = _higher_better_severity(
                 float(val), RATING_THRESHOLDS['throughput_abs_mbps'])
-            text = f'{direction} {fmt_num(val)} Mbit/s（机器未标记带宽，按绝对吞吐评估）'
+            text = f'{direction} {fmt_num(val)} Mbit/s（{baseline_text}）'
             metric_value = float(val)
         tag = f'{direction}吞吐偏低' if sev != 'ok' else None
         add(f'{direction}吞吐', sev, text, tag, metric_value)
@@ -349,6 +360,7 @@ def evaluate(mt, machine, run=None):
         advice = _issue_text(primary['tag']) if primary else '查看诊断详情进一步定位。'
     detail = '；'.join(d['text'] for d in diagnostics)
     mt.update({
+        'throughput_baseline_mbps': labeled,
         'rating_code': code,
         'rating': label,
         'rating_label': label,
@@ -362,6 +374,22 @@ def evaluate(mt, machine, run=None):
         'rating_threshold_note': RATING_CONFIG_NOTE,
     })
     return mt
+
+
+def refresh_item_rating(item, run):
+    """用开测时的带宽快照重算展示评级；只改返回对象，不回写历史原始数据。"""
+    if item.get('status') != 'done' or not item.get('metrics'):
+        return item
+    try:
+        metrics = json.loads(item['metrics'])
+    except (TypeError, ValueError):
+        return item
+    if not isinstance(metrics, dict):
+        return item
+    evaluate(metrics, item, run)
+    item['metrics'] = json.dumps(metrics, ensure_ascii=False)
+    item['metrics_obj'] = metrics
+    return item
 
 
 def failure_metrics(machine, error, run=None):
@@ -462,6 +490,9 @@ def mask_report_text(text):
 
 def build_report(run, target, items):
     """生成 Markdown：保留汇总表，并附上每台后端与目标机之间的原始测试输出。"""
+    context = dict(run)
+    context.setdefault('target_bandwidth', target.get('bandwidth') or '')
+    items = [refresh_item_rating(dict(item), context) for item in items]
     udp = bool(int(run.get('udp') or 0))
 
     def cell(value):

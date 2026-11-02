@@ -22,6 +22,8 @@ docker-compose.yml    面板（+ 可选 caddy profile）
 
 ```bash
 python tests/test_sample.py     # 直接运行全部用例
+python tests/test_bottleneck_rating.py  # 瓶颈评分、历史详情/导出/对比
+python tests/test_job_upgrade.py        # 旧 jobs 表升级兼容
 ```
 
 纯标准库，不需要装依赖；涉及 shell 的用例（`SCRIPT_REPORT_IPS` 地址提取）只在 POSIX（Linux / macOS / 容器）下执行，Windows 上自动跳过。
