@@ -19,7 +19,7 @@ from . import db, job_types, quality, runner, scheduler
 
 # 版本号：这是唯一权威（面板页面、部署横幅、install.sh 都从/沿用它取）。
 # 还在测试阶段，因此用 0.x 版本号。
-APP_VERSION = '0.7.21'
+APP_VERSION = '0.8.0'
 
 app = Flask(__name__)
 app.json.ensure_ascii = False
@@ -484,6 +484,14 @@ def agent_heartbeat():
                         mimetype='text/plain; charset=utf-8')
     m = db.touch_machine(m['id'], request.headers.get('X-Agent-Host', ''),
                          _client_ip())
+    # 任务执行期间 Agent 仍会每几秒发一次心跳，但带上 X-Agent-Busy: 1：
+    # 这时只回传「要不要中止」的指令，绝不再派新任务（否则会并发跑两个测速）。
+    if request.headers.get('X-Agent-Busy') == '1':
+        lines = ['status=ok', 'protocol=2']
+        running = db.running_job_id(m['id'])
+        if running and db.job_cancel_requested(running):
+            lines.append(f'cancel_job={running}')
+        return Response('\n'.join(lines) + '\n', mimetype='text/plain; charset=utf-8')
     job = db.next_queued_job(m['id'])
     lines = ['status=ok', 'protocol=2']
     if job:
@@ -543,8 +551,10 @@ def api_run_create():
 def api_runs():
     runs = db.get_runs()
     schedule_names = {s['id']: s['name'] for s in db.get_schedules(include_archived=True)}
+    # 一次聚合取回所有轮次的计数，避免每轮各查一次（列表每几秒被前端轮询一次）
+    counts = db.run_counts_bulk([r['id'] for r in runs])
     for r in runs:
-        total, done, failed = db.run_counts(r['id'])
+        total, done, failed = counts.get(r['id'], (0, 0, 0))
         r['backend_total'] = total
         r['done_count'] = done
         r['fail_count'] = failed
@@ -581,9 +591,17 @@ def api_run_detail(rid):
 
 @app.post('/api/runs/<int:rid>/stop')
 def api_run_stop(rid):
-    if not runner.stop_run(rid):
+    """停止测试：面板标志位 + 通知远端 Agent 中止。
+
+    只置面板标志位的话，后端机上的 iperf3/ping 还会跑满时长：既占着目标机端口，
+    又会在下一轮开测时抢带宽，整轮结果都不作数。这里同时给涉及的任务打上取消
+    标记，Agent 执行期间的忙碌心跳会读到并 kill 掉自己启动的子进程。
+    """
+    stopped = runner.stop_run(rid)
+    cancelled = db.request_job_cancel(db.running_job_ids_of_run(rid))
+    if not stopped and not cancelled:
         return jsonify({'error': '该测试未在运行'}), 400
-    return jsonify({'ok': True})
+    return jsonify({'ok': True, 'cancelled_jobs': cancelled})
 
 
 @app.delete('/api/runs/<int:rid>')

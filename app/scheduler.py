@@ -532,7 +532,14 @@ def comparison_data(sid, limit=ROUND_LIMIT, view_limit=None):
             'worst_rating': min(m['rating'], key=lambda r: RATING_RANK.get(r, -1)) if m['rating'] else None,
         })
 
-    total_rounds = len(rounds)
+    # 「共 N 轮」用定时任务自己的累计轮次：历史保留有上限（见 db.prune_history），
+    # 只按取回的窗口计数会把「共 3000 轮」说成「共 10000 轮里只有 3000 轮」，
+    # 也会和面板上显示的完成轮次对不上。
+    try:
+        lifetime_rounds = int((s or {}).get('run_count') or 0)
+    except (TypeError, ValueError):
+        lifetime_rounds = 0
+    total_rounds = max(len(rounds), lifetime_rounds)
     view_rounds = rounds
     machines_out = machines
     if view_limit and view_limit > 0:

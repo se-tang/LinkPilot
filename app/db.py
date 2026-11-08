@@ -40,6 +40,12 @@ def get_db():
         conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30)
         conn.row_factory = sqlite3.Row
         conn.execute('PRAGMA journal_mode=WAL')
+        # WAL 下默认的 synchronous=FULL 会让每次 commit 都 fsync；心跳、任务输出回传
+        # 这类小写入很密，改成 NORMAL 后可显著减少落盘次数（掉电最多丢最后几个事务，
+        # 不会损坏数据库），这是 SQLite 官方推荐的 WAL 搭配。
+        conn.execute('PRAGMA synchronous=NORMAL')
+        # 写锁冲突时排队等待，而不是立刻抛 database is locked
+        conn.execute('PRAGMA busy_timeout=30000')
         _local.conn = conn
         _secure_data_files()
     return conn
@@ -124,6 +130,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     status TEXT NOT NULL DEFAULT 'queued',
     output TEXT NOT NULL DEFAULT '',
     exit_code INTEGER,
+    cancel_requested INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
     started_at TEXT,
     finished_at TEXT
@@ -184,6 +191,12 @@ CREATE TABLE IF NOT EXISTS schedule_runs (
     status TEXT NOT NULL DEFAULT 'running',
     note TEXT NOT NULL DEFAULT ''
 );
+-- 查询路径上的索引：心跳取任务、按轮次取明细、定时任务回填都依赖这几列，
+-- 没有索引时每台机器每次心跳都要全表扫 jobs（7 天留存后行数不小）。
+CREATE INDEX IF NOT EXISTS idx_jobs_machine_status ON jobs(machine_id, status, id);
+CREATE INDEX IF NOT EXISTS idx_run_items_run ON run_items(run_id);
+CREATE INDEX IF NOT EXISTS idx_runs_schedule ON runs(schedule_id, id);
+CREATE INDEX IF NOT EXISTS idx_schedule_runs_schedule ON schedule_runs(schedule_id, run_id);
 '''
 
 
@@ -263,6 +276,10 @@ def init_db():
         db.execute("ALTER TABLE jobs ADD COLUMN kind TEXT NOT NULL DEFAULT ''")
     if cols_jobs and 'params' not in cols_jobs:
         db.execute("ALTER TABLE jobs ADD COLUMN params TEXT NOT NULL DEFAULT '{}'")
+    # v3.0：停止测试要能真正中止远端命令。面板在任务行上打取消标记，
+    # Agent 执行期间的心跳（X-Agent-Busy: 1）会把它带回去并 kill 掉子进程。
+    if cols_jobs and 'cancel_requested' not in cols_jobs:
+        db.execute("ALTER TABLE jobs ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0")
     db.execute("UPDATE jobs SET status='failed', exit_code=-1, "
                "output=output || '[面板] 旧版自由脚本文本任务已作废\\n' "
                "WHERE status IN ('queued','running') AND kind=''")
@@ -958,15 +975,50 @@ def finish_run(rid, status, report, log_text, error=''):
     prune_history()
 
 
-def prune_history(keep_runs=100):
-    """测试记录只保留最近 100 条；已完结任务与过期令牌墓碑一并清理。"""
+# 历史保留上限：手动测试与定时任务必须分开。
+# 定时任务是长期对比的数据源，用一个 100 条的上限会在第二天就把对比页需要的轮次删掉。
+_KEEP_MANUAL_DEFAULT = 100
+_KEEP_SCHEDULE_DEFAULT = 3000
+
+
+def _keep_limit(env_name, default):
+    try:
+        value = int(str(os.environ.get(env_name) or default).strip())
+    except (TypeError, ValueError):
+        return default
+    return max(1, value)
+
+
+def prune_history(keep_runs=None):
+    """清理过期记录：手动测试与各个定时任务分别保留最近若干轮。
+
+    旧实现对所有 runs 用同一个上限（100 条）做 `DELETE ... WHERE id <= cutoff`，
+    定时任务按 5 分钟间隔跑满一天就有 288 轮，对比页和导出报告只能看到最近约
+    100 轮，而面板上仍显示「已完成 288 轮」——数据在后台被悄悄删掉了。
+    现在按来源分开清理，可用环境变量覆盖：
+      PANEL_KEEP_RUNS             手动测试保留条数（默认 100）
+      PANEL_KEEP_SCHEDULE_ROUNDS  每个定时任务保留轮次（默认 3000）
+    """
     db = get_db()
-    row = db.execute('SELECT id FROM runs ORDER BY id DESC LIMIT 1 OFFSET ?',
-                     (keep_runs - 1,)).fetchone()
-    if row:
-        cutoff = row['id']
-        db.execute('DELETE FROM run_items WHERE run_id <= ?', (cutoff,))
-        db.execute('DELETE FROM runs WHERE id <= ?', (cutoff,))
+    keep_manual = (keep_runs if keep_runs is not None
+                   else _keep_limit('PANEL_KEEP_RUNS', _KEEP_MANUAL_DEFAULT))
+    keep_sched = _keep_limit('PANEL_KEEP_SCHEDULE_ROUNDS', _KEEP_SCHEDULE_DEFAULT)
+
+    def trim(where, args, limit):
+        row = db.execute(
+            f'SELECT id FROM runs WHERE {where} ORDER BY id DESC LIMIT 1 OFFSET ?',
+            (*args, max(0, int(limit) - 1))).fetchone()
+        if not row:
+            return
+        db.execute(
+            f'DELETE FROM run_items WHERE run_id IN '
+            f'(SELECT id FROM runs WHERE {where} AND id < ?)', (*args, row['id']))
+        db.execute(f'DELETE FROM runs WHERE {where} AND id < ?', (*args, row['id']))
+
+    trim('schedule_id IS NULL', (), keep_manual)
+    for row in db.execute(
+            'SELECT DISTINCT schedule_id FROM runs WHERE schedule_id IS NOT NULL').fetchall():
+        trim('schedule_id = ?', (row['schedule_id'],), keep_sched)
     db.execute("DELETE FROM jobs WHERE status IN ('finished','failed') "
                "AND created_at < datetime('now','-7 days')")
     db.execute("DELETE FROM agent_tombstones WHERE created_at < datetime('now','-7 days')")
@@ -980,6 +1032,28 @@ def run_counts(rid):
         "SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed "
         'FROM run_items WHERE run_id=?', (rid,)).fetchone()
     return row['total'] or 0, row['done'] or 0, row['failed'] or 0
+
+
+def run_counts_bulk(run_ids):
+    """一次取多轮的 (total, done, failed)，避免列表接口每轮一次查询。"""
+    ids = []
+    for raw in run_ids or []:
+        try:
+            ids.append(int(raw))
+        except (TypeError, ValueError):
+            continue
+    out = {}
+    for start in range(0, len(ids), 400):
+        chunk = ids[start:start + 400]
+        marks = ','.join('?' * len(chunk))
+        rows = get_db().execute(
+            'SELECT run_id, COUNT(*) AS total, '
+            "SUM(CASE WHEN status='done' THEN 1 ELSE 0 END) AS done, "
+            "SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed "
+            f'FROM run_items WHERE run_id IN ({marks}) GROUP BY run_id', chunk)
+        for row in rows:
+            out[row['run_id']] = (row['total'] or 0, row['done'] or 0, row['failed'] or 0)
+    return out
 
 
 def delete_run(rid):
@@ -1092,6 +1166,60 @@ def next_queued_job(machine_id):
                (r['id'],))
     db.commit()
     return get_job(r['id'])
+
+
+def _as_job_ids(job_ids):
+    ids = []
+    for raw in job_ids or []:
+        try:
+            ids.append(int(raw))
+        except (TypeError, ValueError):
+            continue
+    return ids
+
+
+def running_job_ids_of_run(rid):
+    """某轮测试涉及的所有仍在执行的任务（目标机 + 各后端机）。"""
+    rows = get_db().execute(
+        "SELECT id FROM jobs WHERE status='running' AND machine_id IN ("
+        "  SELECT machine_id FROM run_items WHERE run_id=? AND machine_id IS NOT NULL"
+        "  UNION SELECT target_id FROM runs WHERE id=?)", (rid, rid)).fetchall()
+    return [row['id'] for row in rows]
+
+
+def request_job_cancel(job_ids):
+    """取消任务：排队中的直接作废，执行中的打标记等 Agent 自行中止。
+
+    面板不能直接杀远端进程，但可以让 Agent 在「忙碌心跳」里收到 cancel_job=<id>，
+    由 Agent 自己 kill 掉子进程（见 app/agent/install.sh）。
+    """
+    ids = _as_job_ids(job_ids)
+    if not ids:
+        return 0
+    db = get_db()
+    marks = ','.join('?' * len(ids))
+    db.execute(
+        f"UPDATE jobs SET status='failed', exit_code=-1, output = output || ?, "
+        f"finished_at=datetime('now','localtime') "
+        f"WHERE status='queued' AND id IN ({marks})",
+        ('\n[面板] 任务已取消（尚未开始）\n', *ids))
+    cur = db.execute(
+        f"UPDATE jobs SET cancel_requested=1 WHERE status='running' AND id IN ({marks})", ids)
+    db.commit()
+    return cur.rowcount
+
+
+def job_cancel_requested(jid):
+    row = get_db().execute('SELECT cancel_requested FROM jobs WHERE id=?', (jid,)).fetchone()
+    return bool(row and row['cancel_requested'])
+
+
+def running_job_id(machine_id):
+    """该机器当前正在执行的任务编号（Agent 同一时间只跑一个）。"""
+    row = get_db().execute(
+        "SELECT id FROM jobs WHERE machine_id=? AND status='running' ORDER BY id LIMIT 1",
+        (machine_id,)).fetchone()
+    return row['id'] if row else None
 
 
 _JOB_OUTPUT_MAX_CHARS = 2_000_000

@@ -347,7 +347,12 @@ def _job(machine, kind, params, timeout, log, stop_check):
     start = time.time()
     while True:
         if stop_check is not None:
-            stop_check()
+            try:
+                stop_check()
+            except RunAborted:
+                # 用户停止：让远端 Agent 也停掉这条命令，别让 iperf3 跑满时长
+                db.request_job_cancel([job_id])
+                raise
         job = db.get_job(job_id)
         out = job['output'] or ''
         if len(out) > offset:

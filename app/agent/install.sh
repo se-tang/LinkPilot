@@ -194,6 +194,15 @@ send_output() {
     --data-urlencode "exit_code=$4" >/dev/null 2>&1
 }
 
+# 任务执行期间的心跳：告诉面板「我在忙」，面板只回取消指令、不再派新任务。
+busy_heartbeat() {
+  curl -fsS -m 5 -X POST "$PANEL_URL/api/agent/heartbeat" \
+    -H "X-Agent-Token: $TOKEN" \
+    -H 'X-Agent-Protocol: 2' \
+    -H 'X-Agent-Busy: 1' \
+    -H "X-Agent-Host: $(hostname)" 2>/dev/null
+}
+
 verify_sig() {
   [ -n "$SIGN_KEY" ] && [ -n "$3" ] || return 1
   calc=$(printf '%s' "$1:$2" | openssl dgst -sha256 -hmac "$SIGN_KEY" 2>/dev/null | awk '{print $NF}')
@@ -383,13 +392,27 @@ while true; do
 
   out="$SPOOL/job.out"; : > "$out"
   run_job >"$out" 2>&1 & pid=$!
-  offset=0; start=$(date +%s)
+  offset=0; start=$(date +%s); tick=0
   while kill -0 "$pid" 2>/dev/null; do
     size=$(wc -c <"$out" 2>/dev/null || echo 0)
     if [ "$size" -gt "$offset" ]; then
       tail -c +"$((offset + 1))" "$out" >"$SPOOL/chunk"
       offset=$size
       send_output "$job_id" "$SPOOL/chunk" 0 ""
+    fi
+    # 执行期间每 3 秒发一次忙碌心跳：维持在线状态，同时收面板的取消指令。
+    # 没有这一路心跳，面板「停止测试」只能在本地面上置标志位，远端的 iperf3
+    # 会继续跑满时长，既占着目标机端口又会和下一轮抢带宽。
+    tick=$((tick + 1))
+    if [ $((tick % 3)) -eq 1 ]; then
+      hb="$(busy_heartbeat)" || hb=""
+      case "$hb" in
+        *"cancel_job=$job_id"*)
+          echo "$(date '+%F %T') 面板要求中止任务 #$job_id" >> "$SPOOL/agent.log"
+          pkill -TERM -P "$pid" 2>/dev/null || true
+          kill -TERM "$pid" 2>/dev/null || true
+          ;;
+      esac
     fi
     now=$(date +%s)
     [ $((now - start)) -le $((timeout + 120)) ] || kill "$pid" 2>/dev/null || true
