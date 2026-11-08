@@ -19,8 +19,10 @@ KINDS = {
     'check_port': {'host', 'port'},
     'iperf_client': {
         'host', 'port', 'duration', 'streams', 'udp', 'udp_bandwidth', 'reverse',
+        'json', 'omit',
     },
     'ping': {'host', 'count'},
+    'update_agent': {'sha256', 'ts', 'sig'},
     'uninstall': set(),
 }
 
@@ -90,19 +92,39 @@ def normalize(kind, params=None):
         bandwidth = str(params.get('udp_bandwidth') or '100M').strip().upper()
         if not _BANDWIDTH_RE.match(bandwidth):
             raise ValueError('UDP 带宽必须带 K/M/G 单位')
+        duration = _as_int(params.get('duration'), 1, 300, '时长')
+        omit = _as_int(params.get('omit', 0), 0, 30, '预热剔除秒数')
+        if omit and omit >= duration:
+            raise ValueError('预热剔除秒数必须小于测试时长')
         return {
             'host': _as_ip(params.get('host')),
             'port': _as_int(params.get('port'), 1, 65535, '端口'),
-            'duration': _as_int(params.get('duration'), 1, 300, '时长'),
+            'duration': duration,
             'streams': _as_int(params.get('streams'), 1, 32, '线程数'),
             'udp': _as_bool(params.get('udp'), 'UDP'),
             'udp_bandwidth': bandwidth,
             'reverse': _as_bool(params.get('reverse'), 'reverse'),
+            # -J：结构化输出（面板优先按 JSON 解析，旧 Agent 不带该参数）
+            'json': _as_bool(params.get('json'), 'JSON 输出'),
+            # -O：剔除前 N 秒（TCP 慢启动），0 = 不剔除
+            'omit': omit,
         }
     if kind == 'ping':
         return {
             'host': _as_ip(params.get('host')),
             'count': _as_int(params.get('count'), 1, 2000, 'ping 次数'),
+        }
+    if kind == 'update_agent':
+        sha = str(params.get('sha256') or '').strip().lower()
+        if not re.match(r'^[0-9a-f]{64}$', sha):
+            raise ValueError('Agent 更新包摘要无效')
+        sig = str(params.get('sig') or '').strip()
+        if not re.match(r'^[0-9a-f]{64}$', sig):
+            raise ValueError('Agent 更新签名无效')
+        return {
+            'sha256': sha,
+            'ts': _as_int(params.get('ts'), 1, 2 ** 40, '时间戳'),
+            'sig': sig,
         }
     raise AssertionError(kind)
 
@@ -143,10 +165,16 @@ def preview(kind, params=None):
             flags += f' -u -b {clean["udp_bandwidth"]}'
         if clean['reverse']:
             flags += ' -R'
+        if clean['omit']:
+            flags += f' -O {clean["omit"]}'
+        if clean['json']:
+            flags += ' -J'
         return (f'iperf3 -c {clean["host"]} -p {clean["port"]} '
                 f'-t {clean["duration"]} -P {clean["streams"]}{flags}')
     if kind == 'ping':
         return f'ping -c {clean["count"]} -i 1 {clean["host"]}'
+    if kind == 'update_agent':
+        return f'更新 Agent 到 {clean["sha256"][:12]}…'
     if kind == 'uninstall':
         return 'uninstall LinkPilot Agent'
     return kind

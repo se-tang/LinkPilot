@@ -1,0 +1,42 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.12']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+
+      - name: 语法检查
+        run: |
+          python -m py_compile app/*.py
+          for f in install.sh entrypoint.sh app/agent/install.sh app/agent/uninstall.sh; do
+            bash -n "$f"
+            echo "ok: $f"
+          done
+
+      - name: 单元 / 回归测试
+        run: |
+          python tests/test_sample.py
+          python tests/test_bottleneck_rating.py
+          python tests/test_job_upgrade.py
+          python tests/test_data_retention.py
+          python tests/test_iperf_json.py
+          python tests/test_agent_update.py
+
+      - name: 安装脚本回归
+        run: bash tests/test_install_update.sh

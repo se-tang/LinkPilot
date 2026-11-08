@@ -137,10 +137,18 @@ if ! REG_RESP="$(curl -fsS -m 20 -X POST "$PANEL_URL/api/agent/register" \
 fi
 TOKEN="$(printf '%s' "$REG_RESP" | sed -n 's/.*"token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
 SIGN_KEY="$(printf '%s' "$REG_RESP" | sed -n 's/.*"sign_key"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+# 面板推送 Agent 更新用的根密钥：只写进 /etc/linkpilot/update.key（0600 root），
+# Agent 自己读不到，所以即使 Agent 账号被拿下也无法伪造一个“新 Agent”让 root 装上。
+UPDATE_KEY="$(printf '%s' "$REG_RESP" | sed -n 's/.*"update_key"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
 if ! printf '%s' "$TOKEN" | grep -Eq '^[0-9a-f]{64}$' \
    || ! printf '%s' "$SIGN_KEY" | grep -Eq '^[0-9a-f]{64}$'; then
   printf '%s失败%s\n' "$RED" "$R"
   fail "注册响应格式无效"
+  exit 1
+fi
+if [ -n "$UPDATE_KEY" ] && ! printf '%s' "$UPDATE_KEY" | grep -Eq '^[0-9a-f]{64}$'; then
+  printf '%s失败%s\n' "$RED" "$R"
+  fail "注册响应里的更新密钥格式无效"
   exit 1
 fi
 printf '%s完成%s\n' "$GRN" "$R"
@@ -166,11 +174,25 @@ set -eu
 umask 077
 CONF=/etc/linkpilot/agent.conf
 SPOOL=/var/lib/linkpilot
+AGENT_SELF=/usr/local/lib/linkpilot/agent.sh
 CONF_VALUE() { sed -n "s/^$1=//p" "$CONF" | head -n1; }
 PANEL_URL="$(CONF_VALUE PANEL_URL)"
 TOKEN="$(CONF_VALUE TOKEN)"
 SIGN_KEY="$(CONF_VALUE SIGN_KEY)"
 [ -n "$PANEL_URL" ] && [ -n "$TOKEN" ] && [ -n "$SIGN_KEY" ] || exit 1
+
+# 自身摘要与能力：面板据此判断「这台机器的 Agent 是不是旧版本、能不能推送更新」。
+AGENT_HASH="$( (sha256sum "$AGENT_SELF" 2>/dev/null || shasum -a 256 "$AGENT_SELF" 2>/dev/null) | awk '{print $1}')"
+AGENT_CAPS=""
+if [ -f /etc/linkpilot/update.key ] && [ -f /usr/local/lib/linkpilot/apply-update.sh ] \
+   && [ -d /run/systemd/system ]; then
+  AGENT_CAPS="update"
+fi
+# 每次启动记一行：排查「Agent 是哪个版本、能不能被推送更新」时不用猜
+echo "$(date '+%F %T') Agent 启动 hash=${AGENT_HASH:0:12} caps=${AGENT_CAPS:-none}" >> "$SPOOL/agent.log"
+
+# systemd stop/restart（包括推送更新后的重启）时优雅退出，不要卡在 sleep/心跳里被强杀
+trap 'exit 0' TERM INT
 
 token_mark="$SPOOL/token_mark"
 if [ "$(cat "$token_mark" 2>/dev/null || echo '')" != "$TOKEN" ]; then
@@ -182,7 +204,9 @@ heartbeat() {
   curl -fsS -m 20 -X POST "$PANEL_URL/api/agent/heartbeat" \
     -H "X-Agent-Token: $TOKEN" \
     -H 'X-Agent-Protocol: 2' \
-    -H "X-Agent-Host: $(hostname)" 2>/dev/null
+    -H "X-Agent-Host: $(hostname)" \
+    -H "X-Agent-Script: $AGENT_HASH" \
+    -H "X-Agent-Caps: $AGENT_CAPS" 2>/dev/null
 }
 
 send_output() {
@@ -200,7 +224,9 @@ busy_heartbeat() {
     -H "X-Agent-Token: $TOKEN" \
     -H 'X-Agent-Protocol: 2' \
     -H 'X-Agent-Busy: 1' \
-    -H "X-Agent-Host: $(hostname)" 2>/dev/null
+    -H "X-Agent-Host: $(hostname)" \
+    -H "X-Agent-Script: $AGENT_HASH" \
+    -H "X-Agent-Caps: $AGENT_CAPS" 2>/dev/null
 }
 
 verify_sig() {
@@ -332,17 +358,47 @@ run_job() {
     iperf_client)
       host="$(P host)"; port="$(P port)"; duration="$(P duration)"
       streams="$(P streams)"; udp="$(P udp)"; bw="$(P udp_bandwidth)"; reverse="$(P reverse)"
+      want_json="$(P json)"; omit="$(P omit)"
       valid_ip "$host" && in_range "$port" 1 65535 && in_range "$duration" 1 300 \
         && in_range "$streams" 1 32 || return 2
       args=(iperf3 -c "$host" -p "$port" -t "$duration" -P "$streams")
       if [ "$udp" = "1" ]; then valid_bw "$bw" || return 2; args+=(-u -b "$bw"); fi
       [ "$reverse" = "1" ] && args+=(-R)
+      # -O：剔除前 N 秒，避免 TCP 慢启动把短测平均值拉低（UDP 不剔除，保留全部丢包统计）
+      case "$omit" in ''|*[!0-9]*) ;; *) [ "$omit" -gt 0 ] && in_range "$omit" 0 30 && args+=(-O "$omit") ;; esac
+      # -J：结构化输出，面板可直接算每个 interval 的稳定性；旧面板不带该参数，解析时回退文本
+      [ "$want_json" = "1" ] && args+=(-J)
       "${args[@]}"
       ;;
     ping)
       host="$(P host)"; count="$(P count)"
       valid_ip "$host" && in_range "$count" 1 2000 || return 2
       ping -c "$count" -i 1 "$host"
+      ;;
+    update_agent)
+      sha="$(P sha256)"; ts="$(P ts)"; sig_u="$(P sig)"
+      [ -n "$sha" ] && [ ${#sha} -eq 64 ] || return 2
+      printf '%s' "$sha" | grep -Eq '^[0-9a-f]{64}$' || return 2
+      valid_int "$ts" || return 2
+      [ -n "$sig_u" ] || return 2
+      [ "$AGENT_CAPS" = "update" ] || {
+        echo "本机 Agent 不具备推送更新能力（缺少 apply-update / update.key），请重跑接入命令"
+        return 3
+      }
+      staged="$SPOOL/update.staged"
+      curl -fsSL -m 60 "$PANEL_URL/agent/agent.sh" -o "$staged" || {
+        echo "下载新 Agent 失败"; rm -f "$staged"; return 1
+      }
+      got="$( (sha256sum "$staged" 2>/dev/null || shasum -a 256 "$staged" 2>/dev/null) | awk '{print $1}')"
+      if [ "$got" != "$sha" ]; then
+        echo "校验失败：下载内容 $got 与面板声明的 $sha 不一致"
+        rm -f "$staged"; return 1
+      fi
+      bash -n "$staged" || { echo "新 Agent 语法检查失败"; rm -f "$staged"; return 1; }
+      printf '%s\n' "$sha" > "$SPOOL/update.sha"
+      printf '%s\n' "$ts" > "$SPOOL/update.ts"
+      printf '%s\n' "$sig_u" > "$SPOOL/update.sig"
+      echo "UPDATE_STAGED sha=$sha（root 助手将在本任务回报后替换并重启 Agent）"
       ;;
     uninstall)
       touch "$SPOOL/uninstall.request"
@@ -386,8 +442,14 @@ while true; do
   printf '%s' "$payload_b64" | base64 -d > "$SPOOL/payload" 2>/dev/null
   kind=$(sed -n 's/^kind=//p' "$SPOOL/payload" | head -n1)
   case "$kind" in
-    ensure_tools|report_ips|check_daemon|start_server|stop_server|check_port|iperf_client|ping|uninstall) ;;
-    *) echo "拒绝未知任务类型：$kind" >> "$SPOOL/agent.log"; sleep 3; continue ;;
+    ensure_tools|report_ips|check_daemon|start_server|stop_server|check_port|iperf_client|ping|update_agent|uninstall) ;;
+    *)
+      # 未知任务类型也要回报一次：否则面板上的任务会永远停在 running，
+      # 「推送更新」这类新任务在旧 Agent 上就表现为「一直没反应」。
+      printf '拒绝未知任务类型：%s\n' "$kind" >> "$SPOOL/agent.log"
+      printf '拒绝未知任务类型：%s（该 Agent 版本过旧，请重跑接入命令）\n' "$kind" > "$SPOOL/reject"
+      send_output "$job_id" "$SPOOL/reject" 1 2
+      sleep 3; continue ;;
   esac
 
   out="$SPOOL/job.out"; : > "$out"
@@ -427,6 +489,13 @@ while true; do
   fi
   : >"$SPOOL/done"
   send_output "$job_id" "$SPOOL/done" 1 "$exit_code"
+
+  # 新 Agent 已就位：等本次任务回报完，再触发 root 助手替换并重启（重启会结束本进程）。
+  if [ -f "$SPOOL/update.sha" ] && [ -f "$SPOOL/update.staged" ]; then
+    echo "$(date '+%F %T') 触发 Agent 自更新（sha=$(cat "$SPOOL/update.sha" 2>/dev/null)）" >> "$SPOOL/agent.log"
+    : >"$SPOOL/update.request"
+    sleep 10
+  fi
 done
 AGENT_EOF
 chown root:linkpilot /usr/local/lib/linkpilot/agent.sh
@@ -441,12 +510,28 @@ CONF_EOF
 chown root:linkpilot /etc/linkpilot/agent.conf
 chmod 0640 /etc/linkpilot/agent.conf
 
+# 推送更新用的根密钥：只有 root 可读，Agent 账号读不到（防「Agent 被拿下 → 借 root 助手装自己的脚本」）
+if [ -n "$UPDATE_KEY" ]; then
+  printf '%s\n' "$UPDATE_KEY" > /etc/linkpilot/update.key
+  chown root:root /etc/linkpilot/update.key
+  chmod 0600 /etc/linkpilot/update.key
+fi
+
 cat > /usr/local/lib/linkpilot/uninstall.sh << 'UNINSTALL_EOF'
 #!/bin/bash
 set -u
+# 先停掉所有相关单元：agent 本体、卸载触发、更新触发（后两个是 path 单元，
+# 不 disable 的话删了文件它们还会留在 systemd 里一直等触发条件）
 systemctl disable --now linkpilot-agent >/dev/null 2>&1 || true
-rm -f /etc/systemd/system/linkpilot-agent.service
+systemctl disable --now linkpilot-agent-uninstall.path >/dev/null 2>&1 || true
+systemctl disable --now linkpilot-agent-update.path >/dev/null 2>&1 || true
+rm -f /etc/systemd/system/linkpilot-agent.service \
+      /etc/systemd/system/linkpilot-agent-uninstall.service \
+      /etc/systemd/system/linkpilot-agent-uninstall.path \
+      /etc/systemd/system/linkpilot-agent-update.service \
+      /etc/systemd/system/linkpilot-agent-update.path
 systemctl daemon-reload >/dev/null 2>&1 || true
+systemctl reset-failed >/dev/null 2>&1 || true
 crontab -u linkpilot -r >/dev/null 2>&1 || true
 pkill -f /usr/local/lib/linkpilot/agent.sh >/dev/null 2>&1 || true
 rm -rf /var/lib/linkpilot /etc/linkpilot /usr/local/lib/linkpilot
@@ -507,6 +592,73 @@ UNIT_EOF
   systemctl daemon-reload
   systemctl enable linkpilot-agent >/dev/null 2>&1
   systemctl enable --now linkpilot-agent-uninstall.path >/dev/null 2>&1 || true
+  # 推送更新：Agent（低权限）只负责把新脚本落到 /var/lib/linkpilot 并核对 sha256，
+  # 真正的替换由 root 的一次性助手完成，且助手要用 /etc/linkpilot/update.key 验签。
+  if [ -n "$UPDATE_KEY" ]; then
+    cat > /usr/local/lib/linkpilot/apply-update.sh << 'UPDATE_EOF'
+#!/bin/bash
+# 由 root 执行的 Agent 更新助手：验签 → 语法检查 → 原子替换 → 重启 Agent。
+# 触发方式：linkpilot-agent-update.path 发现 /var/lib/linkpilot/update.request。
+set -u
+SPOOL=/var/lib/linkpilot
+KEY_FILE=/etc/linkpilot/update.key
+TARGET=/usr/local/lib/linkpilot/agent.sh
+LOG="$SPOOL/update.log"
+
+say() { echo "$(date '+%F %T') $*" >> "$LOG"; }
+cleanup() { rm -f "$SPOOL/update.request" "$SPOOL/update.staged" "$SPOOL/update.sha" \
+                  "$SPOOL/update.ts" "$SPOOL/update.sig"; }
+fail() { say "更新失败：$*"; cleanup; exit 1; }
+
+[ -f "$SPOOL/update.request" ] || exit 0
+[ -r "$KEY_FILE" ] || fail "缺少 $KEY_FILE"
+[ -s "$SPOOL/update.staged" ] || fail "缺少暂存脚本"
+sha=$(tr -d '\r\n' < "$SPOOL/update.sha" 2>/dev/null)
+ts=$(tr -d '\r\n' < "$SPOOL/update.ts" 2>/dev/null)
+sig=$(tr -d '\r\n' < "$SPOOL/update.sig" 2>/dev/null)
+case "$sha" in *[!0-9a-f]*|'') fail "sha256 非法" ;; esac
+[ ${#sha} -eq 64 ] || fail "sha256 长度不对"
+case "$ts" in *[!0-9]*|'') fail "时间戳非法" ;; esac
+now=$(date +%s)
+[ $((now - ts)) -le 3600 ] || fail "签名已过期"
+[ $((ts - now)) -le 300 ] || fail "时间戳在未来"
+
+got=$(sha256sum "$SPOOL/update.staged" | awk '{print $1}')
+[ "$got" = "$sha" ] || fail "文件摘要不匹配"
+expect=$(printf '%s' "update:$sha:$ts" | openssl dgst -sha256 -hmac "$(cat "$KEY_FILE")" | awk '{print $NF}')
+[ -n "$expect" ] && [ "$expect" = "$sig" ] || fail "签名校验不通过"
+bash -n "$SPOOL/update.staged" || fail "脚本语法检查失败"
+
+install -m 0750 -o root -g linkpilot "$SPOOL/update.staged" "$TARGET" || fail "写入 $TARGET 失败"
+say "已替换 Agent（sha=$sha），重启服务"
+cleanup
+systemctl restart linkpilot-agent 2>/dev/null || true
+exit 0
+UPDATE_EOF
+    chmod 0750 /usr/local/lib/linkpilot/apply-update.sh
+    chown root:root /usr/local/lib/linkpilot/apply-update.sh
+    cat > /etc/systemd/system/linkpilot-agent-update.service << 'UNIT_EOF'
+[Unit]
+Description=LinkPilot Agent update apply
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/linkpilot/apply-update.sh
+UNIT_EOF
+    cat > /etc/systemd/system/linkpilot-agent-update.path << 'UNIT_EOF'
+[Unit]
+Description=Watch LinkPilot Agent update request
+
+[Path]
+PathExists=/var/lib/linkpilot/update.request
+Unit=linkpilot-agent-update.service
+
+[Install]
+WantedBy=multi-user.target
+UNIT_EOF
+    systemctl daemon-reload
+    systemctl enable --now linkpilot-agent-update.path >/dev/null 2>&1 || true
+  fi
   systemctl restart linkpilot-agent || true
   if systemctl is-active --quiet linkpilot-agent; then
     AGENT_MODE="systemd"

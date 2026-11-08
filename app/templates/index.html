@@ -92,6 +92,8 @@ summary{cursor:pointer;font-weight:600}
 .md-table{margin:10px 0}
 /* 定时任务 */
 .badge.scheduled{color:var(--accent);border-color:var(--accent)}
+/* Agent 有新版本可推送（沿用 accent 色，和角色徽标区分开） */
+.badge.update{color:var(--accent);border-color:var(--accent);background:rgba(79,70,229,.08)}
 .badge.waiting{color:var(--lime);border-color:var(--lime)}
 .badge.skipped,.badge.interrupted,.badge.expired{color:var(--orange);border-color:var(--orange)}
 .sched-name{font-weight:600;min-width:116px}
@@ -834,7 +836,10 @@ details{border:0;border-radius:10px;background:var(--surface2)}
   <section class="card" id="machinesCard">
     <div class="card-head">
       <h2>机器管理</h2>
-      <button data-action="openMachineForm">＋ 添加机器</button>
+      <div class="actions">
+        <button class="small hidden" id="updateAllAgentsBtn" data-action="updateAllAgents">↑ 全部更新 Agent</button>
+        <button data-action="openMachineForm">＋ 添加机器</button>
+      </div>
     </div>
     <div class="tbl-wrap">
     <table class="machines-table">
@@ -1423,6 +1428,11 @@ function renderMachines() {
       ? `${MACHINES.length} 台机器 · ${onlineCount} 在线 · ${MACHINES.filter(m => m.role === 'backend').length} 后端`
       : '暂无机器';
   }
+  const outdated = MACHINES.filter(m => m.agent_outdated).length;
+  if ($('updateAllAgentsBtn')) {
+    $('updateAllAgentsBtn').classList.toggle('hidden', outdated === 0);
+    $('updateAllAgentsBtn').textContent = `↑ 全部更新 Agent（${outdated}）`;
+  }
   if (!MACHINES.length) {
     tb.innerHTML = emptyState(EMPTY_ICONS.server, '还没有机器', '添加目标机与后端机后，就能发起线路测试',
       '<button class="small" data-action="openMachineForm">＋ 添加机器</button>');
@@ -1436,9 +1446,12 @@ function renderMachines() {
       <td class="machine-address"><span class="badge ${m.role}">${m.role === 'target' ? '目标' : '后端'}</span>
         <div class="quiet">${addrCell(m)}</div></td>
       <td class="machine-meta">${esc(m.region) || '—'} · ${esc(m.bandwidth) || '—'}
+        ${m.agent_outdated ? `<span class="badge update" title="面板上的 Agent 脚本比这台机器新；点「更新」可直接推送，无需重跑接入命令">Agent 可更新</span>` : ''}
         <div class="quiet">${esc(m.hostname) || '—'}</div></td>
       <td class="machine-actions"><div class="btn-grid">
         <button class="small" data-action="showAgentCmd" data-id="${m.id}">接入</button>
+        ${m.agent_outdated ? `<button class="small" data-action="updateAgent" data-id="${m.id}"
+            title="${m.agent_push_supported ? '直接推送到这台机器（Agent 下载 + root 助手替换）' : '这台机器的 Agent 太旧，无法推送更新，需要重跑接入命令'}">更新</button>` : ''}
         <button class="small" data-action="discoverMachine" data-id="${m.id}" title="重新探测本机 IPv4 / IPv6 地址">探测</button>
         <button class="small" data-action="editMachine" data-id="${m.id}">编辑</button>
         <button class="small danger" data-action="deleteMachine" data-id="${m.id}">删除</button>
@@ -1951,6 +1964,49 @@ async function discoverMachine(id) {
   } catch (e) {
     errorToast('探测失败: ' + e.message);
   }
+}
+
+/* 面板推送 Agent 更新：Agent 自己下载 → root 助手验签替换 → 服务重启 */
+async function updateAgent(id, anchor) {
+  const m = MACHINES.find(x => x.id === Number(id));
+  if (!m) return;
+  if (!m.agent_push_supported) {
+    errorToast('这台机器的 Agent 太旧，无法推送更新：请点「接入」重新生成接入码并重跑一次命令');
+    return;
+  }
+  showPopconfirm(anchor, {
+    title: '推送 Agent 更新',
+    message: `把「${m.name}」的 Agent 更新到面板当前版本（约 2 秒，测试中断会失败）`,
+    confirmText: '推送更新',
+    errorPrefix: '推送失败',
+    onConfirm: async () => {
+      await api(`/api/machines/${id}/update-agent`, {method: 'POST'});
+      toast('已排队，Agent 会自行下载并重启', 4000, 'success');
+      setTimeout(() => loadMachines().catch(() => {}), 3000);
+      setTimeout(() => loadMachines().catch(() => {}), 9000);
+    },
+  });
+}
+
+async function updateAllAgents(anchor) {
+  const outdated = MACHINES.filter(m => m.agent_outdated);
+  if (!outdated.length) return toast('所有 Agent 都是最新版本');
+  const pushable = outdated.filter(m => m.agent_push_supported && m.online);
+  if (!pushable.length) {
+    return errorToast('没有可推送的机器：都离线，或 Agent 太旧需要重跑接入命令');
+  }
+  showPopconfirm(anchor, {
+    title: '批量更新 Agent',
+    message: `可推送 ${pushable.length} 台，跳过 ${outdated.length - pushable.length} 台（离线/需重跑接入命令）`,
+    confirmText: '开始更新',
+    errorPrefix: '批量更新失败',
+    onConfirm: async () => {
+      const r = await api('/api/machines/update-all', {method: 'POST'});
+      toast(`已排队 ${r.queued.length} 台；跳过 ${r.skipped.length} 台`, 4500, 'success');
+      setTimeout(() => loadMachines().catch(() => {}), 4000);
+      setTimeout(() => loadMachines().catch(() => {}), 12000);
+    },
+  });
 }
 
 async function logout() {
@@ -3756,6 +3812,8 @@ const ACTIONS = {
   editMachine: (d) => editMachine(d.id),
   deleteMachine: (d, el) => deleteMachine(d.id, el),
   discoverMachine: (d) => discoverMachine(d.id),
+  updateAgent: (d, el) => updateAgent(d.id, el),
+  updateAllAgents: (d, el) => updateAllAgents(el),
   regenToken: (d, el) => regenToken(el),
   copyAgentCmd: () => copyText($('agentCmd').textContent, '已复制接入命令'),
   logout,

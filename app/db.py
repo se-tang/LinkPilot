@@ -69,6 +69,9 @@ CREATE TABLE IF NOT EXISTS machines (
     bandwidth TEXT NOT NULL DEFAULT '',
     token TEXT NOT NULL DEFAULT '',
     sign_key TEXT NOT NULL DEFAULT '',
+    update_key TEXT NOT NULL DEFAULT '',
+    agent_hash TEXT NOT NULL DEFAULT '',
+    agent_caps TEXT NOT NULL DEFAULT '',
     hostname TEXT NOT NULL DEFAULT '',
     agent_ip TEXT NOT NULL DEFAULT '',
     ip4 TEXT NOT NULL DEFAULT '',
@@ -254,6 +257,17 @@ def init_db():
     # 旧库残留的 runs.target_port 列不再读取。
     for row in db.execute("SELECT id FROM machines WHERE sign_key=''").fetchall():
         db.execute('UPDATE machines SET sign_key=? WHERE id=?', (secrets.token_hex(32), row['id']))
+    # v0.9.0：面板推送 Agent 更新。update_key 只给 root（Agent 账号读不到），
+    # agent_hash / agent_caps 由心跳上报，面板据此判断「要不要更新、能不能推」。
+    if cols_m and 'update_key' not in cols_m:
+        db.execute("ALTER TABLE machines ADD COLUMN update_key TEXT NOT NULL DEFAULT ''")
+    if cols_m and 'agent_hash' not in cols_m:
+        db.execute("ALTER TABLE machines ADD COLUMN agent_hash TEXT NOT NULL DEFAULT ''")
+    if cols_m and 'agent_caps' not in cols_m:
+        db.execute("ALTER TABLE machines ADD COLUMN agent_caps TEXT NOT NULL DEFAULT ''")
+    for row in db.execute("SELECT id FROM machines WHERE update_key=''").fetchall():
+        db.execute('UPDATE machines SET update_key=? WHERE id=?',
+                   (secrets.token_hex(32), row['id']))
     # v2.9：测试记录来源（手动 / 定时任务），供记录列表与对比报告区分
     if cols_r and 'source' not in cols_r:
         db.execute("ALTER TABLE runs ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'")
@@ -565,6 +579,8 @@ def public_machine(m):
     out = dict(m)
     out.pop('token', None)
     out.pop('sign_key', None)
+    # 更新密钥只留在服务端签名用，绝不能随机器列表下发
+    out.pop('update_key', None)
     return out
 
 
@@ -572,12 +588,12 @@ def create_machine(f):
     db = get_db()
     cur = db.execute(
         'INSERT INTO machines '
-        '(name, role, region, bandwidth, addr_override, token, sign_key, sort_order) '
-        'VALUES (?,?,?,?,?,?,?,'
+        '(name, role, region, bandwidth, addr_override, token, sign_key, update_key, sort_order) '
+        'VALUES (?,?,?,?,?,?,?,?,'
         ' (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM machines))',
         (f['name'], f['role'], f['region'], f['bandwidth'],
          (f.get('addr_override') or '').strip(),
-         secrets.token_hex(32), secrets.token_hex(32)))
+         secrets.token_hex(32), secrets.token_hex(32), secrets.token_hex(32)))
     db.commit()
     return get_machine(cur.lastrowid)
 
@@ -675,8 +691,11 @@ def consume_registration_code(code):
             return None
         db.execute('UPDATE agent_reg_codes SET used_at=? WHERE code_hash=?',
                    (now, row['code_hash']))
-        cur = db.execute('UPDATE machines SET token=?, sign_key=? WHERE id=?',
-                         (secrets.token_hex(32), secrets.token_hex(32), row['machine_id']))
+        cur = db.execute(
+            'UPDATE machines SET token=?, sign_key=?, update_key=?, '
+            "agent_hash='', agent_caps='' WHERE id=?",
+            (secrets.token_hex(32), secrets.token_hex(32), secrets.token_hex(32),
+             row['machine_id']))
         if cur.rowcount != 1:
             db.rollback()
             return None
@@ -786,6 +805,39 @@ def touch_machine(mid, hostname, ip):
     db.execute('UPDATE machines SET ' + ', '.join(sets) + ' WHERE id=?', args)
     db.commit()
     return get_machine(mid)
+
+
+def set_agent_meta(mid, agent_hash='', agent_caps=None):
+    """记录 Agent 自报的脚本摘要与能力（供「可推送更新」判断），无变化则不写库。"""
+    mid = int(mid)
+    agent_hash = (agent_hash or '')[:64]
+    row = get_db().execute(
+        'SELECT agent_hash, agent_caps FROM machines WHERE id=?', (mid,)).fetchone()
+    if not row:
+        return
+    sets, args = [], []
+    if agent_hash and agent_hash != (row['agent_hash'] or ''):
+        sets.append('agent_hash=?')
+        args.append(agent_hash)
+    if agent_caps is not None and agent_caps[:32] != (row['agent_caps'] or ''):
+        sets.append('agent_caps=?')
+        args.append(agent_caps[:32])
+    if not sets:
+        return
+    args.append(mid)
+    get_db().execute('UPDATE machines SET ' + ', '.join(sets) + ' WHERE id=?', args)
+    get_db().commit()
+
+
+def mark_agent_update_unsupported(mid, reason=''):
+    """Agent 明确回报「不认识 update_agent」时收回它的推送能力。
+
+    否则面板会一直显示「可更新」，每次点都白排一次任务；这里清掉 caps，
+    界面就会改提示「需要重跑接入命令」。
+    """
+    get_db().execute(
+        "UPDATE machines SET agent_caps='' WHERE id=?", (mid,))
+    get_db().commit()
 
 
 def touch_machine_seen(mid, hostname=''):

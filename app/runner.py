@@ -185,11 +185,24 @@ def parse_daemon_report(out):
     return state, busy
 
 
+def omit_seconds(cfg):
+    """TCP 剔除慢启动的秒数（UDP 不剔除，保留全部丢包统计）。"""
+    if (cfg or {}).get('udp'):
+        return 0
+    duration = int((cfg or {}).get('duration') or 0)
+    if duration >= 8:
+        return 3
+    if duration >= 4:
+        return 1
+    return 0
+
+
 def build_iperf_cmd(host, cfg, reverse=False):
     """拼 iperf3 客户端命令（host 由调用方保证是合法 IP，仍然 quote 防注入）。
 
     -P 线程数、-t 时长、-p 端口可自定义；UDP 追加 -u -b（iperf3 的 -b 是**每流**限速，
     所以 -P 4 -b 100M 等于总目标 400M）；reverse=True 即下行（-R）。
+    -O 剔除 TCP 慢启动、-J 输出结构化 JSON（Agent 端会据此拼同样的参数）。
     """
     parts = ['iperf3', '-c', shlex.quote(str(host)),
              '-p', str(cfg['port']), '-t', str(cfg['duration']), '-P', str(cfg['streams'])]
@@ -197,6 +210,10 @@ def build_iperf_cmd(host, cfg, reverse=False):
         parts += ['-u', '-b', cfg['udp_bandwidth']]
     if reverse:
         parts.append('-R')
+    omit = omit_seconds(cfg)
+    if omit:
+        parts += ['-O', str(omit)]
+    parts.append('-J')
     return ' '.join(parts)
 
 
@@ -642,11 +659,12 @@ def _run_backend(lane, st, log, stop_check, target, it, idx, target_ip, proto='I
                 m, 'iperf_client',
                 {'host': tq, 'port': my_port, 'duration': cfg['duration'],
                  'streams': cfg['streams'], 'udp': cfg['udp'],
-                 'udp_bandwidth': cfg['udp_bandwidth'], 'reverse': False},
+                 'udp_bandwidth': cfg['udp_bandwidth'], 'reverse': False,
+                 'json': True, 'omit': omit_seconds(cfg)},
                 cfg['duration'] + 60, log, stop_check)
             if code != 0:
                 raise RuntimeError('上行测试失败: ' + (up_raw or '').strip()[-200:])
-            up_s, up_r = quality.parse_iperf(up_raw)
+            up_s, up_r, _up_iv = quality.parse_iperf_any(up_raw)
             event('uplink', 'done', f'{name} 上行完成',
                   f"发送 {quality.fmt_num(up_s['mbits'] if up_s else None)} Mbit/s，"
                   f"接收 {quality.fmt_num(up_r['mbits'] if up_r else None)} Mbit/s",
@@ -660,11 +678,12 @@ def _run_backend(lane, st, log, stop_check, target, it, idx, target_ip, proto='I
                 m, 'iperf_client',
                 {'host': tq, 'port': my_port, 'duration': cfg['duration'],
                  'streams': cfg['streams'], 'udp': cfg['udp'],
-                 'udp_bandwidth': cfg['udp_bandwidth'], 'reverse': True},
+                 'udp_bandwidth': cfg['udp_bandwidth'], 'reverse': True,
+                 'json': True, 'omit': omit_seconds(cfg)},
                 cfg['duration'] + 60, log, stop_check)
             if code != 0:
                 raise RuntimeError('下行测试失败: ' + (down_raw or '').strip()[-200:])
-            down_s, down_r = quality.parse_iperf(down_raw)
+            down_s, down_r, _down_iv = quality.parse_iperf_any(down_raw)
             event('downlink', 'done', f'{name} 下行完成',
                   f"发送 {quality.fmt_num(down_s['mbits'] if down_s else None)} Mbit/s，"
                   f"接收 {quality.fmt_num(down_r['mbits'] if down_r else None)} Mbit/s",
@@ -682,7 +701,8 @@ def _run_backend(lane, st, log, stop_check, target, it, idx, target_ip, proto='I
         if 'packets transmitted' not in (ping_raw or ''):
             raise RuntimeError('ping 失败: ' + (ping_raw or '').strip()[-200:])
 
-        metrics = quality.parse_metrics(ping_raw, up_raw, down_raw)
+        metrics = quality.parse_metrics(ping_raw, up_raw, down_raw,
+                                        omit=omit_seconds(cfg))
         invalid = bidirectional_failure(metrics)
         if invalid:
             raise RuntimeError(invalid)

@@ -19,7 +19,7 @@ from . import db, job_types, quality, runner, scheduler
 
 # 版本号：这是唯一权威（面板页面、部署横幅、install.sh 都从/沿用它取）。
 # 还在测试阶段，因此用 0.x 版本号。
-APP_VERSION = '0.8.0'
+APP_VERSION = '0.9.0'
 
 app = Flask(__name__)
 app.json.ensure_ascii = False
@@ -289,9 +289,21 @@ def api_health():
 
 # ---------------- 机器管理 ----------------
 
+def _machine_view(m):
+    """机器列表/详情的统一视图：补上「Agent 是否需要更新、能不能推送」。"""
+    row = db.public_machine(m)
+    _body, sha = agent_script()
+    caps = str(row.get('agent_caps') or '')
+    row['agent_push_supported'] = 'update' in caps
+    row['agent_hash'] = row.get('agent_hash') or ''
+    row['agent_outdated'] = bool(row['agent_hash']) and row['agent_hash'] != sha
+    row['agent_script_sha'] = sha[:12]
+    return row
+
+
 @app.get('/api/machines')
 def api_machines():
-    return jsonify([db.public_machine(m) for m in db.get_machines()])
+    return jsonify([_machine_view(m) for m in db.get_machines()])
 
 
 @app.get('/api/machines/<int:mid>')
@@ -299,7 +311,60 @@ def api_machine_get(mid):
     m = db.get_machine(mid)
     if not m:
         return jsonify({'error': '机器不存在'}), 404
-    return jsonify(db.public_machine(m))
+    return jsonify(_machine_view(m))
+
+
+def _agent_update_payload(m):
+    """构造推送更新任务：脚本摘要 + 时间戳 + 用该机器的 root 更新密钥签的 HMAC。"""
+    _body, sha = agent_script()
+    key = str(m.get('update_key') or '')
+    if not key:
+        raise RuntimeError('该机器没有更新密钥，请重新生成接入码并重跑接入命令')
+    ts = int(time.time())
+    sig = hmac.new(key.encode('utf-8'), f'update:{sha}:{ts}'.encode('utf-8'),
+                   hashlib.sha256).hexdigest()
+    return {'sha256': sha, 'ts': ts, 'sig': sig}, sha
+
+
+@app.post('/api/machines/<int:mid>/update-agent')
+def api_machine_update_agent(mid):
+    """让这台机器的 Agent 自更新到面板当前版本（由 Agent 下载 + root 助手替换）。"""
+    m = db.get_machine(mid)
+    if not m:
+        return jsonify({'error': '机器不存在'}), 404
+    if not db.machine_online(m):
+        return jsonify({'error': '该机器 Agent 未上线，无法推送更新'}), 400
+    if 'update' not in str(m.get('agent_caps') or ''):
+        return jsonify({
+            'error': '这台机器的 Agent 还不支持推送更新（缺少 root 更新助手），'
+                     '需要重新生成接入码并重跑一次接入命令'}), 400
+    _body, sha = agent_script()
+    if (m.get('agent_hash') or '') == sha:
+        return jsonify({'ok': True, 'already_current': True, 'sha256': sha})
+    params, sha = _agent_update_payload(m)
+    job_id = db.create_job(mid, 'update_agent', params, timeout=300)
+    return jsonify({'ok': True, 'job_id': job_id, 'sha256': sha})
+
+
+@app.post('/api/machines/update-all')
+def api_machines_update_all():
+    """给所有「旧版本 + 在线 + 支持推送」的机器排队一次更新。"""
+    _body, sha = agent_script()
+    queued, skipped = [], []
+    for m in db.get_machines():
+        if (m.get('agent_hash') or '') == sha:
+            continue
+        if not db.machine_online(m):
+            skipped.append({'id': m['id'], 'name': m['name'], 'reason': 'Agent 离线'})
+            continue
+        if 'update' not in str(m.get('agent_caps') or ''):
+            skipped.append({'id': m['id'], 'name': m['name'],
+                            'reason': '不支持推送更新，需重跑接入命令'})
+            continue
+        params, _sha = _agent_update_payload(m)
+        queued.append({'id': m['id'], 'name': m['name'],
+                       'job_id': db.create_job(m['id'], 'update_agent', params, 300)})
+    return jsonify({'ok': True, 'sha256': sha, 'queued': queued, 'skipped': skipped})
 
 
 def _machine_fields(data):
@@ -332,7 +397,7 @@ def _machine_fields(data):
 def api_machine_create():
     data = request.get_json(force=True, silent=True) or {}
     fields = _machine_fields(data)
-    return jsonify(db.public_machine(db.create_machine(fields)))
+    return jsonify(_machine_view(db.create_machine(fields)))
 
 
 @app.put('/api/machines/<int:mid>')
@@ -342,7 +407,7 @@ def api_machine_update(mid):
         return jsonify({'error': '机器不存在'}), 404
     data = request.get_json(force=True, silent=True) or {}
     fields = _machine_fields(data)
-    return jsonify(db.public_machine(db.update_machine(mid, fields)))
+    return jsonify(_machine_view(db.update_machine(mid, fields)))
 
 
 @app.put('/api/machines/order')
@@ -418,6 +483,48 @@ def agent_uninstall():
     return _serve_agent_file('uninstall.sh')
 
 
+# ---------------- Agent 脚本体（供「面板推送更新」下载） ----------------
+
+_AGENT_BODY_CACHE = {'mtime': None, 'body': '', 'sha': ''}
+
+
+def agent_script():
+    """返回 (install.sh 里的 Agent 脚本体, sha256)。
+
+    必须和 install.sh 真正写进 /usr/local/lib/linkpilot/agent.sh 的内容逐字节一致，
+    否则 Agent 端按签过名的 sha256 校验必然失败。
+    """
+    path = os.path.join(AGENT_DIR, 'install.sh')
+    mtime = os.path.getmtime(path)
+    if _AGENT_BODY_CACHE['mtime'] != mtime:
+        with open(path, encoding='utf-8') as f:
+            lines = f.read().splitlines()
+        start = end = None
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if start is None and stripped.startswith(
+                    'cat > /usr/local/lib/linkpilot/agent.sh <<'):
+                start = i
+            elif start is not None and stripped == 'AGENT_EOF':
+                end = i
+                break
+        if start is None or end is None:
+            raise RuntimeError('install.sh 里找不到 Agent 脚本体')
+        body = '\n'.join(lines[start + 1:end]) + '\n'
+        _AGENT_BODY_CACHE.update({
+            'mtime': mtime,
+            'body': body,
+            'sha': hashlib.sha256(body.encode('utf-8')).hexdigest(),
+        })
+    return _AGENT_BODY_CACHE['body'], _AGENT_BODY_CACHE['sha']
+
+
+@app.get('/agent/agent.sh')
+def agent_body():
+    body, _sha = agent_script()
+    return Response(body, mimetype='text/x-shellscript; charset=utf-8')
+
+
 # ---------------- Agent API（令牌认证） ----------------
 
 def _agent_registration_transport_ok():
@@ -456,6 +563,9 @@ def api_agent_register():
         'machine_id': m['id'],
         'token': m['token'],
         'sign_key': m['sign_key'],
+        # 根密钥：安装脚本会把它写到 /etc/linkpilot/update.key（0600 root），
+        # Agent 账号读不到，用于校验「面板推送的 Agent 更新」
+        'update_key': m.get('update_key', ''),
         'agent_protocol': 2,
     })
 
@@ -484,6 +594,11 @@ def agent_heartbeat():
                         mimetype='text/plain; charset=utf-8')
     m = db.touch_machine(m['id'], request.headers.get('X-Agent-Host', ''),
                          _client_ip())
+    # Agent 自报的脚本摘要 / 能力：面板据此判断「要不要更新、能不能推」
+    db.set_agent_meta(
+        m['id'],
+        request.headers.get('X-Agent-Script', ''),
+        request.headers.get('X-Agent-Caps', ''))
     # 任务执行期间 Agent 仍会每几秒发一次心跳，但带上 X-Agent-Busy: 1：
     # 这时只回传「要不要中止」的指令，绝不再派新任务（否则会并发跑两个测速）。
     if request.headers.get('X-Agent-Busy') == '1':
@@ -527,7 +642,14 @@ def agent_output():
         db.append_job_output(jid, text)
     if request.form.get('done') == '1':
         exit_code = request.form.get('exit_code', type=int)
-        db.finish_job(jid, exit_code if exit_code is not None else -1)
+        code = exit_code if exit_code is not None else -1
+        db.finish_job(jid, code)
+        # 旧 Agent 不认识 update_agent（exit 2）时会明确回报；这时收回它的推送能力，
+        # 面板改提示「需要重跑接入命令」，而不是每次点更新都白排一次任务。
+        if job.get('kind') == 'update_agent' and code == 2:
+            db.mark_agent_update_unsupported(m['id'])
+            db.set_machine_probe(
+                m['id'], 'Agent 版本过旧，不支持推送更新：请重新生成接入码并重跑一次接入命令')
     return Response('status=ok\n', mimetype='text/plain; charset=utf-8')
 
 

@@ -54,6 +54,111 @@ def _to_mb(val, unit):
     return v
 
 
+def parse_iperf_json(out):
+    """解析 `iperf3 -J` 输出 → (sender, receiver, intervals)；不是 JSON 则返回 None。
+
+    面板从 v0.9.0 起让 Agent 带 `-J`，结构化输出比文本正则稳，还能拿到每个
+    interval 的吞吐，用来算线路稳定性（CV / P95）。旧 Agent 仍返回文本，
+    由 parse_iperf_any 回退。
+    """
+    text = (out or '').strip()
+    start = text.find('{')
+    if start < 0:
+        return None
+    try:
+        doc = json.loads(text[start:])
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(doc, dict) or not isinstance(doc.get('end'), dict):
+        return None
+    end = doc['end']
+
+    def entry(node, retr=False):
+        try:
+            bps = float(node.get('bits_per_second'))
+        except (TypeError, ValueError):
+            return None
+        out_entry = {'mbits': bps / 1e6}
+        try:
+            out_entry['transfer_mb'] = float(node.get('bytes')) / 1048576.0
+        except (TypeError, ValueError):
+            pass
+        if retr and node.get('retransmits') is not None:
+            try:
+                out_entry['retr'] = int(node['retransmits'])
+            except (TypeError, ValueError):
+                pass
+        return out_entry
+
+    sender = entry(end.get('sum_sent') or {}, retr=True)
+    receiver = entry(end.get('sum_received') or {})
+    # UDP 的抖动/丢包只有接收侧统计得准，iperf3 放在 end.sum
+    udp_sum = end.get('sum') or {}
+    if receiver is not None and udp_sum.get('lost_percent') is not None:
+        try:
+            receiver['jitter_ms'] = float(udp_sum.get('jitter_ms'))
+            receiver['lost'] = int(udp_sum.get('lost_packets'))
+            receiver['total'] = int(udp_sum.get('packets'))
+            receiver['loss_pct'] = float(udp_sum['lost_percent'])
+        except (TypeError, ValueError):
+            pass
+    intervals = []
+    for item in doc.get('intervals') or []:
+        s = item.get('sum') or {}
+        # -O 剔除的那几秒仍会出现在 intervals 里（omitted=true），算稳定性时要跳掉，
+        # 否则慢启动的低速样本会把 CV 拉高。
+        if s.get('omitted'):
+            continue
+        try:
+            intervals.append(float(s.get('bits_per_second')) / 1e6)
+        except (TypeError, ValueError):
+            continue
+    return sender, receiver, intervals
+
+
+def parse_iperf_any(out):
+    """统一入口：优先按 `-J` JSON 解析，失败则退回文本解析。"""
+    parsed = parse_iperf_json(out)
+    if parsed:
+        return parsed
+    sender, receiver = parse_iperf(out)
+    return sender, receiver, []
+
+
+def stability(intervals):
+    """区间吞吐的波动：CV（标准差/均值）与 P95。样本不足时返回 None。"""
+    vals = [v for v in (intervals or []) if v is not None and v >= 0]
+    if len(vals) < 3:
+        return None
+    mean = sum(vals) / float(len(vals))
+    if mean <= 0:
+        return None
+    var = sum((v - mean) ** 2 for v in vals) / float(len(vals))
+    ordered = sorted(vals)
+    idx = min(len(ordered) - 1, int(round(0.95 * (len(ordered) - 1))))
+    return {'samples': len(vals), 'cv_pct': (var ** 0.5) / mean * 100.0,
+            'p95_mbits': ordered[idx], 'avg_mbits': mean}
+
+
+def json_block(sender, receiver, intervals, omit=0):
+    """把 JSON 结果压成报告里能看的几行（原始 JSON 太长，不适合塞进报告）。"""
+    lines = []
+    if sender:
+        lines.append(f"[SUM] sender   {fmt_num(sender.get('mbits'))} Mbits/sec"
+                     + (f"  retr {int(sender['retr'])}" if sender.get('retr') is not None else ''))
+    if receiver:
+        extra = ''
+        if receiver.get('loss_pct') is not None:
+            extra = (f"  jitter {fmt_num(receiver.get('jitter_ms'), 2)} ms"
+                     f"  loss {fmt_num(receiver.get('loss_pct'), 2)}%")
+        lines.append(f"[SUM] receiver {fmt_num(receiver.get('mbits'))} Mbits/sec{extra}")
+    st = stability(intervals)
+    if st:
+        lines.append(f"# 稳定性：CV {fmt_num(st['cv_pct'], 1)}% · P95 {fmt_num(st['p95_mbits'])} Mbit/s"
+                     f"（{st['samples']} 个区间" + (f"，已剔除前 {omit} 秒" if omit else '') + '）')
+    return '\n'.join(lines)
+
+
 def parse_iperf(out):
     """返回 (sender, receiver) 两条汇总行，含 mbits / transfer_mb / retr（TCP）/ 抖动与丢包（UDP）。
 
@@ -128,11 +233,15 @@ def ping_block(out):
     return '\n'.join(keep)
 
 
-def parse_metrics(ping_raw, up_raw, down_raw):
-    """把三段原始输出解析为结构化指标（含报告用的三段摘录块）。"""
+def parse_metrics(ping_raw, up_raw, down_raw, omit=0):
+    """把三段原始输出解析为结构化指标（含报告用的三段摘录块）。
+
+    iperf3 带 `-J` 时输出 JSON：优先按 JSON 解析，并额外给出每个方向的稳定性
+    （区间吞吐的 CV 与 P95）；旧 Agent 的文本输出仍走原来的正则解析。
+    """
     mt = parse_ping(ping_raw)
-    us, ur = parse_iperf(up_raw)
-    ds, dr = parse_iperf(down_raw)
+    us, ur, up_iv = parse_iperf_any(up_raw)
+    ds, dr, down_iv = parse_iperf_any(down_raw)
     mt['up_sender_mbits'] = us['mbits'] if us else None
     mt['up_receiver_mbits'] = ur['mbits'] if ur else None
     mt['down_sender_mbits'] = ds['mbits'] if ds else None
@@ -156,9 +265,18 @@ def parse_metrics(ping_raw, up_raw, down_raw):
         mt[f'{tag}_jitter_ms'] = udp['jitter_ms'] if udp else None
         mt[f'{tag}_udp_lost'] = udp['lost'] if udp else None
     mt['udp'] = any(mt.get(k) is not None for k in ('up_udp_loss_pct', 'down_udp_loss_pct'))
+    # 稳定性（只有 -J 才有区间序列；文本输出自然为空，不影响旧记录）
+    for tag, iv in (('up', up_iv), ('down', down_iv)):
+        st = stability(iv)
+        mt[f'{tag}_stability'] = st
+        mt[f'{tag}_cv_pct'] = st['cv_pct'] if st else None
+        mt[f'{tag}_p95_mbits'] = st['p95_mbits'] if st else None
+    mt['omit_seconds'] = int(omit or 0)
     mt['ping_block'] = ping_block(ping_raw)
-    mt['up_block'] = summary_block(up_raw)
-    mt['down_block'] = summary_block(down_raw)
+    mt['up_block'] = (json_block(us, ur, up_iv, omit) if up_iv
+                      else summary_block(up_raw))
+    mt['down_block'] = (json_block(ds, dr, down_iv, omit) if down_iv
+                        else summary_block(down_raw))
     return mt
 
 

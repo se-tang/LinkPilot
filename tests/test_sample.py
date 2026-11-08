@@ -559,11 +559,11 @@ def test_test_params():
 
     # 4) 命令拼装：端口 / 线程 / 时长 / UDP / 下行
     tcp = dict(cfg, udp=False, udp_bandwidth='100M')
-    assert runner.build_iperf_cmd('1.2.3.4', tcp) == 'iperf3 -c 1.2.3.4 -p 6500 -t 30 -P 4', tcp
+    assert runner.build_iperf_cmd('1.2.3.4', tcp) == 'iperf3 -c 1.2.3.4 -p 6500 -t 30 -P 4 -O 3 -J', tcp
     assert runner.build_iperf_cmd('1.2.3.4', tcp, reverse=True) == \
-        'iperf3 -c 1.2.3.4 -p 6500 -t 30 -P 4 -R'
+        'iperf3 -c 1.2.3.4 -p 6500 -t 30 -P 4 -R -O 3 -J'
     udp_cmd = runner.build_iperf_cmd('2606:4700:4700::1111', dict(tcp, udp=True, udp_bandwidth='200M'))
-    assert udp_cmd == 'iperf3 -c 2606:4700:4700::1111 -p 6500 -t 30 -P 4 -u -b 200M', udp_cmd
+    assert udp_cmd == 'iperf3 -c 2606:4700:4700::1111 -p 6500 -t 30 -P 4 -u -b 200M -J', udp_cmd
 
     # 5) 端口等参数只通过白名单结构化载荷下发
     srv = job_types.encode('start_server', {'port': 6500, 'ttl': 600, 'bind': '1.2.3.4'})
@@ -599,9 +599,9 @@ def test_test_params():
     rcfg = runner.run_cfg(db.get_run(run_id))
     assert [runner.item_port(it, rcfg) for it in items] == [6001, 5201]
     assert runner.build_iperf_cmd('93.184.216.34', runner.item_cfg(rcfg, items[0])) == \
-        'iperf3 -c 93.184.216.34 -p 6001 -t 5 -P 2'
+        'iperf3 -c 93.184.216.34 -p 6001 -t 5 -P 2 -O 1 -J'
     assert runner.build_iperf_cmd('93.184.216.34', runner.item_cfg(rcfg, items[1])) == \
-        'iperf3 -c 93.184.216.34 -p 5201 -t 5 -P 2'
+        'iperf3 -c 93.184.216.34 -p 5201 -t 5 -P 2 -O 1 -J'
     assert runner.normalize_params({'ports': {'3': '6001'}})['ports'] == {3: 6001}
     for bad in ({'ports': {'1': 0}}, {'ports': {'1': 99999}}, {'ports': {'1': 'x'}},
                 {'ports': {'x': 5201}}):
@@ -621,7 +621,7 @@ def test_test_params():
     assert [runner.item_port(it, cfg_nat) for it in follow] == [43343, 43343]
     assert runner.item_cfg(cfg_nat, follow[0])['port'] == 43343
     assert runner.build_iperf_cmd('1.2.3.4', runner.item_cfg(cfg_nat, follow[0])) == \
-        'iperf3 -c 1.2.3.4 -p 43343 -t 10 -P 1'
+        'iperf3 -c 1.2.3.4 -p 43343 -t 10 -P 1 -O 3 -J'
     # 多机各用各端口（目标机有公网 IP）：目标机端口 + 各机单独指定的连接端口都要起
     cfg2 = runner.normalize_params({'port': '5201'})
     items2 = [{'machine_name': 'A', 'port': 6001}, {'machine_name': 'B', 'port': 0},
