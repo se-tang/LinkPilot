@@ -1,5 +1,12 @@
 # 更新记录
 
+## 0.10.1 — 2026-11-09
+
+- 移除 0.10.0 加入的「异常告警」：面板卡片、`/api/settings` 与 `/api/settings/test-alert`、`app/alerts.py`、测试结束后的告警派发，以及 `settings` / `alert_state` 两张表的建表语句一并删除。
+- 该卡片插在机器管理和发起测试之间，把首页两栏布局挤乱了；移除后首页恢复「机器管理 ←→ 发起测试」的原始布局。
+- 已有数据库里若已经建过这两张空表，不影响使用（代码不再读写），可手动 `DROP TABLE settings; DROP TABLE alert_state;` 清理。
+- 保留：前端拆分、SSE 实时刷新、CSV/JSON 导出。
+
 ## 0.10.0 — 2026-11-09
 
 - 前端拆分：`index.html` 里的内联 CSS / JS 拆成 `static/app.css`、`static/app.js`，模板只剩 HTML 骨架（185KB → 约 20KB）。静态资源带 `?v=<版本号>`，服务端对带版本号的资源返回 `public, max-age=31536000, immutable`，升级后自动失效。

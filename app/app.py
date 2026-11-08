@@ -18,11 +18,11 @@ from flask import (Flask, Response, g, jsonify, redirect, render_template, reque
                    session, stream_with_context)
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from . import alerts, db, job_types, quality, runner, scheduler
+from . import db, job_types, quality, runner, scheduler
 
 # 版本号：这是唯一权威（面板页面、部署横幅、install.sh 都从/沿用它取）。
 # 还在测试阶段，因此用 0.x 版本号。
-APP_VERSION = '0.10.0'
+APP_VERSION = '0.10.1'
 
 app = Flask(__name__)
 app.json.ensure_ascii = False
@@ -1066,51 +1066,6 @@ def api_schedule_report(sid):
         report,
         mimetype='text/markdown; charset=utf-8',
         headers={'Content-Disposition': f'attachment; filename=iperf3-longrun-{sid}.md'})
-
-
-# ---------------- 设置 / 告警 ----------------
-
-@app.get('/api/settings')
-def api_settings_get():
-    return jsonify(alerts.config())
-
-
-@app.post('/api/settings')
-def api_settings_post():
-    data = request.get_json(force=True, silent=True) or {}
-    webhook = str(data.get('webhook') or '').strip()
-    if webhook and not re.match(r'^https?://\S+$', webhook):
-        raise ValueError('webhook 必须以 http:// 或 https:// 开头')
-
-    def num(key, lo, hi, label):
-        raw = data.get(key)
-        if raw is None or str(raw).strip() == '':
-            return None
-        try:
-            value = float(str(raw).strip())
-        except (TypeError, ValueError):
-            raise ValueError(f'{label}必须是数字')
-        if not lo <= value <= hi:
-            raise ValueError(f'{label}需在 {lo}–{hi} 之间')
-        return value
-
-    loss = num('min_loss_pct', 0, 100, '丢包阈值')
-    throughput = num('min_throughput_pct', 1, 100, '吞吐下限')
-    cooldown = num('cooldown_seconds', 0, 86400, '冷却时间')
-    db.set_setting('alert_webhook', webhook)
-    db.set_setting('alert_enabled', '1' if data.get('enabled') else '0')
-    if loss is not None:
-        db.set_setting('alert_min_loss_pct', f'{loss:g}')
-    if throughput is not None:
-        db.set_setting('alert_min_throughput_pct', f'{throughput:g}')
-    if cooldown is not None:
-        db.set_setting('alert_cooldown_seconds', str(int(cooldown)))
-    return jsonify(alerts.config())
-
-
-@app.post('/api/settings/test-alert')
-def api_settings_test_alert():
-    return jsonify(alerts.send_test())
 
 
 # ---------------- 导出（CSV / JSON） ----------------

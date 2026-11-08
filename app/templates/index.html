@@ -83,32 +83,6 @@
     </div>
   </section>
 
-  <section class="card" id="alertCard">
-    <div class="card-head">
-      <h2>异常告警</h2>
-      <div class="actions">
-        <button class="small" data-action="testAlert">发送测试</button>
-        <button class="small primary" data-action="saveAlertSettings">保存</button>
-      </div>
-    </div>
-    <div class="row">
-      <label class="chk"><input type="checkbox" id="alertEnabled"> 启用告警</label>
-      <span class="quiet" id="alertStatus">—</span>
-    </div>
-    <div class="grid2">
-      <div class="field"><label>Webhook 地址（POST JSON，留空 = 不发送）</label>
-        <input id="alertWebhook" placeholder="https://example.com/hooks/linkpilot"/></div>
-      <div class="field"><label>同一机器冷却时间（秒）</label>
-        <input id="alertCooldown" type="number" min="0" max="86400" step="60"/></div>
-      <div class="field"><label>丢包阈值（%，达到即告警）</label>
-        <input id="alertLoss" type="number" min="0" max="100" step="0.1"/></div>
-      <div class="field"><label>吞吐下限（占标称带宽的 %）</label>
-        <input id="alertThroughput" type="number" min="1" max="100" step="1"/></div>
-    </div>
-    <p class="hint">每轮测试结束后按阈值挑出异常机器推一次；同一台机器在冷却时间内只提醒一次。
-      payload：<code>{"type":"linkpilot.alert","event":"run_finished","run":{…},"alerts":[{"machine","reasons","metrics"}]}</code></p>
-  </section>
-
   <section class="card" id="runCard">
     <div class="card-head"><h2>发起测试</h2></div>
     <div class="run-form">

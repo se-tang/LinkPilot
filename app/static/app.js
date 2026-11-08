@@ -2657,8 +2657,6 @@ const ACTIONS = {
   discoverMachine: (d) => discoverMachine(d.id),
   updateAgent: (d, el) => updateAgent(d.id, el),
   updateAllAgents: (d, el) => updateAllAgents(el),
-  saveAlertSettings: () => saveAlertSettings(),
-  testAlert: () => testAlert(),
   exportRunCsv: () => exportRunCsv(),
   exportRunJson: () => exportRunJson(),
   exportSchedCsv: () => exportSchedCsv(),
@@ -2829,7 +2827,6 @@ async function init() {
     await loadMachines();
     await loadRuns();
     await loadSchedules();
-    loadAlertSettings();
     const st = await api('/api/status');
     if (st.active_run_id) openRun(st.active_run_id);
     startStream();
@@ -2913,52 +2910,6 @@ function startStream() {
     SSE_PRIMED = false;
   };
 }
-/* ---------------- 异常告警设置 ---------------- */
-
-async function loadAlertSettings() {
-  try {
-    const s = await api('/api/settings');
-    $('alertEnabled').checked = !!s.enabled;
-    $('alertWebhook').value = s.webhook || '';
-    $('alertCooldown').value = s.cooldown_seconds;
-    $('alertLoss').value = s.min_loss_pct;
-    $('alertThroughput').value = s.min_throughput_pct;
-    $('alertStatus').textContent = s.webhook
-      ? (s.enabled ? '已启用：测试结束后按阈值推送' : '已填写地址，但未启用')
-      : '未配置 webhook（不会发送）';
-  } catch (e) {
-    $('alertStatus').textContent = '读取设置失败：' + e.message;
-  }
-}
-
-async function saveAlertSettings() {
-  try {
-    await api('/api/settings', {
-      method: 'POST',
-      body: JSON.stringify({
-        enabled: $('alertEnabled').checked,
-        webhook: $('alertWebhook').value.trim(),
-        cooldown_seconds: $('alertCooldown').value,
-        min_loss_pct: $('alertLoss').value,
-        min_throughput_pct: $('alertThroughput').value,
-      }),
-    });
-    toast('告警设置已保存', 3000, 'success');
-    loadAlertSettings();
-  } catch (e) {
-    errorToast('保存失败: ' + e.message);
-  }
-}
-
-async function testAlert() {
-  try {
-    const r = await api('/api/settings/test-alert', {method: 'POST'});
-    toast(`测试告警已发送（HTTP ${r.status}）`, 3500, 'success');
-  } catch (e) {
-    errorToast('测试失败: ' + e.message);
-  }
-}
-
 /* ---------------- 导出 ---------------- */
 
 function exportRunCsv() {

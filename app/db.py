@@ -194,16 +194,6 @@ CREATE TABLE IF NOT EXISTS schedule_runs (
     status TEXT NOT NULL DEFAULT 'running',
     note TEXT NOT NULL DEFAULT ''
 );
--- 面板设置（告警等），键值对；缺省值写在代码里，表里只存用户改过的
-CREATE TABLE IF NOT EXISTS settings (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL DEFAULT ''
-);
--- 告警冷却：同一台机器同一个原因，在冷却时间内只发一次
-CREATE TABLE IF NOT EXISTS alert_state (
-    key TEXT PRIMARY KEY,
-    last_sent REAL NOT NULL DEFAULT 0
-);
 -- 查询路径上的索引：心跳取任务、按轮次取明细、定时任务回填都依赖这几列，
 -- 没有索引时每台机器每次心跳都要全表扫 jobs（7 天留存后行数不小）。
 CREATE INDEX IF NOT EXISTS idx_jobs_machine_status ON jobs(machine_id, status, id);
@@ -847,43 +837,6 @@ def mark_agent_update_unsupported(mid, reason=''):
     """
     get_db().execute(
         "UPDATE machines SET agent_caps='' WHERE id=?", (mid,))
-    get_db().commit()
-
-
-# ---------------- 面板设置 / 告警冷却 ----------------
-
-def get_setting(key, default=''):
-    row = get_db().execute('SELECT value FROM settings WHERE key=?', (key,)).fetchone()
-    return row['value'] if row else default
-
-
-def set_setting(key, value):
-    get_db().execute(
-        'INSERT INTO settings (key, value) VALUES (?,?) '
-        'ON CONFLICT(key) DO UPDATE SET value=excluded.value', (key, str(value)))
-    get_db().commit()
-
-
-def get_settings(keys):
-    if not keys:
-        return {}
-    marks = ','.join('?' * len(keys))
-    rows = get_db().execute(
-        f'SELECT key, value FROM settings WHERE key IN ({marks})', list(keys)).fetchall()
-    return {r['key']: r['value'] for r in rows}
-
-
-def alert_last_sent(key):
-    row = get_db().execute(
-        'SELECT last_sent FROM alert_state WHERE key=?', (key,)).fetchone()
-    return float(row['last_sent']) if row else 0.0
-
-
-def mark_alert_sent(key, when=None):
-    get_db().execute(
-        'INSERT INTO alert_state (key, last_sent) VALUES (?,?) '
-        'ON CONFLICT(key) DO UPDATE SET last_sent=excluded.last_sent',
-        (key, float(when if when is not None else time.time())))
     get_db().commit()
 
 

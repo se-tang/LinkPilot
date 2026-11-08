@@ -37,7 +37,7 @@ jobs:
           python tests/test_data_retention.py
           python tests/test_iperf_json.py
           python tests/test_agent_update.py
-          python tests/test_settings_export.py
+          python tests/test_export_stream.py
 
       - name: 安装脚本回归
         run: bash tests/test_install_update.sh

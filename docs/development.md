@@ -27,7 +27,7 @@ python tests/test_job_upgrade.py        # 旧 jobs 表升级兼容
 python tests/test_data_retention.py     # 历史保留策略 / 任务取消 / 批量计数 / 忙碌心跳
 python tests/test_iperf_json.py          # iperf3 -J 结构化解析 / 稳定性 / -O 参数
 python tests/test_agent_update.py       # 面板推送 Agent 更新（脚本摘要 / 签名任务 / 端点 / 权限）
-python tests/test_settings_export.py    # 告警设置 / webhook / CSV / JSON 导出 / SSE
+python tests/test_export_stream.py     # CSV / JSON 导出 / SSE
 ```
 
 纯标准库，不需要装依赖；涉及 shell 的用例（`SCRIPT_REPORT_IPS` 地址提取）只在 POSIX（Linux / macOS / 容器）下执行，Windows 上自动跳过。
