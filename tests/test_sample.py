@@ -11,6 +11,15 @@ os.environ['DATA_DIR'] = tempfile.mkdtemp(prefix='linkpilot-test-')
 
 from app import quality  # noqa: E402
 
+def dashboard_source():
+    """面板页面 + 拆分出去的静态资源（模板里现在只剩 HTML 骨架）。"""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    parts = []
+    for rel in ('app/templates/index.html', 'app/static/app.js', 'app/static/app.css'):
+        with open(os.path.join(root, rel), encoding='utf-8') as f:
+            parts.append(f.read())
+    return '\n'.join(parts)
+
 PING_RAW = """PING 1.2.3.4 (1.2.3.4) 56(84) bytes of data.
 64 bytes from 1.2.3.4: icmp_seq=1 ttl=52 time=144.3 ms
 64 bytes from 1.2.3.4: icmp_seq=2 ttl=52 time=144.4 ms
@@ -1620,9 +1629,7 @@ def test_security_hardening():
 
 
 def test_dashboard_interactions_present():
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    with open(os.path.join(root, 'app', 'templates', 'index.html'), encoding='utf-8') as f:
-        html = f.read()
+    html = dashboard_source()
     for key in ('setChartMode', 'toggleChartMachine', 'setChartDirection',
                 'buildTrendChartSvg', 'copyRichText', 'toggleRunGroup', 'run-group',
                 'AbortController', 'skeleton-chart', 'comparisonTableHtml', '生成报告中',
@@ -1802,9 +1809,7 @@ def test_install_dirty_update():
 def test_udp_controls_initial_state():
     """UDP 带宽输入框必须在首次渲染和定时任务弹窗打开时就同步禁用状态。"""
     import re
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    with open(os.path.join(root, 'app', 'templates', 'index.html'), encoding='utf-8') as f:
-        html = f.read()
+    html = dashboard_source()
     assert 'function syncUdpControls(checkId, bandwidthId)' in html
     assert re.search(r'id="sUdpBw"[^>]*disabled', html), '定时任务的 UDP 带宽初始应禁用'
     init_block = html.split('async function init()', 1)[1][:800]

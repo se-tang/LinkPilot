@@ -1,5 +1,15 @@
 # 更新记录
 
+## 0.10.0 — 2026-11-09
+
+- 前端拆分：`index.html` 里的内联 CSS / JS 拆成 `static/app.css`、`static/app.js`，模板只剩 HTML 骨架（185KB → 约 20KB）。静态资源带 `?v=<版本号>`，服务端对带版本号的资源返回 `public, max-age=31536000, immutable`，升级后自动失效。
+- 实时刷新改用 SSE：新增 `GET /api/stream`，推送四个数据域（机器 / 测试记录 / 定时任务 / Agent 脚本版本）的指纹，前端只在指纹变化时才去拉对应接口；SSE 连不上时自动退回原来的 8/10/15 秒轮询。长连接上限 4 个、单连接 5 分钟自动断开重连，避免占满 waitress 线程。
+- 新增异常告警：`GET/POST /api/settings` 配置 webhook 地址、丢包阈值（默认 1%）、吞吐下限（默认标称带宽的 40%）、冷却时间（默认 600 秒）。每轮测试结束后按阈值挑出异常机器 POST 一次，同一机器在冷却时间内只提醒一次；面板新增「异常告警」卡片，可保存设置并「发送测试」。
+- 新增导出：单轮 `CSV` / `JSON`（`/api/runs/<id>/export.csv|json`）、长期对比 `CSV`（`/api/schedules/<id>/export.csv`，按「轮次 × 机器」长表）；CSV 对 `= + - @` 开头的单元格加前缀，避免 Excel 公式注入。
+- 测试：新增 `tests/test_settings_export.py`（设置校验、告警阈值与冷却、webhook 实收、CSV/JSON 导出、SSE 首帧与鉴权）。
+
+升级：面板重建镜像生效；本次没有数据库结构变更之外的 Agent 改动（新增 `settings` / `alert_state` 两张表，`CREATE TABLE IF NOT EXISTS` 自动建）。浏览器首次加载会重新下载拆分后的静态资源，之后命中长缓存。
+
 ## 0.9.0 — 2026-11-08
 
 - 新增**面板推送 Agent 更新**：机器列表出现「Agent 可更新」徽标，点「更新」或「全部更新 Agent」即可让节点自行升级，不用再重跑接入命令。链路是：面板下发签名任务（含新脚本 sha256）→ Agent 从 `/agent/agent.sh` 下载并核对摘要 → 落到 `/var/lib/linkpilot` → root 一次性助手用 `/etc/linkpilot/update.key`（0600 root，Agent 账号读不到）验签 → 语法检查 → 原子替换 → 重启服务。

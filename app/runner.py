@@ -19,6 +19,7 @@ import time
 import traceback
 
 from . import agent_jobs as aj
+from . import alerts
 from . import db, job_types, quality
 
 # 测试参数默认值与上限（前端只做提示，这里才是准入门槛）
@@ -579,6 +580,13 @@ def _worker(run_id, target, ip_version=4):
         log(f'=== 测试结束，状态: {status}，报告已生成 ===')
         db.finish_run(run_id, status=status, report=report,
                       log_text='\n'.join(log_lines), error=error)
+        # 告警：按阈值挑出异常机器推 webhook（没配地址或没异常时什么也不做）
+        try:
+            sent = alerts.maybe_send(dict(run, status=status), items, log=log)
+            if sent:
+                log(f'[告警] 已推送 {sent} 台异常机器的告警')
+        except Exception as exc:
+            log(f'[告警] 处理失败（不影响测试结果）：{exc}')
         with _state_lock:
             _active.pop(run_id, None)
 

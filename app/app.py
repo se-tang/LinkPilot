@@ -1,8 +1,10 @@
 """LinkPilot 面板 Web 服务：登录验证、机器管理（Agent 接入）、测试任务、Agent API。"""
 import base64
+import csv
 import datetime
 import hashlib
 import hmac
+import io
 import ipaddress
 import json
 import os
@@ -12,14 +14,15 @@ import threading
 import time
 from urllib.parse import urlsplit
 
-from flask import Flask, Response, g, jsonify, redirect, render_template, request, session
+from flask import (Flask, Response, g, jsonify, redirect, render_template, request,
+                   session, stream_with_context)
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from . import db, job_types, quality, runner, scheduler
+from . import alerts, db, job_types, quality, runner, scheduler
 
 # 版本号：这是唯一权威（面板页面、部署横幅、install.sh 都从/沿用它取）。
 # 还在测试阶段，因此用 0.x 版本号。
-APP_VERSION = '0.9.0'
+APP_VERSION = '0.10.0'
 
 app = Flask(__name__)
 app.json.ensure_ascii = False
@@ -170,7 +173,14 @@ def security_headers(resp):
     if PANEL_HTTPS or forwarded_https:
         resp.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
     if resp.mimetype == 'text/html' or request.path.startswith('/api/'):
-        resp.headers['Cache-Control'] = 'no-store'
+        # SSE 必须 no-cache（no-store 也可以，但明确写成 no-cache 更贴合事件流语义）
+        resp.headers['Cache-Control'] = 'no-cache' if request.path == '/api/stream' else 'no-store'
+    elif request.path.startswith('/static/'):
+        # 模板里给静态资源带了 ?v=<版本号>：带版本号可以长缓存，没带的只缓存一小时
+        if request.args.get('v'):
+            resp.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+        else:
+            resp.headers['Cache-Control'] = 'public, max-age=3600'
     return resp
 
 
@@ -759,6 +769,123 @@ def api_status():
     return jsonify({'active_run_id': runner.active_run_id(), 'version': APP_VERSION})
 
 
+# ---------------- 实时状态推送（SSE，替代前端 8/10/15 秒轮询） ----------------
+#
+# 前端只关心「哪些数据变了」，所以这里推的是四个数据域的指纹，不是数据本身：
+# 指纹变了前端才去调对应的 REST 接口，既省流量，也不用把渲染逻辑搬到服务端。
+
+_STREAM_LOCK = threading.Lock()
+_STREAM_CLIENTS = 0
+_STREAM_MAX_CLIENTS = 4       # waitress 只有 8 个线程，SSE 长连接不能无限占
+_STREAM_TTL_SECONDS = 300     # 到点主动断开，让 EventSource 重连（顺带回收线程）
+_DIGEST_LOCK = threading.Lock()
+_DIGEST_CACHE = {'at': 0.0, 'value': None}
+
+
+def _sig(value):
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, ensure_ascii=False, default=str).encode('utf-8')
+    ).hexdigest()[:12]
+
+
+def compute_state_digest():
+    """四个数据域的指纹；测试里可直接调用。"""
+    _body, agent_sha = agent_script()
+    machines = [
+        [m['id'], bool(m.get('online')), bool(m.get('active_job')), m.get('role'),
+         m.get('name'), (m.get('agent_hash') or '')[:8], m.get('agent_caps') or '']
+        for m in db.get_machines()
+    ]
+    runs = db.get_runs(limit=30)
+    counts = db.run_counts_bulk([r['id'] for r in runs])
+    runs_sig = [
+        [r['id'], r['status'], r.get('schedule_id'),
+         counts.get(r['id'], (0, 0, 0))[1], counts.get(r['id'], (0, 0, 0))[2]]
+        for r in runs
+    ]
+    schedules = [
+        [s['id'], bool(s.get('enabled')), s.get('last_status'), s.get('last_run_id'),
+         s.get('run_count'), s.get('next_run_at'), s.get('archived_at')]
+        for s in db.get_schedules(include_archived=True)
+    ]
+    return {
+        'version': APP_VERSION,
+        'agent_script': agent_sha[:12],
+        'machines': _sig(machines),
+        'runs': _sig(runs_sig),
+        'schedules': _sig(schedules),
+    }
+
+
+def state_digest():
+    """2 秒内的指纹复用：多个浏览器窗口不必各自算一遍。"""
+    now = time.time()
+    with _DIGEST_LOCK:
+        if _DIGEST_CACHE['value'] is not None and now - _DIGEST_CACHE['at'] < 2:
+            return _DIGEST_CACHE['value']
+    value = compute_state_digest()
+    with _DIGEST_LOCK:
+        _DIGEST_CACHE['at'] = now
+        _DIGEST_CACHE['value'] = value
+    return value
+
+
+def _stream_acquire():
+    global _STREAM_CLIENTS
+    with _STREAM_LOCK:
+        if _STREAM_CLIENTS >= _STREAM_MAX_CLIENTS:
+            return False
+        _STREAM_CLIENTS += 1
+        return True
+
+
+def _stream_release():
+    global _STREAM_CLIENTS
+    with _STREAM_LOCK:
+        _STREAM_CLIENTS = max(0, _STREAM_CLIENTS - 1)
+
+
+@app.get('/api/stream')
+def api_stream():
+    """SSE：数据有变化才推 state，没变化每 15 秒发一个注释保活。"""
+    if not _stream_acquire():
+        # 连接数到顶就明确拒绝，前端会自动退回轮询
+        return Response('too many streams\n', status=503, mimetype='text/plain')
+
+    def generate():
+        try:
+            yield 'retry: 3000\n\n'
+            deadline = time.time() + _STREAM_TTL_SECONDS
+            last = None
+            ticks = 0
+            while time.time() < deadline:
+                if not _session_user():
+                    break                      # 会话过期（登出 / 改密码）就结束
+                try:
+                    payload = state_digest()
+                except Exception as exc:        # 单次查询失败不该把连接打死
+                    yield f': error {exc.__class__.__name__}\n\n'
+                    time.sleep(2)
+                    continue
+                if payload != last:
+                    last = payload
+                    yield 'event: state\ndata: ' + json.dumps(payload, ensure_ascii=False) + '\n\n'
+                else:
+                    ticks += 1
+                    if ticks % 8 == 0:
+                        yield ': keepalive\n\n'
+                time.sleep(2)
+            yield 'event: bye\ndata: {"reason":"ttl"}\n\n'
+        finally:
+            _stream_release()
+
+    resp = Response(stream_with_context(generate()),
+                    mimetype='text/event-stream')
+    resp.headers['Cache-Control'] = 'no-cache'
+    resp.headers['X-Accel-Buffering'] = 'no'   # 反代别缓冲，否则 SSE 会攒住不发
+    return resp
+
+
 # ---------------- 定时任务（长期重复测试 + 跨轮对比） ----------------
 
 _CACHE_LOCK = threading.Lock()
@@ -939,6 +1066,155 @@ def api_schedule_report(sid):
         report,
         mimetype='text/markdown; charset=utf-8',
         headers={'Content-Disposition': f'attachment; filename=iperf3-longrun-{sid}.md'})
+
+
+# ---------------- 设置 / 告警 ----------------
+
+@app.get('/api/settings')
+def api_settings_get():
+    return jsonify(alerts.config())
+
+
+@app.post('/api/settings')
+def api_settings_post():
+    data = request.get_json(force=True, silent=True) or {}
+    webhook = str(data.get('webhook') or '').strip()
+    if webhook and not re.match(r'^https?://\S+$', webhook):
+        raise ValueError('webhook 必须以 http:// 或 https:// 开头')
+
+    def num(key, lo, hi, label):
+        raw = data.get(key)
+        if raw is None or str(raw).strip() == '':
+            return None
+        try:
+            value = float(str(raw).strip())
+        except (TypeError, ValueError):
+            raise ValueError(f'{label}必须是数字')
+        if not lo <= value <= hi:
+            raise ValueError(f'{label}需在 {lo}–{hi} 之间')
+        return value
+
+    loss = num('min_loss_pct', 0, 100, '丢包阈值')
+    throughput = num('min_throughput_pct', 1, 100, '吞吐下限')
+    cooldown = num('cooldown_seconds', 0, 86400, '冷却时间')
+    db.set_setting('alert_webhook', webhook)
+    db.set_setting('alert_enabled', '1' if data.get('enabled') else '0')
+    if loss is not None:
+        db.set_setting('alert_min_loss_pct', f'{loss:g}')
+    if throughput is not None:
+        db.set_setting('alert_min_throughput_pct', f'{throughput:g}')
+    if cooldown is not None:
+        db.set_setting('alert_cooldown_seconds', str(int(cooldown)))
+    return jsonify(alerts.config())
+
+
+@app.post('/api/settings/test-alert')
+def api_settings_test_alert():
+    return jsonify(alerts.send_test())
+
+
+# ---------------- 导出（CSV / JSON） ----------------
+
+_CSV_TRIGGER = ('=', '+', '-', '@')
+
+
+def _csv_cell(value):
+    """防 CSV 公式注入：Excel 会把 = + - @ 开头的单元格当公式执行。"""
+    if value is None:
+        return ''
+    text = str(value)
+    if text[:1] in _CSV_TRIGGER:
+        text = "'" + text
+    return text
+
+
+def _csv_response(rows, filename):
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    for row in rows:
+        writer.writerow([_csv_cell(cell) for cell in row])
+    # 带 BOM：Excel 直接双击打开中文表头才不会乱码（pandas 也能正常处理）
+    body = '\ufeff' + buf.getvalue()
+    return Response(
+        body, mimetype='text/csv; charset=utf-8',
+        headers={'Content-Disposition': f'attachment; filename={filename}'})
+
+
+@app.get('/api/runs/<int:rid>/export.csv')
+def api_run_export_csv(rid):
+    run = db.get_run(rid)
+    if not run:
+        return jsonify({'error': '测试记录不存在'}), 404
+    items = db.get_run_items(rid)
+    rows = [[
+        '机器', '地区', '带宽', '端口', '状态', '上行Mbit/s', '下行Mbit/s', '丢包%',
+        'RTTms', '抖动ms', '重传', '上行CV%', '下行CV%', '上行P95', '下行P95',
+        '评级', '说明',
+    ]]
+    for it in items:
+        mt = it.get('metrics_obj') or {}
+        rows.append([
+            it.get('machine_name'), it.get('machine_region'), it.get('machine_bandwidth'),
+            it.get('port'), it.get('status'), mt.get('up_mbits'), mt.get('down_mbits'),
+            mt.get('loss_pct'), mt.get('rtt_avg'), mt.get('mdev_ms'), mt.get('retr_total'),
+            mt.get('up_cv_pct'), mt.get('down_cv_pct'), mt.get('up_p95_mbits'),
+            mt.get('down_p95_mbits'),
+            (mt.get('rating_code') or '') + ' ' + (mt.get('rating_label') or ''),
+            mt.get('rating_summary') or it.get('error') or '',
+        ])
+    return _csv_response(rows, f'linkpilot-run-{rid}.csv')
+
+
+@app.get('/api/runs/<int:rid>/export.json')
+def api_run_export_json(rid):
+    run = db.get_run(rid)
+    if not run:
+        return jsonify({'error': '测试记录不存在'}), 404
+    items = db.get_run_items(rid)
+    payload = {
+        'version': APP_VERSION,
+        'run': run,
+        'items': [{
+            'machine_id': it.get('machine_id'), 'machine_name': it.get('machine_name'),
+            'machine_region': it.get('machine_region'),
+            'machine_bandwidth': it.get('machine_bandwidth'),
+            'port': it.get('port'), 'status': it.get('status'), 'error': it.get('error'),
+            'metrics': it.get('metrics_obj'),
+        } for it in items],
+        'summary': quality.run_summary(run, items),
+    }
+    body = json.dumps(payload, ensure_ascii=False, indent=1)
+    return Response(body, mimetype='application/json; charset=utf-8',
+                    headers={'Content-Disposition':
+                             f'attachment; filename=linkpilot-run-{rid}.json'})
+
+
+@app.get('/api/schedules/<int:sid>/export.csv')
+def api_schedule_export_csv(sid):
+    data = scheduler.comparison_data(sid, limit=scheduler.ROUND_LIMIT)
+    if not data:
+        return jsonify({'error': '该定时任务没有可导出的历史记录'}), 404
+    by_round = {}
+    for machine in data['machines']:
+        for point in machine['series']:
+            by_round.setdefault(point['run_id'], {})[machine['name']] = point
+    rows = [[
+        '轮次', '开始时间', '结束时间', '机器', '状态', '上行Mbit/s', '下行Mbit/s',
+        '丢包%', 'RTTms', '抖动ms', '重传', '评级', '说明',
+    ]]
+    for rnd in data['rounds']:
+        points = by_round.get(rnd['run_id'], {})
+        for name in [m['name'] for m in data['machines']]:
+            point = points.get(name)
+            if not point:
+                continue
+            rows.append([
+                rnd['run_id'], rnd['created_at'], rnd.get('finished_at') or '', name,
+                point.get('status'), point.get('up'), point.get('down'), point.get('loss'),
+                point.get('rtt'), point.get('mdev'), point.get('retr'),
+                point.get('rating'), point.get('error') or '',
+            ])
+    return _csv_response(rows, f'linkpilot-schedule-{sid}.csv')
 
 
 @app.errorhandler(ValueError)
