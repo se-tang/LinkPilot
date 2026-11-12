@@ -1,6 +1,6 @@
-<img src="app/static/logo.svg" width="104" height="59" alt="LinkPilot" align="left" hspace="12"/>
-
 # LinkPilot
+
+<img src="docs/assets/linkpilot-logo.png" width="520" alt="LinkPilot Network Lab"/>
 
 多机网络线路测试面板：一台目标机配合多台后端机执行 iperf3，记录上下行、延迟、丢包、抖动和重传，并持续观察长期趋势。
 

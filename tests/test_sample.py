@@ -5,6 +5,7 @@ import re
 import sys
 import tempfile
 import time
+import xml.etree.ElementTree as ET
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ['DATA_DIR'] = tempfile.mkdtemp(prefix='linkpilot-test-')
@@ -1829,13 +1830,16 @@ def test_brand_logo():
             page = f.read()
         assert 'logo.svg' in page and '📡' not in page, name
         assert 'LinkPilot' in page, name
-    with open(os.path.join(root, 'app', 'static', 'logo.svg'), encoding='utf-8') as f:
+    with open(os.path.join(root, 'app', 'static', 'logo.svg'), 'rb') as f:
         logo = f.read()
-    assert '<svg' in logo and '<title>LinkPilot logo</title>' in logo
-    assert '#ff9f1c' in logo and '#2448a8' in logo
+    svg_ns = '{http://www.w3.org/2000/svg}'
+    svg = ET.fromstring(logo)
+    assert svg.tag == svg_ns + 'svg'
+    assert svg.findtext(svg_ns + 'title', '').startswith('LinkPilot')
     resp = flask_app.test_client().get('/static/logo.svg')
     assert resp.status_code == 200
-    assert resp.mimetype in ('image/svg+xml', 'image/svg+xml;charset=utf-8'), resp.mimetype
+    assert resp.mimetype == 'image/svg+xml', resp.mimetype
+    assert resp.data == logo
     print('SVG 品牌标识 / favicon OK')
 
 
