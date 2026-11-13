@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/linkpilot-logo.png" width="520" alt="LinkPilot">
+</p>
+
 # LinkPilot
 
 多机网络线路测试面板。支持手动测速、定时任务、趋势对比和 Markdown 报告。
@@ -12,7 +16,7 @@ curl -fsSL https://raw.githubusercontent.com/se-tang/LinkPilot/main/install.sh |
 
 ## HTTPS 反代
 
-面板不需要额外配置。任意反代把请求转发到面板 HTTP 端口即可：
+面板只需要暴露一个管理端口。任意 HTTPS 反代把请求转发到该端口即可，Agent 接入也会自动复用当前访问域名：
 
 ```nginx
 location / {

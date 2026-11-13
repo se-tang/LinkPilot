@@ -7,6 +7,7 @@
 - 服务端同时识别 `X-Forwarded-Proto`、`X-Forwarded-Host` 和 `X-Forwarded-Prefix`，兼容任意 HTTPS 反向代理。
 - Agent 独立监听默认收回 `127.0.0.1`，不再额外公开随机端口；反向代理只需转发管理端口。
 - README 精简为安装、HTTPS 反代、升级三部分。
+- README 恢复顶部 LinkPilot 品牌图；项目页面图标与 favicon 原本未删除。
 
 ## 0.10.3 - 2026-11-13
 
