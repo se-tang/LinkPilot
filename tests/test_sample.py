@@ -1527,6 +1527,17 @@ def test_security_hardening():
         (m['id'],)).fetchone()
     assert stored and stored['code_hash'] != reg['code'], stored
 
+    with app_mod.app.test_request_context(
+            '/',
+            base_url='http://internal:8000/',
+            headers={
+                'Host': 'internal:8000',
+                'X-Forwarded-Proto': 'https',
+                'X-Forwarded-Host': 'panel.example.com',
+                'X-Forwarded-Prefix': '/lp',
+            }):
+        assert app_mod._request_origin() == 'https://panel.example.com/lp'
+
     old_allow = app_mod.ALLOW_INSECURE_AGENT
     app_mod.ALLOW_INSECURE_AGENT = True
     try:
@@ -1622,15 +1633,15 @@ def test_security_hardening():
     with open(os.path.join(root, 'docker-compose.yml'), encoding='utf-8') as f:
         compose = f.read()
     assert '${PANEL_BIND:-0.0.0.0}' in compose
-    assert '${PANEL_AGENT_BIND:-0.0.0.0}' in compose
+    assert '${PANEL_AGENT_BIND:-127.0.0.1}' in compose
     assert '${PANEL_ALLOW_INSECURE_AGENT:-1}' in compose
     with open(os.path.join(root, 'install.sh'), encoding='utf-8') as f:
         installer = f.read()
     assert 'env_set_default PANEL_BIND 0.0.0.0' in installer
     assert 'PANEL_ALLOW_INSECURE_AGENT=1' in installer
     assert 'detect_public_ip()' in installer
-    assert '_requested_public_url="${PANEL_PUBLIC_URL:-}"' in installer
-    assert '反代上游' in installer
+    assert '当前为 HTTP 直连模式' not in installer
+    assert '安全组/NAT映射' not in installer
     with open(os.path.join(root, 'Dockerfile'), encoding='utf-8') as f:
         dockerfile = f.read()
     assert 'USER 10001:10001' in dockerfile

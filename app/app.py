@@ -22,7 +22,7 @@ from . import db, job_types, quality, runner, scheduler
 
 # 版本号：这是唯一权威（面板页面、部署横幅、install.sh 都从/沿用它取）。
 # 还在测试阶段，因此用 0.x 版本号。
-APP_VERSION = '0.10.3'
+APP_VERSION = '0.10.4'
 
 app = Flask(__name__)
 app.json.ensure_ascii = False
@@ -123,6 +123,22 @@ def _client_ip():
         return ipaddress.ip_address(ra).compressed[:64]
     except ValueError:
         return ra[:64]
+
+
+def _request_origin():
+    """Return the browser-facing origin, including a terminating HTTPS proxy."""
+    scheme = request.headers.get('X-Forwarded-Proto', '').split(',')[0].strip().lower()
+    if scheme not in ('http', 'https'):
+        scheme = request.scheme
+    host = request.headers.get('X-Forwarded-Host', '').split(',')[0].strip() or request.host
+    prefix = request.headers.get('X-Forwarded-Prefix', '').split(',')[0].strip()
+    if prefix and not prefix.startswith('/'):
+        prefix = '/' + prefix
+    candidate = f'{scheme}://{host}{prefix}'.rstrip('/')
+    parsed = urlsplit(candidate)
+    if parsed.scheme in ('http', 'https') and parsed.netloc:
+        return candidate
+    return request.url_root.rstrip('/')
 
 
 def _login_locked_seconds(ip):
@@ -244,11 +260,8 @@ def auth_gate():
 
 @app.route('/')
 def index():
-    agent_url = os.environ.get('PANEL_AGENT_URL', '').rstrip('/')
-    if not agent_url:
-        agent_url = request.url_root.rstrip('/')
     return render_template(
-        'index.html', version=APP_VERSION, agent_url=agent_url,
+        'index.html', version=APP_VERSION, agent_url=_request_origin(),
         allow_insecure_agent=ALLOW_INSECURE_AGENT, csp_nonce=g.csp_nonce)
 
 
@@ -441,11 +454,10 @@ def api_machine_registration_code(mid):
     if not m:
         return jsonify({'error': '机器不存在'}), 404
     code = db.create_registration_code(mid, ttl_seconds=600)
-    agent_url = os.environ.get('PANEL_AGENT_URL', '').rstrip('/') or request.url_root.rstrip('/')
     return jsonify({
         'machine_id': mid,
         'code': code,
-        'agent_url': agent_url,
+        'agent_url': _request_origin(),
         'expires_in': 600,
     })
 

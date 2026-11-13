@@ -1,6 +1,6 @@
 # 部署与 HTTPS
 
-> 一键部署命令见 [README「快速开始」](../README.md#快速开始)，这里只写它背后的细节。
+> 一键部署命令见 [README](../README.md)，这里只写配置细节。
 
 ## 部署脚本做了什么
 
@@ -8,7 +8,7 @@
 
 1. 自检系统与包管理器（Debian/Ubuntu、CentOS/RHEL/Rocky/Alma/Fedora、Alpine、openSUSE、Arch）；
 2. `curl`/`wget` + `ca-certificates` → `git` → **docker + docker compose v2**（官方安装脚本 → 发行版仓库 → compose 独立二进制逐级兜底，守护进程没起会自动拉起）；`git` 装不上时自动退回源码包下载；
-3. 克隆到 `~/LinkPilot` → 生成 `.env`（管理端口 + Agent 端口）→ `docker compose up -d --build` → 等健康检查通过后打印部署信息。
+3. 克隆到 `~/LinkPilot` → 生成 `.env`（管理端口）→ `docker compose up -d --build` → 等健康检查通过后打印部署信息。
 
 要点：
 
@@ -16,31 +16,24 @@
 - **可重复执行**：再次运行就是升级（自动检查更新 → 有更新才重建），数据、端口、机器接入关系全部保留；之前用过 HTTPS 会自动带上 `--profile tls`，不会把 caddy 弄丢，并顺手清理被误挂载成目录的 `Caddyfile.local`。升级时不会重复显示初始密码（避免误导）。同一条命令在**没装过的机器上是安装、装过的机器上是升级**，详见下面的「升级」。
 - **非 root 也能跑**：会通过 `sudo` 提权（需要机器上有 sudo）。
 - 国内装 Docker 慢/超时：命令改成 `... | DOCKER_MIRROR=Aliyun bash`；机器走代理：命令最前面加 `https_proxy=http://IP:端口`。
-- 环境变量：`LINKPILOT_DIR`（安装目录，默认 `~/LinkPilot`）、`LINKPILOT_REPO_URL`、`LINKPILOT_BRANCH`、`LINKPILOT_TLS=1`（同时启用 HTTPS 网关）、`PANEL_PORT`、`PANEL_BIND`、`PANEL_PUBLIC_URL`、`PANEL_PUBLIC_HOST`（公网 IP 自动探测失败时手动指定）、`LINKPILOT_VERBOSE=1`、`LINKPILOT_LOG`、`NO_COLOR=1`、`DOCKER_MIRROR`、`COMPOSE_MIRROR`、`LINKPILOT_TARBALL`。
-- 已有系统 Nginx/Apache 等外部 HTTPS 反代时，脚本会识别指向当前管理端口的 HTTPS `server_name` 并写入 `PANEL_PUBLIC_URL`；也可在 `.env` 显式设置 `PANEL_PUBLIC_URL=https://面板域名`。外部反代不会启动内置 Caddy。
+- 环境变量：`LINKPILOT_DIR`（安装目录，默认 `~/LinkPilot`）、`LINKPILOT_REPO_URL`、`LINKPILOT_BRANCH`、`LINKPILOT_TLS=1`（同时启用内置 HTTPS 网关）、`PANEL_PORT`、`PANEL_BIND`、`LINKPILOT_VERBOSE=1`、`LINKPILOT_LOG`、`NO_COLOR=1`、`DOCKER_MIRROR`、`COMPOSE_MIRROR`、`LINKPILOT_TARBALL`。
 - 脚本需要 `bash`（Alpine 等默认 ash 的系统先 `apk add bash`）；机器上连 `curl` 都没有时先 `apt-get update && apt-get install -y curl`（或 `yum install -y curl` / `apk add curl`）。
-- 管理端口和 Agent 端口随机生成并记录在 `.env`，升级/重启不变。管理面默认绑定 `0.0.0.0`，安装后会探测公网 IP 并打印直连 URL；需要本机反代或 SSH 隧道时显式设 `PANEL_BIND=127.0.0.1`。登录密码只从 `data/.initial_password` 读取一次并由安装脚本展示，不再写入容器日志。
-- 默认直连模式会同时允许 Agent 走 HTTP。公网 NAT 环境需要同时映射管理端口和 Agent 端口到面板机内网 IP。HTTP 不加密，部署在公网时必须用安全组限制来源 IP；需要跨公网长期使用时应再配置 HTTPS。
+- 管理端口随机生成并记录在 `.env`，升级/重启不变。管理面默认绑定 `0.0.0.0`，安装后会探测公网 IP 并打印 HTTP URL。Agent 独立监听只绑定回环，实际接入通过当前管理域名反代。登录密码只从 `data/.initial_password` 读取一次并由安装脚本展示，不再写入容器日志。
 - 面板容器默认只读文件系统 + 最小权限运行。
 
-### 直接接任意 HTTPS 反代
+### 接任意 HTTPS 反代
 
-反代可以先配置，也可以在安装后补上。安装时把最终公网 URL 传给安装器，LinkPilot 会关闭明文 Agent 注册，并使用该 URL 生成接入命令：
+安装后不需要再改 LinkPilot 配置。把普通 HTTP 请求反代到管理端口，并保留 Host 与 `X-Forwarded-Proto`：
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/se-tang/LinkPilot/main/install.sh \
-  | PANEL_PORT=28874 \
-    PANEL_PUBLIC_URL=https://panel.example.com \
-    bash
+```nginx
+location / {
+    proxy_pass http://面板机可达地址:管理端口;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
 ```
 
-反代上游就是完成页打印的：
-
-```text
-http://面板机可达地址:28874
-```
-
-同机反代可加 `PANEL_BIND=127.0.0.1`；反代在另一台机器时保持默认 `0.0.0.0`，让反代通过面板机 IP 访问。传入 HTTPS `PANEL_PUBLIC_URL` 后不会再显示 NAT 直连或 HTTP 明文警告。
+通过 `https://你的域名` 打开面板后，页面和 Agent 接入命令会自动使用浏览器当前域名。无需设置 `PANEL_AGENT_URL`，也不需要额外开放 Agent 端口。
 
 想手动控制每一步：
 
@@ -100,7 +93,7 @@ docker compose --profile tls up -d
 
 > 若之前在未创建 `Caddyfile.local` 时启动过容器，Docker 会把它误建成一个**目录**（`ls -la` 显示为 `drwxr-xr-x`）。先 `rm -rf Caddyfile.local` 再重新执行上面的 `cp -T` 即可。
 
-新安装默认直接开放管理端口。配置域名后重跑安装脚本或 `docker compose --profile tls up -d`，面板与 Agent 改走 HTTPS 域名；需要关闭公网 HTTP 直连时设 `PANEL_BIND=127.0.0.1`。
+新安装默认开放管理端口。外部反代直接复用该端口；只有使用内置 Caddy 时才需要 `--profile tls` 和 `PANEL_DOMAIN`。
 
 > 从旧版本升级时，Agent 协议已切换到结构化任务，**旧 Agent 必须重新生成一次性接入码并重跑安装命令**。这是协议迁移，不是重新添加机器；历史测试数据保留。
 

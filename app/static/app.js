@@ -25,7 +25,7 @@ let MACHINE_ORDER_SAVING = false;
 let LAST_MACHINES_SIG = '', LAST_SCHEDULES_SIG = '', LAST_RUNS_SIG = '', LAST_CMP_SIG = '';
 // 由模板写在 <body data-*> 上：静态脚本可以不随版本变化而失效
 const LP_CFG = document.body.dataset;
-const DEFAULT_AGENT_URL = LP_CFG.agentUrl || location.origin;
+const DEFAULT_AGENT_URL = location.origin;
 const ALLOW_INSECURE_AGENT = LP_CFG.allowInsecureAgent === '1';
 
 const $ = (id) => document.getElementById(id);
@@ -671,7 +671,7 @@ async function issueAgentCode(m) {
   const data = await api(`/api/machines/${m.id}/registration-code`, {method: 'POST'});
   agentMachine = {...m, registration_code: data.code, agent_url: data.agent_url};
   agentAwaitingReconnect = !!m.online;
-  $('agentPanelUrl').value = data.agent_url || DEFAULT_AGENT_URL;
+  $('agentPanelUrl').value = location.origin || data.agent_url || DEFAULT_AGENT_URL;
   return agentMachine;
 }
 

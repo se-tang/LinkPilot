@@ -9,8 +9,8 @@ services:
     ports:
       # 默认直接监听所有网卡；需要本机反代时可显式设 PANEL_BIND=127.0.0.1。
       - "${PANEL_BIND:-0.0.0.0}:${PANEL_PORT:-8088}:8000"
-      # Agent 通道独立监听；该端口只放行 /agent/ 与 /api/agent/。
-      - "${PANEL_AGENT_BIND:-0.0.0.0}:${PANEL_AGENT_PORT:-18080}:8001"
+      # Agent 接入默认通过管理端口的当前域名，内部监听不再额外公开。
+      - "${PANEL_AGENT_BIND:-127.0.0.1}:${PANEL_AGENT_PORT:-18080}:8001"
     environment:
       TZ: Asia/Shanghai
       DATA_DIR: /data
@@ -18,7 +18,6 @@ services:
       PANEL_PORT: ${PANEL_PORT:-8088}
       PANEL_AGENT_PORT: ${PANEL_AGENT_PORT:-18080}
       PANEL_AGENT_INTERNAL_PORT: 8001
-      PANEL_AGENT_URL: ${PANEL_AGENT_URL:-}
       PANEL_HTTPS: ${PANEL_HTTPS:-0}
       PANEL_ALLOW_INSECURE_AGENT: ${PANEL_ALLOW_INSECURE_AGENT:-1}
       PANEL_PROXY_SECRET: ${PANEL_PROXY_SECRET:-}

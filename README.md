@@ -4,33 +4,28 @@
 
 ## 安装
 
-默认安装后直接打印可访问地址：
+安装后直接打印公网 HTTP 地址：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/se-tang/LinkPilot/main/install.sh | bash
 ```
 
-## HTTPS 反向代理
+## HTTPS 反代
 
-先准备 HTTPS 反代，安装时传入最终公网地址即可。安装器会按反代模式配置 Agent、Secure Cookie 和访问地址，不再要求 SSH 隧道或直连 NAT：
+面板不需要额外配置。任意反代把请求转发到面板 HTTP 端口即可：
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/se-tang/LinkPilot/main/install.sh \
-  | PANEL_PORT=28874 \
-    PANEL_PUBLIC_URL=https://panel.example.com \
-    bash
+```nginx
+location / {
+    proxy_pass http://面板机IP:管理端口;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
 ```
 
-反向代理上游：
-
-```text
-http://面板机可达地址:28874
-```
-
-同机反代时加 `PANEL_BIND=127.0.0.1`；远程反代保持默认 `0.0.0.0`。安装完成页会直接打印反代上游地址。Agent 接入地址自动使用 `https://panel.example.com`。
+之后通过 `https://你的域名` 打开面板。生成的目标机接入命令自动使用浏览器当前域名，不需要配置 `PANEL_AGENT_URL`。
 
 ## 升级
 
-用安装时的同一条命令重跑即可，端口、数据、密码和 Agent 关系保持不变。
+重跑安装命令即可，端口、数据、密码和 Agent 关系保持不变。
 
 详细配置见 [部署文档](docs/deploy.md)，参数见 [使用说明](docs/usage.md)。
