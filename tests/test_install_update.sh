@@ -129,6 +129,22 @@ chmod +x "$TMP/nginx-bin/nginx"
 
 printf 'install.sh update / non-interactive log / external TLS detection OK\n'
 
+# 公网 IP 探测必须校验 IPv4，不能用上游错误页或异常文本污染访问地址。
+sed -n '/^detect_public_ip() {/,/^}/p' "$ROOT/install.sh" >"$TMP/public-ip.sh"
+mkdir -p "$TMP/public-ip-bin"
+cat >"$TMP/public-ip-bin/curl" <<'CURL_EOF'
+#!/bin/sh
+printf '203.0.113.42\n'
+CURL_EOF
+chmod +x "$TMP/public-ip-bin/curl"
+(
+  # shellcheck disable=SC1091
+  . "$TMP/public-ip.sh"
+  detected="$(PATH="$TMP/public-ip-bin:$PATH" detect_public_ip)"
+  test "$detected" = "203.0.113.42"
+)
+printf 'install.sh public IP detection OK\n'
+
 # 通过 stdin 跑完整脚本，模拟尚未安装 Docker 的机器。
 # PATH 只包含显式允许的工具，安装命令和 Docker 均使用替身。
 mkdir -p "$TMP/bootstrap/bin" "$TMP/bootstrap/panel"

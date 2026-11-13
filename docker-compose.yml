@@ -7,8 +7,8 @@ services:
     container_name: linkpilot
     restart: unless-stopped
     ports:
-      # 管理面默认只绑回环，公网访问必须经 HTTPS 反代或 SSH 隧道。
-      - "${PANEL_BIND:-127.0.0.1}:${PANEL_PORT:-8088}:8000"
+      # 默认直接监听所有网卡；需要本机反代时可显式设 PANEL_BIND=127.0.0.1。
+      - "${PANEL_BIND:-0.0.0.0}:${PANEL_PORT:-8088}:8000"
       # Agent 通道独立监听；该端口只放行 /agent/ 与 /api/agent/。
       - "${PANEL_AGENT_BIND:-0.0.0.0}:${PANEL_AGENT_PORT:-18080}:8001"
     environment:
@@ -20,7 +20,7 @@ services:
       PANEL_AGENT_INTERNAL_PORT: 8001
       PANEL_AGENT_URL: ${PANEL_AGENT_URL:-}
       PANEL_HTTPS: ${PANEL_HTTPS:-0}
-      PANEL_ALLOW_INSECURE_AGENT: ${PANEL_ALLOW_INSECURE_AGENT:-0}
+      PANEL_ALLOW_INSECURE_AGENT: ${PANEL_ALLOW_INSECURE_AGENT:-1}
       PANEL_PROXY_SECRET: ${PANEL_PROXY_SECRET:-}
       PANEL_TRUST_LOCAL_PROXY: ${PANEL_TRUST_LOCAL_PROXY:-0}
       # 启用 HTTPS（tls profile / 反向代理）后设为 1，Cookie 仅经加密连接传输

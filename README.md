@@ -25,9 +25,10 @@ curl -fsSL https://raw.githubusercontent.com/se-tang/LinkPilot/main/install.sh |
 
 脚本会自动安装缺失的 Git、Docker 和 Docker Compose，生成独立的管理端口、Agent 端口与初始登录密码。
 
-- 管理面默认只绑定 `127.0.0.1`，需通过 SSH 隧道或 HTTPS 反向代理访问。
+- 管理面默认直接监听公网端口，安装完成后会打印可访问的公网 IP 地址和端口。
+- 需要 SSH 隧道或本机反向代理时，可显式设置 `PANEL_BIND=127.0.0.1`。
 - Agent 使用独立公网端口，且只开放注册、心跳和结果回传接口。
-- 远程接入默认要求 HTTPS；接入命令只包含一次性注册码，不包含长期密钥。
+- 默认直连模式允许 Agent 使用 HTTP；公网长期使用时建议限制安全组来源或再配置 HTTPS。
 
 ## 使用
 

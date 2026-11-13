@@ -21,7 +21,7 @@ tail -20 /var/lib/linkpilot/agent.log
 | 机器上 `ip -6 addr show scope global` 只有 `fe80::` 或 `fc00::` / `fd00::` | 这台机器确实没有**全局可路由**的 IPv6（链路本地 / ULA 不能用于跨公网测试），面板显示「无 IPv6」是正确结果，不是探测故障。 |
 | 机器在线但地址一直停在「探测中…」 | 心跳正常只说明连通；地址要靠探测任务补齐，点「探测地址」手动重试即可。 |
 | Agent 一直不上线 | 机器上 `systemctl status linkpilot-agent` 与 `agent.log`：`curl_exit=60` 多为证书问题，`curl_exit=28` 是连不上面板（防火墙 / 安全组 / DNS），`curl_exit=22` 是令牌被面板拒绝。若面板刚跨协议升级，请到机器管理重新生成一次性接入码并重跑安装命令。 |
-| 面板打不开 | `docker compose ps` 看容器状态与健康检查；`docker compose logs --tail 50 linkpilot`。 |
+| 面板打不开 | 先在本机执行 `curl http://127.0.0.1:管理端口/api/health`。本机正常但公网打不开时，检查 `.env` 是否仍为 `PANEL_BIND=127.0.0.1`，以及云厂商安全组/NAT 是否把公网端口映射到面板机内网 IP。再看 `docker compose ps` 和 `docker compose logs --tail 50 linkpilot`。 |
 | Caddy 证书签不下来 | 域名 A 记录是否指向本机、安全组是否放行 80/443、80 是否被别的服务占用；`docker compose --profile tls logs --tail 30 caddy`。 |
 | 面板容器反复重启 | 常见是端口冲突（改 `.env` 的 `PANEL_PORT` 后 `docker compose up -d`）或磁盘空间不足。 |
 | 定时任务的「最近一轮」显示**本轮跳过 / 等待空档** | 触发时面板里已有测试在跑（手动或别的定时任务）。默认策略是跳过本轮并写下原因（不排队，避免长期对比的时间轴被推后）；勾上任务的「与手动测试冲突时等待」就会等空档再跑。 |

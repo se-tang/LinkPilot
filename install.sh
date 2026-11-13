@@ -32,7 +32,7 @@ APP_NAME="LinkPilot"
 REPO_SLUG="LinkPilot"
 # 当前版本：与 app/app.py 的 APP_VERSION 保持一致（app.py 是唯一权威）。
 # 升级时脚本会用「更新后的代码里」的版本号自我重跑，所以这里的值只对「全新安装」生效。
-APP_VERSION="0.10.1"
+APP_VERSION="0.10.2"
 REPO_URL="${LINKPILOT_REPO_URL:-https://github.com/se-tang/LinkPilot.git}"
 BRANCH="${LINKPILOT_BRANCH:-main}"
 TARGET_HOME="$(getent passwd "$(id -u)" 2>/dev/null | cut -d: -f6)"
@@ -727,6 +727,30 @@ detect_external_https_url() {
   ' | sort -u | head -n1
 }
 
+detect_public_ip() {
+  command -v curl >/dev/null 2>&1 || return 1
+  for url in \
+    https://api.ipify.org \
+    https://ifconfig.me/ip \
+    https://icanhazip.com
+  do
+    ip="$(curl -4 -fsS --max-time 4 "$url" 2>/dev/null | tr -d '\r\n ')"
+    [ -n "$ip" ] || continue
+    if printf '%s\n' "$ip" | awk -F. '
+      NF != 4 { exit 1 }
+      {
+        for (i = 1; i <= 4; i++) {
+          if ($i !~ /^[0-9]+$/ || $i < 0 || $i > 255) exit 1
+        }
+      }
+    '; then
+      printf '%s\n' "$ip"
+      return 0
+    fi
+  done
+  return 1
+}
+
 # 这里判断「是不是首次部署」，必须在 docker compose 之前定死：
 # compose 一起容器就会把 ./data 建出来，之后再看就永远是「已有数据」了
 # （曾经因此让全新部署误报「沿用已有账号」，把该显示的一次性初始密码藏了起来）。
@@ -755,12 +779,8 @@ fi
 PANEL_PORT="$(sed -n 's/^PANEL_PORT=//p' "$INSTALL_DIR/.env" | tail -n1)"
 PANEL_DOMAIN="$(sed -n 's/^PANEL_DOMAIN=//p' "$INSTALL_DIR/.env" | tail -n1)"
 [ -n "${PANEL_PORT:-}" ] || PANEL_PORT=8088
-if [ "$FRESH_INSTALL" = "1" ]; then
-  env_set_default PANEL_BIND 127.0.0.1
-else
-  # 老部署原本等价于 0.0.0.0；升级时保留可访问性，避免突然断管。
-  env_set_default PANEL_BIND 0.0.0.0
-fi
+# 默认直接可用；需要 SSH 隧道或本机反代时，显式设置 PANEL_BIND=127.0.0.1。
+env_set_default PANEL_BIND 0.0.0.0
 env_set_default PANEL_AGENT_BIND 0.0.0.0
 if [ -z "$(env_get PANEL_AGENT_PORT)" ]; then
   _ap=""
@@ -775,12 +795,15 @@ if [ -z "$(env_get PANEL_AGENT_PORT)" ]; then
   printf 'PANEL_AGENT_PORT=%s\n' "$_ap" >>"$INSTALL_DIR/.env"
 fi
 if [ -z "$(env_get PANEL_ALLOW_INSECURE_AGENT)" ]; then
-  if [ "$FRESH_INSTALL" = "1" ]; then
-    printf 'PANEL_ALLOW_INSECURE_AGENT=0\n' >>"$INSTALL_DIR/.env"
-  else
-    # 旧版没有独立 Agent 端口，升级时先兼容其 HTTP 接入；面板会持续提示风险。
-    printf 'PANEL_ALLOW_INSECURE_AGENT=1\n' >>"$INSTALL_DIR/.env"
-  fi
+  case "$(env_get PANEL_BIND)" in
+    127.0.0.1|::1|"[::1]")
+      printf 'PANEL_ALLOW_INSECURE_AGENT=0\n' >>"$INSTALL_DIR/.env"
+      ;;
+    *)
+      # 默认直连模式必须允许 Agent 走同一个 HTTP 入口，否则装完无法接入机器。
+      printf 'PANEL_ALLOW_INSECURE_AGENT=1\n' >>"$INSTALL_DIR/.env"
+      ;;
+  esac
 fi
 if [ -z "$(env_get PANEL_PROXY_SECRET)" ]; then
   _secret="$(openssl rand -hex 32 2>/dev/null || date +%s%N | sha256sum | awk '{print $1}')"
@@ -889,23 +912,27 @@ else
   env_set_value PANEL_HTTPS 0
   env_set_value PANEL_AGENT_BIND 0.0.0.0
   if [ "$(env_get PANEL_ALLOW_INSECURE_AGENT)" = "1" ]; then
-    warn "当前未启用 HTTPS：为兼容旧 Agent，明文注册仍开启；建议尽快配置 PANEL_DOMAIN"
+    warn "当前为 HTTP 直连模式：管理面与 Agent 均为明文，请用安全组限制来源 IP"
   else
-    warn "当前未启用 HTTPS：管理面仅供本机访问，新 Agent 注册已禁用；请配置 PANEL_DOMAIN"
+    warn "当前未启用 HTTPS：管理面仅供本机访问，新 Agent 注册已禁用"
   fi
 fi
 
-_pub_ip="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") {print $(i + 1); exit}}')"
-[ -n "${_pub_ip:-}" ] || _pub_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
-[ -n "${_pub_ip:-}" ] || _pub_ip="<面板机IP>"
+_local_ip="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") {print $(i + 1); exit}}')"
+[ -n "${_local_ip:-}" ] || _local_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+_public_ip="$(env_get PANEL_PUBLIC_HOST)"
+[ -n "${_public_ip:-}" ] || _public_ip="${PANEL_PUBLIC_HOST:-}"
+[ -n "${_public_ip:-}" ] || _public_ip="$(detect_public_ip || true)"
+[ -n "${_public_ip:-}" ] || _public_ip="$_local_ip"
+[ -n "${_public_ip:-}" ] || _public_ip="<面板机IP>"
 if [ "$TLS_EXTERNAL" = "1" ]; then
   env_set_value PANEL_AGENT_URL "$PANEL_PUBLIC_URL"
 elif [ -z "$(env_get PANEL_AGENT_URL)" ] && [ "$TLS" = "1" ] && [ -n "${PANEL_DOMAIN:-}" ]; then
   env_set_value PANEL_AGENT_URL "https://$PANEL_DOMAIN"
 else
-  case "$_pub_ip" in
-    *:*) _agent_host="[$_pub_ip]" ;;
-    *) _agent_host="$_pub_ip" ;;
+  case "$_public_ip" in
+    *:*) _agent_host="[$_public_ip]" ;;
+    *) _agent_host="$_public_ip" ;;
   esac
   [ -n "$(env_get PANEL_AGENT_URL)" ] \
     || env_set_value PANEL_AGENT_URL "http://$_agent_host:$PANEL_AGENT_PORT"
@@ -975,9 +1002,7 @@ while [ "$_i" -lt 15 ]; do
   sleep 2
 done
 
-PANEL_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") {print $(i + 1); exit}}')"
-[ -n "${PANEL_IP:-}" ] || PANEL_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
-[ -n "${PANEL_IP:-}" ] || PANEL_IP="<面板机IP>"
+PANEL_IP="${_public_ip:-<面板机IP>}"
 
 _banner_field() { # $1=字段名
   printf '%s\n' "$BANNER" | sed -n "s/.*$1[:：][[:space:]]*//p" | head -n1 | tr -d '\r'
@@ -1010,7 +1035,12 @@ elif [ "${PANEL_BIND:-}" = "127.0.0.1" ]; then
   printf '  %s面板%s   %shttp://127.0.0.1:%s%s  %s(SSH 隧道或 HTTPS 反代访问)%s\n' \
     "$C_BOLD" "$C_RESET" "$C_BOLD$C_CYAN" "$PANEL_PORT" "$C_RESET" "$C_DIM" "$C_RESET"
 else
-  printf '  %s面板%s   %shttp://%s:%s%s\n' "$C_BOLD" "$C_RESET" "$C_BOLD$C_CYAN" "$PANEL_IP" "$PANEL_PORT" "$C_RESET"
+  printf '  %s面板%s   %shttp://%s:%s%s  %s(直接访问)%s\n' \
+    "$C_BOLD" "$C_RESET" "$C_BOLD$C_CYAN" "$PANEL_IP" "$PANEL_PORT" "$C_RESET" "$C_DIM" "$C_RESET"
+  if [ "$PANEL_IP" != "${_local_ip:-}" ]; then
+    printf '  %s网络%s   请确认安全组/NAT映射公网 %s/tcp 和 %s/tcp 到 %s%s\n' \
+      "$C_BOLD" "$C_RESET" "$PANEL_PORT" "$PANEL_AGENT_PORT" "$_local_ip" "$C_RESET"
+  fi
 fi
 printf '  %sAgent%s  %s\n' "$C_BOLD" "$C_RESET" "${PANEL_AGENT_URL:-$(env_get PANEL_AGENT_URL)}"
 printf '  %s账号%s   %s\n' "$C_BOLD" "$C_RESET" "${PANEL_USER:-见 data/auth.json}"
