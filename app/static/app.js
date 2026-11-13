@@ -916,7 +916,48 @@ function renderRunForm() {
     document.querySelectorAll('#backendList input[type=checkbox]').forEach(cb => { cb.checked = true; });
   }
   runFormInit = true;
+  updateBackendSelection();
   updateIpv6Ui();
+}
+
+function updateCheckboxSelection(rootId, summaryId, buttonIds) {
+  const boxes = [...document.querySelectorAll(`#${rootId} input[type=checkbox]`)];
+  const selected = boxes.filter(cb => cb.checked).length;
+  const summary = $(summaryId);
+  if (summary) summary.textContent = boxes.length ? `已选 ${selected} / ${boxes.length}` : '';
+  for (const id of buttonIds) {
+    const button = $(id);
+    if (button) button.disabled = !boxes.length;
+  }
+}
+
+function setCheckboxSelection(rootId, invert, summaryId, buttonIds) {
+  const boxes = [...document.querySelectorAll(`#${rootId} input[type=checkbox]`)];
+  if (!boxes.length) return;
+  for (const cb of boxes) cb.checked = invert ? !cb.checked : true;
+  updateCheckboxSelection(rootId, summaryId, buttonIds);
+}
+
+function updateBackendSelection() {
+  updateCheckboxSelection(
+    'backendList', 'backendSelectionSummary', ['selectAllBackends', 'invertBackends']);
+}
+
+function setBackendSelection(invert = false) {
+  setCheckboxSelection(
+    'backendList', invert, 'backendSelectionSummary', ['selectAllBackends', 'invertBackends']);
+  updateIpv6Ui();
+}
+
+function updateSchedBackendSelection() {
+  updateCheckboxSelection(
+    'sBackendList', 'sBackendSelectionSummary', ['sSelectAllBackends', 'sInvertBackends']);
+}
+
+function setSchedBackendSelection(invert = false) {
+  setCheckboxSelection(
+    'sBackendList', invert, 'sBackendSelectionSummary',
+    ['sSelectAllBackends', 'sInvertBackends']);
 }
 
 function updateIpv6Ui() {
@@ -1980,6 +2021,7 @@ function renderScheduleForm() {
   box.querySelectorAll('input').forEach(cb => {
     cb.checked = prevChecked.size ? prevChecked.has(cb.value) : true;
   });
+  updateSchedBackendSelection();
 }
 
 function seedScheduleForm(s) {
@@ -2031,6 +2073,7 @@ function openScheduleForm(s) {
     const box = $('sBackendList');
     const want = new Set((s.backend_ids || []).map(String));
     box.querySelectorAll('input').forEach(cb => { cb.checked = want.has(cb.value); });
+    updateSchedBackendSelection();
   }
   seedScheduleForm(s);
   $('schedModal').classList.remove('hidden');
@@ -2769,6 +2812,10 @@ const ACTIONS = {
   copyAgentCmd: () => copyText($('agentCmd').textContent, '已复制接入命令'),
   logout,
   startRun: (d, el) => startRun(el),
+  selectAllBackends: () => setBackendSelection(false),
+  invertBackends: () => setBackendSelection(true),
+  selectAllSchedBackends: () => setSchedBackendSelection(false),
+  invertSchedBackends: () => setSchedBackendSelection(true),
   loadRuns: () => loadRuns(),
   setRunsFilter: (d) => setRunsFilter(d.filter),
   openRun: (d) => openRun(d.id),
@@ -2841,7 +2888,11 @@ $('agentPanelUrl').addEventListener('input', () => {
 $('mRole').addEventListener('change', updateRoleHint);
 
 $('targetSelect').addEventListener('change', updateIpv6Ui);
-$('backendList').addEventListener('change', updateIpv6Ui);
+$('backendList').addEventListener('change', () => {
+  updateBackendSelection();
+  updateIpv6Ui();
+});
+$('sBackendList').addEventListener('change', updateSchedBackendSelection);
 $('useIpv6').addEventListener('change', () => {
   // 勾选 IPv6 时给出一次显式确认，避免误选后整轮失败
   const cb = $('useIpv6');

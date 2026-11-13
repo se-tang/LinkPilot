@@ -155,7 +155,16 @@
       <label class="run-section-label">目标机器
         <select id="targetSelect"></select>
       </label>
-      <div class="run-section-label">后端机器</div>
+      <div class="run-section-label run-backend-head">
+        <span>后端机器</span>
+        <div class="run-backend-actions">
+          <button type="button" class="small" id="selectAllBackends"
+                  data-action="selectAllBackends">全选</button>
+          <button type="button" class="small" id="invertBackends"
+                  data-action="invertBackends">反选</button>
+          <span class="quiet" id="backendSelectionSummary" aria-live="polite"></span>
+        </div>
+      </div>
       <div id="backendList" class="run-backend-list"></div>
       <div class="run-options">
         <label class="chk"><input type="checkbox" id="useIpv6"> 使用 IPv6 测试</label>
@@ -400,7 +409,16 @@
     <div class="field"><label>目标机器 *（被测端，iperf3 -s）</label>
       <select id="sTarget"></select></div>
     <div class="field">
-      <label>后端机器 *（发起端，可多选）</label>
+      <div class="run-backend-head">
+        <span>后端机器 *（发起端，可多选）</span>
+        <div class="run-backend-actions">
+          <button type="button" class="small" id="sSelectAllBackends"
+                  data-action="selectAllSchedBackends">全选</button>
+          <button type="button" class="small" id="sInvertBackends"
+                  data-action="invertSchedBackends">反选</button>
+          <span class="quiet" id="sBackendSelectionSummary" aria-live="polite"></span>
+        </div>
+      </div>
       <div id="sBackendList"></div>
     </div>
     <div class="row" style="align-items:center">
