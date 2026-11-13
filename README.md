@@ -14,20 +14,6 @@
 curl -fsSL https://raw.githubusercontent.com/se-tang/LinkPilot/main/install.sh | bash
 ```
 
-## HTTPS 反代
-
-面板只需要暴露一个管理端口。任意 HTTPS 反代把请求转发到该端口即可，Agent 接入也会自动复用当前访问域名：
-
-```nginx
-location / {
-    proxy_pass http://面板机IP:管理端口;
-    proxy_set_header Host $host;
-    proxy_set_header X-Forwarded-Proto $scheme;
-}
-```
-
-之后通过 `https://你的域名` 打开面板。生成的目标机接入命令自动使用浏览器当前域名，不需要配置 `PANEL_AGENT_URL`。
-
 ## 升级
 
 重跑安装命令即可，端口、数据、密码和 Agent 关系保持不变。
