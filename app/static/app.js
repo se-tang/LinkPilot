@@ -660,8 +660,19 @@ function buildAgentCmd() {
   const q = (s) => "'" + String(s).replace(/'/g, "'\\''") + "'";
   // 全新机器可能只装了 curl 或只装了 wget：两种下载器自适应，避免接入命令跑不起来
   const fetchCmd = `command -v curl >/dev/null 2>&1 && curl -fsSL ${url}/agent/install.sh || wget -qO- ${url}/agent/install.sh`;
+  // Alpine 默认没有 bash；先由 POSIX sh 安装，再把安装器 stdin 原样交给 bash。
+  const bashBootstrap = [
+    'if ! command -v bash >/dev/null 2>&1; then',
+    'if command -v apk >/dev/null 2>&1; then apk add --no-cache bash;',
+    'elif command -v apt-get >/dev/null 2>&1; then apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y bash;',
+    'elif command -v dnf >/dev/null 2>&1; then dnf install -y bash;',
+    'elif command -v yum >/dev/null 2>&1; then yum install -y bash;',
+    'elif command -v zypper >/dev/null 2>&1; then zypper --non-interactive install bash;',
+    'else printf "LinkPilot requires bash\\n" >&2; exit 1; fi; fi;',
+    'exec bash -s -- "$@"',
+  ].join(' ');
   const env = url.startsWith('http://') ? 'LINKPILOT_INSECURE_HTTP=1 ' : '';
-  return `( ${fetchCmd} ) | ${env}bash -s -- ${q(url)} ${q(agentMachine.registration_code)}`;
+  return `( ${fetchCmd} ) | ${env}sh -c ${q(bashBootstrap)} sh ${q(url)} ${q(agentMachine.registration_code)}`;
 }
 
 async function issueAgentCode(m) {

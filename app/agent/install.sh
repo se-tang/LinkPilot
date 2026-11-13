@@ -67,11 +67,80 @@ if [ "$(id -u)" != "0" ]; then
   exit 1
 fi
 
+cap_available() {
+  local bit hex num
+  case "$1" in
+    CAP_SYS_ADMIN) bit=2097152 ;;
+    CAP_NET_RAW) bit=8192 ;;
+    *) return 1 ;;
+  esac
+  hex="$(awk '$1 == "CapEff:" {print $2; exit}' /proc/self/status 2>/dev/null || true)"
+  [ -n "$hex" ] || return 1
+  num="$(printf '%d' "0x$hex" 2>/dev/null)" || return 1
+  [ $((num & bit)) -ne 0 ]
+}
+
+container_kind() {
+  local kind
+  kind="$(systemd-detect-virt 2>/dev/null || true)"
+  if [ -z "$kind" ] || [ "$kind" = "none" ]; then
+    if [ -e /run/.containerenv ]; then
+      kind="podman"
+    elif [ -e /.dockerenv ]; then
+      kind="docker"
+    elif [ -s /run/systemd/container ]; then
+      kind="$(tr -d '\r\n' </run/systemd/container)"
+    fi
+  fi
+  printf '%s' "$kind"
+}
+
+CONTAINER_KIND="$(container_kind)"
+SANDBOX_COMPAT=0
+PING_COMPAT=0
+case "${LINKPILOT_CONTAINER_COMPAT:-auto}" in
+  1|yes|force)
+    SANDBOX_COMPAT=1
+    PING_COMPAT=1
+    ;;
+  0|no|off)
+    ;;
+  *)
+    cap_available CAP_NET_RAW || PING_COMPAT=1
+    if [ -n "$CONTAINER_KIND" ] && ! cap_available CAP_SYS_ADMIN; then
+      SANDBOX_COMPAT=1
+    fi
+    ;;
+esac
+
+HAS_SYSTEMD=0
+HAS_OPENRC=0
+if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
+  HAS_SYSTEMD=1
+elif command -v rc-service >/dev/null 2>&1 \
+     && command -v rc-update >/dev/null 2>&1 \
+     && [ -x /sbin/openrc-run ]; then
+  HAS_OPENRC=1
+fi
+case "${LINKPILOT_CONTAINER_COMPAT:-auto}" in
+  0|no|off) ;;
+  *) if [ "$HAS_OPENRC" = "1" ]; then PING_COMPAT=1; fi ;;
+esac
+
 HOSTNAME_S="$(hostname 2>/dev/null || echo '-')"
 printf '\n  %s%sLinkPilot%s %s节点接入%s\n' "$B" "$MAG" "$R" "$D" "$R"
 rule
 printf '  %s主机%s   %s\n' "$D" "$R" "$HOSTNAME_S"
 printf '  %s面板%s   %s\n' "$D" "$R" "$PANEL_URL"
+if [ "$SANDBOX_COMPAT" = "1" ]; then
+  COMPAT_MODE="容器兼容模式"
+  if [ "$HAS_SYSTEMD" = "1" ]; then COMPAT_MODE="systemd 兼容模式"; fi
+  if [ "$HAS_OPENRC" = "1" ]; then COMPAT_MODE="OpenRC 兼容模式"; fi
+  printf '  %s兼容%s   %s\n' "$D" "$R" "受限 ${CONTAINER_KIND:-容器}，自动使用 $COMPAT_MODE"
+fi
+if [ "$PING_COMPAT" = "1" ]; then
+  printf '  %s兼容%s   %s\n' "$D" "$R" "缺少 CAP_NET_RAW，自动使用无文件能力 ping"
+fi
 rule
 printf '\n'
 
@@ -110,14 +179,14 @@ ensure_pkg iperf3 iperf3 iperf3 iperf3 >/dev/null 2>&1 || true
 if ! command -v iperf3 >/dev/null 2>&1 && [ "$(pkg_mgr)" = "zypper" ]; then
   zypper --non-interactive install iperf >/dev/null 2>&1 || true
 fi
-ensure_pkg ping iputils-ping iputils iputils >/dev/null 2>&1 || true
+ensure_pkg ping iputils-ping iputils iputils-ping >/dev/null 2>&1 || true
 if ! command -v iperf3 >/dev/null 2>&1 || ! command -v ping >/dev/null 2>&1; then
   printf '%s失败%s\n' "$RED" "$R"
   fail "iperf3 或 ping 安装失败，请先手动安装"
   exit 1
 fi
 printf '%s完成%s\n' "$GRN" "$R"
-if command -v setcap >/dev/null 2>&1; then
+if [ "$PING_COMPAT" = "0" ] && command -v setcap >/dev/null 2>&1; then
   setcap cap_net_raw+ep "$(command -v ping)" 2>/dev/null || true
 fi
 
@@ -153,25 +222,69 @@ if [ -n "$UPDATE_KEY" ] && ! printf '%s' "$UPDATE_KEY" | grep -Eq '^[0-9a-f]{64}
 fi
 printf '%s完成%s\n' "$GRN" "$R"
 
+if ! getent group linkpilot >/dev/null 2>&1; then
+  if command -v groupadd >/dev/null 2>&1; then
+    groupadd --system linkpilot
+  elif command -v addgroup >/dev/null 2>&1; then
+    addgroup -S linkpilot
+  else
+    fail "无法创建 linkpilot 系统组"
+    exit 1
+  fi
+fi
 if ! id linkpilot >/dev/null 2>&1; then
   if command -v useradd >/dev/null 2>&1; then
-    useradd --system --home-dir /var/lib/linkpilot --shell /usr/sbin/nologin linkpilot
+    useradd --system --gid linkpilot --home-dir /var/lib/linkpilot \
+      --shell /usr/sbin/nologin linkpilot
   elif command -v adduser >/dev/null 2>&1; then
-    adduser -S -D -H -h /var/lib/linkpilot -s /sbin/nologin linkpilot
+    adduser -S -D -H -G linkpilot -h /var/lib/linkpilot -s /sbin/nologin linkpilot
   else
     fail "无法创建 linkpilot 系统用户"
     exit 1
   fi
 fi
 
+AGENT_FILE_GROUP=linkpilot
+CONF_DIR_GROUP=linkpilot
+if [ "$HAS_OPENRC" = "1" ] && [ "$PING_COMPAT" = "1" ]; then
+  # Alpine's start-stop-daemon can set the effective GID but not arbitrary
+  # supplementary groups. The process keeps UID linkpilot and uses GID root
+  # for unprivileged ICMP datagrams, so its executable/config must be root-group.
+  AGENT_FILE_GROUP=root
+  CONF_DIR_GROUP=root
+fi
+
 install -d -m 0755 -o root -g root /usr/local/lib/linkpilot
-install -d -m 0750 -o root -g linkpilot /etc/linkpilot
+install -d -m 0750 -o root -g "$CONF_DIR_GROUP" /etc/linkpilot
 install -d -m 0750 -o linkpilot -g linkpilot /var/lib/linkpilot
+
+if [ "$PING_COMPAT" = "1" ]; then
+  dot; printf '容器兼容 ping ... '
+  PING_SRC="$(command -v ping)"
+  PING_DST=/usr/local/lib/linkpilot/ping
+  if [ "$PING_SRC" != "$PING_DST" ]; then
+    install -m 0755 "$PING_SRC" "$PING_DST"
+  fi
+  if command -v setcap >/dev/null 2>&1; then
+    setcap -r "$PING_DST" 2>/dev/null || true
+  fi
+  PING_GROUP_START="$(awk 'NR == 1 {print $1}' /proc/sys/net/ipv4/ping_group_range 2>/dev/null || true)"
+  if [ -n "$PING_GROUP_START" ] && [ "$PING_GROUP_START" -gt 0 ] 2>/dev/null; then
+    printf '%s失败%s\n' "$RED" "$R"
+    fail "容器的 ping_group_range 不接受 root 组，无法启用无特权 ICMP"
+    exit 1
+  fi
+  printf '%s完成%s\n' "$GRN" "$R"
+fi
 
 cat > /usr/local/lib/linkpilot/agent.sh << 'AGENT_EOF'
 #!/bin/bash
 set -eu
 umask 077
+if [ -x /usr/local/lib/linkpilot/ping ]; then
+  PATH="/usr/local/lib/linkpilot:$PATH"
+  export PATH
+fi
 CONF=/etc/linkpilot/agent.conf
 SPOOL=/var/lib/linkpilot
 AGENT_SELF=/usr/local/lib/linkpilot/agent.sh
@@ -185,13 +298,13 @@ SIGN_KEY="$(CONF_VALUE SIGN_KEY)"
 AGENT_HASH="$( (sha256sum "$AGENT_SELF" 2>/dev/null || shasum -a 256 "$AGENT_SELF" 2>/dev/null) | awk '{print $1}')"
 AGENT_CAPS=""
 if [ -f /etc/linkpilot/update.key ] && [ -f /usr/local/lib/linkpilot/apply-update.sh ] \
-   && [ -d /run/systemd/system ]; then
+   && { [ -d /run/systemd/system ] || [ -f /etc/init.d/linkpilot-agent-watch ]; }; then
   AGENT_CAPS="update"
 fi
 # 每次启动记一行：排查「Agent 是哪个版本、能不能被推送更新」时不用猜
 echo "$(date '+%F %T') Agent 启动 hash=${AGENT_HASH:0:12} caps=${AGENT_CAPS:-none}" >> "$SPOOL/agent.log"
 
-# systemd stop/restart（包括推送更新后的重启）时优雅退出，不要卡在 sleep/心跳里被强杀
+# 服务 stop/restart（包括推送更新后的重启）时优雅退出，不要卡在 sleep/心跳里被强杀
 trap 'exit 0' TERM INT
 
 token_mark="$SPOOL/token_mark"
@@ -498,7 +611,7 @@ while true; do
   fi
 done
 AGENT_EOF
-chown root:linkpilot /usr/local/lib/linkpilot/agent.sh
+chown "root:${AGENT_FILE_GROUP}" /usr/local/lib/linkpilot/agent.sh
 chmod 0750 /usr/local/lib/linkpilot/agent.sh
 
 cat > /etc/linkpilot/agent.conf << CONF_EOF
@@ -507,8 +620,11 @@ TOKEN=$TOKEN
 SIGN_KEY=$SIGN_KEY
 PROTOCOL=2
 CONF_EOF
-chown root:linkpilot /etc/linkpilot/agent.conf
+chown "root:${CONF_DIR_GROUP}" /etc/linkpilot/agent.conf
 chmod 0640 /etc/linkpilot/agent.conf
+printf '%s\n' "$AGENT_FILE_GROUP" >/etc/linkpilot/agent.group
+chown root:root /etc/linkpilot/agent.group
+chmod 0644 /etc/linkpilot/agent.group
 
 # 推送更新用的根密钥：只有 root 可读，Agent 账号读不到（防「Agent 被拿下 → 借 root 助手装自己的脚本」）
 if [ -n "$UPDATE_KEY" ]; then
@@ -525,11 +641,23 @@ set -u
 systemctl disable --now linkpilot-agent >/dev/null 2>&1 || true
 systemctl disable --now linkpilot-agent-uninstall.path >/dev/null 2>&1 || true
 systemctl disable --now linkpilot-agent-update.path >/dev/null 2>&1 || true
+if command -v rc-service >/dev/null 2>&1; then
+  rc-service linkpilot-agent-watch stop >/dev/null 2>&1 || true
+  rc-service linkpilot-agent stop >/dev/null 2>&1 || true
+fi
+if command -v rc-update >/dev/null 2>&1; then
+  rc-update del linkpilot-agent-watch default >/dev/null 2>&1 || true
+  rc-update del linkpilot-agent default >/dev/null 2>&1 || true
+fi
 rm -f /etc/systemd/system/linkpilot-agent.service \
       /etc/systemd/system/linkpilot-agent-uninstall.service \
       /etc/systemd/system/linkpilot-agent-uninstall.path \
       /etc/systemd/system/linkpilot-agent-update.service \
       /etc/systemd/system/linkpilot-agent-update.path
+rm -f /etc/init.d/linkpilot-agent /etc/init.d/linkpilot-agent-watch
+rm -f /run/linkpilot-agent.pid /run/linkpilot-agent-watch.pid
+rm -f /etc/systemd/system/linkpilot-agent.service.d/container-compat.conf
+rmdir /etc/systemd/system/linkpilot-agent.service.d 2>/dev/null || true
 systemctl daemon-reload >/dev/null 2>&1 || true
 systemctl reset-failed >/dev/null 2>&1 || true
 crontab -u linkpilot -r >/dev/null 2>&1 || true
@@ -540,65 +668,13 @@ userdel linkpilot >/dev/null 2>&1 || true
 UNINSTALL_EOF
 chmod 0750 /usr/local/lib/linkpilot/uninstall.sh
 
-AGENT_MODE=""
-dot; printf '注册常驻服务 ... '
-if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
-  cat > /etc/systemd/system/linkpilot-agent.service << 'UNIT_EOF'
-[Unit]
-Description=LinkPilot Agent
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=linkpilot
-Group=linkpilot
-ExecStart=/bin/bash /usr/local/lib/linkpilot/agent.sh
-Restart=always
-RestartSec=5
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=true
-ProtectKernelTunables=true
-ProtectKernelModules=true
-ProtectControlGroups=true
-ReadWritePaths=/var/lib/linkpilot
-CapabilityBoundingSet=CAP_NET_RAW CAP_NET_BIND_SERVICE
-AmbientCapabilities=CAP_NET_RAW CAP_NET_BIND_SERVICE
-
-[Install]
-WantedBy=multi-user.target
-UNIT_EOF
-  cat > /etc/systemd/system/linkpilot-agent-uninstall.service << 'UNIT_EOF'
-[Unit]
-Description=LinkPilot Agent cleanup
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/lib/linkpilot/uninstall.sh
-UNIT_EOF
-  cat > /etc/systemd/system/linkpilot-agent-uninstall.path << 'UNIT_EOF'
-[Unit]
-Description=Watch LinkPilot Agent uninstall request
-
-[Path]
-PathExists=/var/lib/linkpilot/uninstall.request
-Unit=linkpilot-agent-uninstall.service
-
-[Install]
-WantedBy=multi-user.target
-UNIT_EOF
-  systemctl daemon-reload
-  systemctl enable linkpilot-agent >/dev/null 2>&1
-  systemctl enable --now linkpilot-agent-uninstall.path >/dev/null 2>&1 || true
-  # 推送更新：Agent（低权限）只负责把新脚本落到 /var/lib/linkpilot 并核对 sha256，
-  # 真正的替换由 root 的一次性助手完成，且助手要用 /etc/linkpilot/update.key 验签。
-  if [ -n "$UPDATE_KEY" ]; then
-    cat > /usr/local/lib/linkpilot/apply-update.sh << 'UPDATE_EOF'
+# 推送更新：Agent（低权限）只负责把新脚本落到 /var/lib/linkpilot 并核对 sha256，
+# 真正的替换由 root 助手完成，且助手要用 /etc/linkpilot/update.key 验签。
+if [ -n "$UPDATE_KEY" ]; then
+  cat > /usr/local/lib/linkpilot/apply-update.sh << 'UPDATE_EOF'
 #!/bin/bash
-# 由 root 执行的 Agent 更新助手：验签 → 语法检查 → 原子替换 → 重启 Agent。
-# 触发方式：linkpilot-agent-update.path 发现 /var/lib/linkpilot/update.request。
+# 由 root 执行的 Agent 更新助手：验签 -> 语法检查 -> 原子替换 -> 重启 Agent。
+# systemd 由 path unit 触发，OpenRC 由 linkpilot-agent-watch 轮询触发。
 set -u
 SPOOL=/var/lib/linkpilot
 KEY_FILE=/etc/linkpilot/update.key
@@ -629,14 +705,99 @@ expect=$(printf '%s' "update:$sha:$ts" | openssl dgst -sha256 -hmac "$(cat "$KEY
 [ -n "$expect" ] && [ "$expect" = "$sig" ] || fail "签名校验不通过"
 bash -n "$SPOOL/update.staged" || fail "脚本语法检查失败"
 
-install -m 0750 -o root -g linkpilot "$SPOOL/update.staged" "$TARGET" || fail "写入 $TARGET 失败"
+group=$(cat /etc/linkpilot/agent.group 2>/dev/null || echo linkpilot)
+install -m 0750 -o root -g "$group" "$SPOOL/update.staged" "$TARGET" || fail "写入 $TARGET 失败"
 say "已替换 Agent（sha=$sha），重启服务"
 cleanup
-systemctl restart linkpilot-agent 2>/dev/null || true
+if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
+  systemctl restart linkpilot-agent 2>/dev/null || true
+elif command -v rc-service >/dev/null 2>&1 && [ -x /etc/init.d/linkpilot-agent ]; then
+  rc-service linkpilot-agent restart >/dev/null 2>&1 || true
+fi
 exit 0
 UPDATE_EOF
-    chmod 0750 /usr/local/lib/linkpilot/apply-update.sh
-    chown root:root /usr/local/lib/linkpilot/apply-update.sh
+  chmod 0750 /usr/local/lib/linkpilot/apply-update.sh
+  chown root:root /usr/local/lib/linkpilot/apply-update.sh
+fi
+
+AGENT_MODE=""
+dot; printf '注册常驻服务 ... '
+if [ "$HAS_SYSTEMD" = "1" ]; then
+  LEGACY_COMPAT_DROPIN=/etc/systemd/system/linkpilot-agent.service.d/container-compat.conf
+  if [ -f "$LEGACY_COMPAT_DROPIN" ] \
+     && grep -q 'The host is a restricted Podman container' "$LEGACY_COMPAT_DROPIN" 2>/dev/null; then
+    rm -f "$LEGACY_COMPAT_DROPIN"
+    rmdir /etc/systemd/system/linkpilot-agent.service.d 2>/dev/null || true
+  fi
+  cat > /etc/systemd/system/linkpilot-agent.service << 'UNIT_EOF'
+[Unit]
+Description=LinkPilot Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=linkpilot
+Group=linkpilot
+ExecStart=/bin/bash /usr/local/lib/linkpilot/agent.sh
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+UNIT_EOF
+  if [ "$SANDBOX_COMPAT" = "1" ]; then
+    cat >> /etc/systemd/system/linkpilot-agent.service << 'UNIT_EOF'
+# Restricted container: mount/user-namespace hardening needs CAP_SYS_ADMIN.
+UNIT_EOF
+  else
+    cat >> /etc/systemd/system/linkpilot-agent.service << 'UNIT_EOF'
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ReadWritePaths=/var/lib/linkpilot
+UNIT_EOF
+  fi
+  if [ "$PING_COMPAT" = "1" ]; then
+    cat >> /etc/systemd/system/linkpilot-agent.service << 'UNIT_EOF'
+SupplementaryGroups=root
+Environment=PATH=/usr/local/lib/linkpilot:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+UNIT_EOF
+  else
+    cat >> /etc/systemd/system/linkpilot-agent.service << 'UNIT_EOF'
+CapabilityBoundingSet=CAP_NET_RAW CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_RAW CAP_NET_BIND_SERVICE
+UNIT_EOF
+  fi
+  cat >> /etc/systemd/system/linkpilot-agent.service << 'UNIT_EOF'
+
+[Install]
+WantedBy=multi-user.target
+UNIT_EOF
+  cat > /etc/systemd/system/linkpilot-agent-uninstall.service << 'UNIT_EOF'
+[Unit]
+Description=LinkPilot Agent cleanup
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/linkpilot/uninstall.sh
+UNIT_EOF
+  cat > /etc/systemd/system/linkpilot-agent-uninstall.path << 'UNIT_EOF'
+[Unit]
+Description=Watch LinkPilot Agent uninstall request
+
+[Path]
+PathExists=/var/lib/linkpilot/uninstall.request
+Unit=linkpilot-agent-uninstall.service
+
+[Install]
+WantedBy=multi-user.target
+UNIT_EOF
+  systemctl daemon-reload
+  systemctl enable linkpilot-agent >/dev/null 2>&1
+  systemctl enable --now linkpilot-agent-uninstall.path >/dev/null 2>&1 || true
+  if [ -n "$UPDATE_KEY" ]; then
     cat > /etc/systemd/system/linkpilot-agent-update.service << 'UNIT_EOF'
 [Unit]
 Description=LinkPilot Agent update apply
@@ -668,8 +829,144 @@ UNIT_EOF
     note 'journalctl -u linkpilot-agent -n 30'
     exit 1
   fi
+elif [ "$HAS_OPENRC" = "1" ]; then
+  OPENRC_AGENT_GROUP=root
+  : >/var/lib/linkpilot/agent.log
+  chown linkpilot:linkpilot /var/lib/linkpilot/agent.log
+  chmod 0600 /var/lib/linkpilot/agent.log
+  cat > /etc/init.d/linkpilot-agent << 'OPENRC_EOF'
+#!/sbin/openrc-run
+
+name="LinkPilot Agent"
+description="LinkPilot low-privilege node agent"
+pidfile="/run/linkpilot-agent.pid"
+logfile="/var/lib/linkpilot/agent.log"
+
+start() {
+  ebegin "Starting ${name}"
+  export RC_SVCNAME
+  supervise-daemon "$RC_SVCNAME" --start \
+    --user linkpilot --group __AGENT_GROUP__ --no-new-privs \
+    --pidfile "$pidfile" \
+    --stdout "$logfile" --stderr "$logfile" \
+    --respawn-delay 5 \
+    -- /bin/bash /usr/local/lib/linkpilot/agent.sh
+  eend $?
+}
+
+stop() {
+  ebegin "Stopping ${name}"
+  supervise-daemon "$RC_SVCNAME" --stop \
+    --pidfile "$pidfile" --retry TERM/10/KILL/5
+  eend $?
+}
+
+status() {
+  ebegin "Checking ${name}"
+  if [ -f "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
+    eend 0
+  else
+    eend 1
+  fi
+}
+
+depend() {
+  need net
+  after firewall
+}
+OPENRC_EOF
+  sed -i "s/__AGENT_GROUP__/$OPENRC_AGENT_GROUP/g" /etc/init.d/linkpilot-agent
+  chmod 0755 /etc/init.d/linkpilot-agent
+
+  if [ -n "$UPDATE_KEY" ]; then
+    cat > /usr/local/lib/linkpilot/watch-root-requests.sh << 'WATCH_EOF'
+#!/bin/sh
+SPOOL=/var/lib/linkpilot
+while :; do
+  if [ -f "$SPOOL/uninstall.request" ]; then
+    rm -f "$SPOOL/uninstall.request"
+    setsid /usr/local/lib/linkpilot/uninstall.sh \
+      >>"$SPOOL/uninstall.log" 2>&1 &
+    exit 0
+  fi
+  if [ -f "$SPOOL/update.request" ]; then
+    /usr/local/lib/linkpilot/apply-update.sh || true
+  fi
+  sleep 2
+done
+WATCH_EOF
+    chmod 0750 /usr/local/lib/linkpilot/watch-root-requests.sh
+    chown root:root /usr/local/lib/linkpilot/watch-root-requests.sh
+    cat > /etc/init.d/linkpilot-agent-watch << 'OPENRC_EOF'
+#!/sbin/openrc-run
+
+name="LinkPilot Agent root request watcher"
+description="Applies signed LinkPilot Agent updates"
+pidfile="/run/linkpilot-agent-watch.pid"
+logfile="/var/lib/linkpilot/root-watch.log"
+
+start() {
+  ebegin "Starting ${name}"
+  export RC_SVCNAME
+  supervise-daemon "$RC_SVCNAME" --start \
+    --pidfile "$pidfile" \
+    --stdout "$logfile" --stderr "$logfile" \
+    --respawn-delay 5 \
+    -- /bin/sh /usr/local/lib/linkpilot/watch-root-requests.sh
+  eend $?
+}
+
+stop() {
+  ebegin "Stopping ${name}"
+  supervise-daemon "$RC_SVCNAME" --stop \
+    --pidfile "$pidfile" --retry TERM/10/KILL/5
+  eend $?
+}
+
+status() {
+  ebegin "Checking ${name}"
+  if [ -f "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
+    eend 0
+  else
+    eend 1
+  fi
+}
+
+depend() {
+  need net
+  after linkpilot-agent
+}
+OPENRC_EOF
+    chmod 0755 /etc/init.d/linkpilot-agent-watch
+  fi
+
+  rc-update add linkpilot-agent default >/dev/null 2>&1
+  if [ -x /etc/init.d/linkpilot-agent-watch ]; then
+    rc-update add linkpilot-agent-watch default >/dev/null 2>&1
+    rc-service linkpilot-agent-watch restart >/dev/null 2>&1 || true
+  fi
+  rc-service linkpilot-agent restart || true
+  if rc-service linkpilot-agent status >/dev/null 2>&1; then
+    AGENT_MODE="openrc"
+    printf '%s完成%s %s(OpenRC，低权限用户 linkpilot)%s\n' "$GRN" "$R" "$D" "$R"
+  else
+    printf '%s失败%s\n' "$RED" "$R"
+    note 'rc-service linkpilot-agent status; tail -n 30 /var/lib/linkpilot/agent.log'
+    exit 1
+  fi
 else
   pkill -f /usr/local/lib/linkpilot/agent.sh >/dev/null 2>&1 || true
+  if [ "$PING_COMPAT" = "1" ] \
+     && ! id -nG linkpilot 2>/dev/null | tr ' ' '\n' | grep -qx 'root'; then
+    if command -v usermod >/dev/null 2>&1; then
+      usermod -aG root linkpilot
+    elif command -v gpasswd >/dev/null 2>&1; then
+      gpasswd -a linkpilot root >/dev/null
+    else
+      fail "无 systemd 且无法把 linkpilot 加入 root 组以启用无特权 ICMP"
+      exit 1
+    fi
+  fi
   if command -v runuser >/dev/null 2>&1; then
     (setsid runuser -u linkpilot -- /bin/sh -c \
       'exec /bin/bash /usr/local/lib/linkpilot/agent.sh >> /var/lib/linkpilot/agent.log 2>&1' &)

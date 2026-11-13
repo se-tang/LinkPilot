@@ -196,6 +196,65 @@ class ApplyHelperTest(unittest.TestCase):
         self.assertIn('PathExists=/var/lib/linkpilot/update.request', self.text)
 
 
+class PodmanCompatTest(unittest.TestCase):
+    """受限 Podman 必须由安装器自动降级，不能让用户手工改 systemd。"""
+
+    def setUp(self):
+        self.text = (ROOT / 'app' / 'agent' / 'install.sh').read_text(encoding='utf-8')
+
+    def test_detects_limited_container_capabilities(self):
+        self.assertIn('container_kind()', self.text)
+        self.assertIn('cap_available()', self.text)
+        self.assertIn('CAP_SYS_ADMIN', self.text)
+        self.assertIn('CAP_NET_RAW', self.text)
+        self.assertIn('LINKPILOT_CONTAINER_COMPAT', self.text)
+
+    def test_renders_container_compatible_unit(self):
+        self.assertIn('if [ "$SANDBOX_COMPAT" = "1" ]', self.text)
+        self.assertIn('if [ "$PING_COMPAT" = "1" ]', self.text)
+        self.assertIn('SupplementaryGroups=root', self.text)
+        self.assertIn('/usr/local/lib/linkpilot/ping', self.text)
+        self.assertIn('setcap -r "$PING_DST"', self.text)
+        self.assertIn('Environment=PATH=/usr/local/lib/linkpilot:', self.text)
+        self.assertIn('PATH="/usr/local/lib/linkpilot:$PATH"', self.text)
+        self.assertIn('ping_group_range', self.text)
+
+    def test_installer_removes_legacy_compat_dropin(self):
+        self.assertIn('LEGACY_COMPAT_DROPIN', self.text)
+        self.assertIn('The host is a restricted Podman container', self.text)
+        self.assertIn('rm -f /etc/systemd/system/linkpilot-agent.service.d/container-compat.conf',
+                      self.text)
+
+
+class AlpineCompatTest(unittest.TestCase):
+    """Alpine/OpenRC 需要 bash 引导、受监督守护和源码更新 watcher。"""
+
+    def setUp(self):
+        self.text = (ROOT / 'app' / 'agent' / 'install.sh').read_text(encoding='utf-8')
+        self.app_js = (ROOT / 'app' / 'static' / 'app.js').read_text(encoding='utf-8')
+
+    def test_browser_command_bootstraps_bash_with_posix_sh(self):
+        self.assertIn('command -v apk', self.app_js)
+        self.assertIn('apk add --no-cache bash', self.app_js)
+        self.assertIn('sh -c', self.app_js)
+        self.assertIn('exec bash -s -- "$@"', self.app_js)
+
+    def test_installer_emits_openrc_services(self):
+        self.assertIn('HAS_OPENRC', self.text)
+        self.assertIn('/etc/init.d/linkpilot-agent', self.text)
+        self.assertIn('/etc/init.d/linkpilot-agent-watch', self.text)
+        self.assertIn('supervise-daemon "$RC_SVCNAME" --start', self.text)
+        self.assertIn('--user linkpilot --group __AGENT_GROUP__ --no-new-privs', self.text)
+        self.assertIn('rc-update add linkpilot-agent default', self.text)
+
+    def test_alpine_uses_unprivileged_private_ping(self):
+        self.assertIn('ensure_pkg ping iputils-ping iputils iputils-ping', self.text)
+        self.assertIn('PING_COMPAT=1', self.text)
+        self.assertIn('/etc/linkpilot/agent.group', self.text)
+        self.assertIn('watch-root-requests.sh', self.text)
+        self.assertIn('rc-service linkpilot-agent restart', self.text)
+
+
 if __name__ == '__main__':
     try:
         unittest.main(verbosity=2)

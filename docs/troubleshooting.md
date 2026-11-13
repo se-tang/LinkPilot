@@ -21,6 +21,8 @@ tail -20 /var/lib/linkpilot/agent.log
 | 机器上 `ip -6 addr show scope global` 只有 `fe80::` 或 `fc00::` / `fd00::` | 这台机器确实没有**全局可路由**的 IPv6（链路本地 / ULA 不能用于跨公网测试），面板显示「无 IPv6」是正确结果，不是探测故障。 |
 | 机器在线但地址一直停在「探测中…」 | 心跳正常只说明连通；地址要靠探测任务补齐，点「探测地址」手动重试即可。 |
 | Agent 一直不上线 | 机器上 `systemctl status linkpilot-agent` 与 `agent.log`：`curl_exit=60` 多为证书问题，`curl_exit=28` 是连不上面板（防火墙 / 安全组 / DNS），`curl_exit=22` 是令牌被面板拒绝。若面板刚跨协议升级，请到机器管理重新生成一次性接入码并重跑安装命令。 |
+| 受限 Podman 容器里 Agent 报 `217/USER` / `Failed to keep CAP_SYS_ADMIN` | 旧安装器生成的 systemd 单元无法在缺少 `CAP_SYS_ADMIN` 的容器中建立沙箱。v0.10.7 起安装器会自动生成容器兼容单元，并在缺少 `CAP_NET_RAW` 时自动配置无特权 ping；重新生成接入码并重跑安装命令即可。普通 KVM 不会被降级。 |
+| Alpine / OpenRC 节点显示未接入 | v0.10.7 起安装器会自动生成 `/etc/init.d/linkpilot-agent` 和 root 更新 watcher；用面板新生成的命令重跑即可。检查命令：`rc-service linkpilot-agent status`、`tail -30 /var/lib/linkpilot/agent.log`。 |
 | 面板打不开 | 先执行 `curl http://127.0.0.1:管理端口/api/health`。本机正常但公网打不开时，检查云厂商安全组和端口映射。再看 `docker compose ps` 和 `docker compose logs --tail 50 linkpilot`。 |
 | Caddy 证书签不下来 | 域名 A 记录是否指向本机、安全组是否放行 80/443、80 是否被别的服务占用；`docker compose --profile tls logs --tail 30 caddy`。 |
 | 面板容器反复重启 | 常见是端口冲突（改 `.env` 的 `PANEL_PORT` 后 `docker compose up -d`）或磁盘空间不足。 |

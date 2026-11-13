@@ -1,5 +1,14 @@
 # 更新记录
 
+## 0.10.7 - 2026-11-13
+
+- Agent 安装器自动识别受限 Podman 容器：当容器缺少 `CAP_SYS_ADMIN` 时，生成不依赖 mount/user namespace 的兼容 systemd 单元；普通 KVM 和有能力的容器继续使用原有完整沙箱与 `linkpilot` 低权限用户。
+- 当容器缺少 `CAP_NET_RAW` 时，安装器自动安装一份无文件能力的私有 ping，并仅给 Agent 服务附加 root 组，使用容器允许的无特权 ICMP datagram；不再需要用户手工修改 `/usr/local/bin/ping`。
+- 无 systemd 的受限容器也会在 nohup/crontab 启动路径中补齐 ping 组权限。
+- 重跑接入命令会自动清理旧版手工兼容 drop-in，并刷新为安装器生成的完整 systemd 单元。
+- Alpine 使用原生 OpenRC 服务：安装器自动生成 `linkpilot-agent` 和 root 更新 watcher，使用 `supervise-daemon` 自动拉起、`NoNewPrivs`、UID `linkpilot` 和有效 GID `root`，无需 systemd 兼容层。
+- Alpine 自动安装 `iputils-ping`，改用无 setuid、无文件能力的私有 ping；浏览器接入命令先用 POSIX `sh` 检查并按 `apk` 等包管理器安装 bash，再执行原安装器。
+
 ## 0.10.6 - 2026-11-13
 
 - 机器已经有可用测试地址时，不再在“角色 / 地址”列显示地址探测感叹号。
