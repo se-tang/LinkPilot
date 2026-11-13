@@ -230,4 +230,32 @@ for scenario in official official_fail download_fail both_fail; do
   ! grep -q 'command not found' "$log"
 done
 
+# 安装命令的环境变量必须直接写入 .env；HTTPS 公网地址是反代模式入口。
+reverse_dir="$TMP/bootstrap/reverse-proxy"
+mkdir -p "$reverse_dir"
+touch "$reverse_dir/docker-compose.yml"
+calls="$TMP/bootstrap/reverse-proxy.calls"
+log="$TMP/bootstrap/reverse-proxy.log"
+out="$TMP/bootstrap/reverse-proxy.out"
+touch "$calls"
+rc=0
+cat "$ROOT/install.sh" | env -u BASH_ENV PATH="$BOOTSTRAP_BIN" \
+  BOOTSTRAP_BIN="$BOOTSTRAP_BIN" MOCK_DOCKER="$TMP/bootstrap/docker-mock" \
+  SCENARIO=official CALLS="$calls" DOCKER_MIRROR=test-mirror \
+  LINKPILOT_DIR="$reverse_dir" LINKPILOT_LOG="$log" \
+  LINKPILOT_DRY_RUN=1 LINKPILOT_PLAIN=1 LINKPILOT_VERBOSE=0 \
+  PANEL_PORT=28874 PANEL_BIND=127.0.0.1 PANEL_AGENT_PORT=11176 \
+  PANEL_PUBLIC_URL=https://panel.example.com \
+  bash >"$out" 2>&1 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  cat "$out" "$log" >&2
+  exit "$rc"
+fi
+grep -qx 'PANEL_PORT=28874' "$reverse_dir/.env"
+grep -qx 'PANEL_BIND=127.0.0.1' "$reverse_dir/.env"
+grep -qx 'PANEL_AGENT_PORT=11176' "$reverse_dir/.env"
+grep -qx 'PANEL_PUBLIC_URL=https://panel.example.com' "$reverse_dir/.env"
+grep -qx 'PANEL_ALLOW_INSECURE_AGENT=0' "$reverse_dir/.env"
+printf 'install.sh reverse proxy env overrides OK\n'
+
 printf 'install.sh Docker bootstrap / package fallback / failure reporting OK\n'

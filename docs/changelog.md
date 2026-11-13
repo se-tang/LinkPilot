@@ -1,5 +1,12 @@
 # 更新记录
 
+## 0.10.3 - 2026-11-13
+
+- 安装命令直接接受 `PANEL_PORT`、`PANEL_BIND`、`PANEL_PUBLIC_URL` 覆盖，不再要求先手写 `.env`。
+- 传入 `PANEL_PUBLIC_URL=https://...` 即进入 HTTPS 反代模式：自动关闭明文 Agent、启用 Secure Cookie，并打印可直接填进 Nginx/Caddy 的上游地址。
+- 反代模式不再输出直连 NAT 映射和 HTTP 明文警告；这些提示只属于没有公网 HTTPS 地址的直连模式。
+- README 精简为安装、HTTPS 反代、升级三部分。
+
 ## 0.10.2 - 2026-11-13
 
 - 恢复“新装后直接可用”的默认体验：管理面从仅监听 `127.0.0.1` 改为默认监听 `0.0.0.0`，不再要求先配 SSH 隧道或 HTTPS 反向代理。

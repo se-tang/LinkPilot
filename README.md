@@ -1,46 +1,36 @@
 # LinkPilot
 
-<img src="docs/assets/linkpilot-logo.png" width="520" alt="LinkPilot Network Lab"/>
-
-多机网络线路测试面板：一台目标机配合多台后端机执行 iperf3，记录上下行、延迟、丢包、抖动和重传，并持续观察长期趋势。
-
-## 功能
-
-- 手动多机测速，支持 TCP、UDP、IPv4、IPv6。
-- 定时任务使用指定间隔和运行期限连续测试。
-- 单线/多线吞吐趋势、跨轮汇总和逐轮明细。
-- 测试记录按定时任务自动折叠，支持带图 Markdown 报告。
-- 线路质量使用 S/A/B/C/F 五级评级，提供异常标签、诊断详情和测试摘要。
-- 实时日志按预检、Ping、上行、下行、分析、完成阶段汇总，原始日志仍可展开查看。
-- Agent 接入，不在面板保存 SSH 凭据。
-- 面板可直接把 Agent 更新推送到节点（签名任务 + root 验签替换），不用逐台上机重跑命令。
-- iperf3 走 `-J` 结构化输出：报告给出区间稳定性（CV / P95），TCP 默认剔除慢启动。
-- SSE 实时刷新；单轮/长期数据可导出 CSV、JSON。
+多机网络线路测试面板。支持手动测速、定时任务、趋势对比和 Markdown 报告。
 
 ## 安装
+
+默认安装后直接打印可访问地址：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/se-tang/LinkPilot/main/install.sh | bash
 ```
 
-脚本会自动安装缺失的 Git、Docker 和 Docker Compose，生成独立的管理端口、Agent 端口与初始登录密码。
+## HTTPS 反向代理
 
-- 管理面默认直接监听公网端口，安装完成后会打印可访问的公网 IP 地址和端口。
-- 需要 SSH 隧道或本机反向代理时，可显式设置 `PANEL_BIND=127.0.0.1`。
-- Agent 使用独立公网端口，且只开放注册、心跳和结果回传接口。
-- 默认直连模式允许 Agent 使用 HTTP；公网长期使用时建议限制安全组来源或再配置 HTTPS。
+先准备 HTTPS 反代，安装时传入最终公网地址即可。安装器会按反代模式配置 Agent、Secure Cookie 和访问地址，不再要求 SSH 隧道或直连 NAT：
 
-## 使用
+```bash
+curl -fsSL https://raw.githubusercontent.com/se-tang/LinkPilot/main/install.sh \
+  | PANEL_PORT=28874 \
+    PANEL_PUBLIC_URL=https://panel.example.com \
+    bash
+```
 
-1. 添加目标机与后端机。
-2. 复制一次性接入命令，在机器上以 root 执行；安装阶段完成后 Agent 以低权限用户运行。
-3. 选择目标机、勾选后端机并开始测试。
-4. 长期观察使用「定时任务」，完成后查看「汇总对比」。
+反向代理上游：
 
-## 文档
+```text
+http://面板机可达地址:28874
+```
 
-- [部署、HTTPS 与升级](docs/deploy.md)
-- [参数与使用说明](docs/usage.md)
-- [常见问题](docs/troubleshooting.md)
-- [开发说明](docs/development.md)
-- [更新记录](docs/changelog.md)
+同机反代时加 `PANEL_BIND=127.0.0.1`；远程反代保持默认 `0.0.0.0`。安装完成页会直接打印反代上游地址。Agent 接入地址自动使用 `https://panel.example.com`。
+
+## 升级
+
+用安装时的同一条命令重跑即可，端口、数据、密码和 Agent 关系保持不变。
+
+详细配置见 [部署文档](docs/deploy.md)，参数见 [使用说明](docs/usage.md)。

@@ -32,7 +32,7 @@ APP_NAME="LinkPilot"
 REPO_SLUG="LinkPilot"
 # 当前版本：与 app/app.py 的 APP_VERSION 保持一致（app.py 是唯一权威）。
 # 升级时脚本会用「更新后的代码里」的版本号自我重跑，所以这里的值只对「全新安装」生效。
-APP_VERSION="0.10.2"
+APP_VERSION="0.10.3"
 REPO_URL="${LINKPILOT_REPO_URL:-https://github.com/se-tang/LinkPilot.git}"
 BRANCH="${LINKPILOT_BRANCH:-main}"
 TARGET_HOME="$(getent passwd "$(id -u)" 2>/dev/null | cut -d: -f6)"
@@ -689,6 +689,12 @@ rand_port() {
   fi
   printf '%s\n' "$((10000 + (RANDOM % 20001)))"
 }
+valid_port() {
+  case "${1:-}" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  [ "$1" -ge 1 ] && [ "$1" -le 65535 ]
+}
 port_in_use() { (exec 3<>"/dev/tcp/127.0.0.1/$1") >/dev/null 2>&1; }
 env_get() {
   sed -n "s/^$1=//p" "$INSTALL_DIR/.env" 2>/dev/null | tail -n1
@@ -761,28 +767,46 @@ else
   FRESH_INSTALL=1
 fi
 
+_requested_panel_port="${PANEL_PORT:-}"
+_requested_agent_port="${PANEL_AGENT_PORT:-}"
+_requested_bind="${PANEL_BIND:-}"
+_requested_public_url="${PANEL_PUBLIC_URL:-}"
+[ -z "$_requested_panel_port" ] || valid_port "$_requested_panel_port" \
+  || die "PANEL_PORT 必须是 1-65535 的整数"
+[ -z "$_requested_agent_port" ] || valid_port "$_requested_agent_port" \
+  || die "PANEL_AGENT_PORT 必须是 1-65535 的整数"
+
 if [ -f "$INSTALL_DIR/.env" ]; then
   step_done "沿用已有 .env"
 else
-  _p=""
-  _i=0
-  while [ "$_i" -lt 30 ]; do
-    _p="$(rand_port)"
-    port_in_use "$_p" || break
+  if [ -n "$_requested_panel_port" ]; then
+    _p="$_requested_panel_port"
+  else
     _p=""
-    _i=$((_i + 1))
-  done
-  [ -n "$_p" ] || _p="$(rand_port)"
+    _i=0
+    while [ "$_i" -lt 30 ]; do
+      _p="$(rand_port)"
+      port_in_use "$_p" || break
+      _p=""
+      _i=$((_i + 1))
+    done
+    [ -n "$_p" ] || _p="$(rand_port)"
+  fi
   printf 'PANEL_PORT=%s\n' "$_p" > "$INSTALL_DIR/.env"
-  step_done "随机端口 $_p"
+  step_done "管理端口 $_p"
 fi
+[ -z "$_requested_panel_port" ] || env_set_value PANEL_PORT "$_requested_panel_port"
 PANEL_PORT="$(sed -n 's/^PANEL_PORT=//p' "$INSTALL_DIR/.env" | tail -n1)"
 PANEL_DOMAIN="$(sed -n 's/^PANEL_DOMAIN=//p' "$INSTALL_DIR/.env" | tail -n1)"
 [ -n "${PANEL_PORT:-}" ] || PANEL_PORT=8088
 # 默认直接可用；需要 SSH 隧道或本机反代时，显式设置 PANEL_BIND=127.0.0.1。
-env_set_default PANEL_BIND 0.0.0.0
+if [ -n "$_requested_bind" ]; then
+  env_set_value PANEL_BIND "$_requested_bind"
+else
+  env_set_default PANEL_BIND 0.0.0.0
+fi
 env_set_default PANEL_AGENT_BIND 0.0.0.0
-if [ -z "$(env_get PANEL_AGENT_PORT)" ]; then
+if [ -z "$_requested_agent_port" ] && [ -z "$(env_get PANEL_AGENT_PORT)" ]; then
   _ap=""
   _i=0
   while [ "$_i" -lt 30 ]; do
@@ -794,6 +818,7 @@ if [ -z "$(env_get PANEL_AGENT_PORT)" ]; then
   [ -n "$_ap" ] || _ap="$(rand_port)"
   printf 'PANEL_AGENT_PORT=%s\n' "$_ap" >>"$INSTALL_DIR/.env"
 fi
+[ -z "$_requested_agent_port" ] || env_set_value PANEL_AGENT_PORT "$_requested_agent_port"
 if [ -z "$(env_get PANEL_ALLOW_INSECURE_AGENT)" ]; then
   case "$(env_get PANEL_BIND)" in
     127.0.0.1|::1|"[::1]")
@@ -812,7 +837,13 @@ fi
 PANEL_BIND="$(env_get PANEL_BIND)"
 PANEL_AGENT_PORT="$(env_get PANEL_AGENT_PORT)"
 chmod 600 "$INSTALL_DIR/.env"
-if [ -z "$(env_get PANEL_PUBLIC_URL)" ]; then
+if [ -n "$_requested_public_url" ]; then
+  case "$_requested_public_url" in
+    https://?*) ;;
+    *) die "PANEL_PUBLIC_URL 必须是完整的 https:// 地址" ;;
+  esac
+  env_set_value PANEL_PUBLIC_URL "$_requested_public_url"
+elif [ -z "$(env_get PANEL_PUBLIC_URL)" ]; then
   _detected_public_url="$(detect_external_https_url || true)"
   [ -z "$_detected_public_url" ] || env_set_value PANEL_PUBLIC_URL "$_detected_public_url"
 fi
@@ -1029,6 +1060,12 @@ _rule '─'
 printf '\n'
 if [ "$TLS_EXTERNAL" = "1" ]; then
   printf '  %s面板%s   %s%s%s\n' "$C_BOLD" "$C_RESET" "$C_BOLD$C_CYAN" "$PANEL_PUBLIC_URL" "$C_RESET"
+  case "${PANEL_BIND:-}" in
+    127.0.0.1|::1|"[::1]") _upstream_host="127.0.0.1" ;;
+    *) _upstream_host="${_local_ip:-<面板机IP>}" ;;
+  esac
+  printf '  %s反代上游%s %shttp://%s:%s%s\n' \
+    "$C_BOLD" "$C_RESET" "$C_BOLD$C_CYAN" "$_upstream_host" "$PANEL_PORT" "$C_RESET"
 elif [ "$TLS" = "1" ] && [ -n "${PANEL_DOMAIN:-}" ]; then
   printf '  %s面板%s   %shttps://%s%s\n' "$C_BOLD" "$C_RESET" "$C_BOLD$C_CYAN" "$PANEL_DOMAIN" "$C_RESET"
 elif [ "${PANEL_BIND:-}" = "127.0.0.1" ]; then

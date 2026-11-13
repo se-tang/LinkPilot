@@ -1629,6 +1629,8 @@ def test_security_hardening():
     assert 'env_set_default PANEL_BIND 0.0.0.0' in installer
     assert 'PANEL_ALLOW_INSECURE_AGENT=1' in installer
     assert 'detect_public_ip()' in installer
+    assert '_requested_public_url="${PANEL_PUBLIC_URL:-}"' in installer
+    assert '反代上游' in installer
     with open(os.path.join(root, 'Dockerfile'), encoding='utf-8') as f:
         dockerfile = f.read()
     assert 'USER 10001:10001' in dockerfile
