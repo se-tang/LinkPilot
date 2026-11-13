@@ -830,7 +830,10 @@ UNIT_EOF
     exit 1
   fi
 elif [ "$HAS_OPENRC" = "1" ]; then
-  OPENRC_AGENT_GROUP=root
+  OPENRC_AGENT_GROUP=linkpilot
+  if [ "$PING_COMPAT" = "1" ]; then
+    OPENRC_AGENT_GROUP=root
+  fi
   : >/var/lib/linkpilot/agent.log
   chown linkpilot:linkpilot /var/lib/linkpilot/agent.log
   chmod 0600 /var/lib/linkpilot/agent.log
