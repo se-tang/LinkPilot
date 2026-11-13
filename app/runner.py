@@ -883,9 +883,9 @@ def discover_machine(mid, force=False):
         db.set_machine_ips(mid, found, force=force)
         db.set_machine_probe(mid, '')
     else:
-        # 不是故障：NAT 机的本机地址本来就是私网，测试用的是面板观测到的**出口公网 IP**。
-        # 这条只是说明「本机探测没给出可用的新地址（通常也没有全局 IPv6）」。
+        # 不是故障：部分云厂商只把弹性公网地址映射到边缘，机器网卡上仍显示私网。
+        # 有可信心跳时，实际测试地址会使用面板观测到的公网出口 IP。
         db.set_machine_probe(
-            mid, '本机探测只有私网 / ULA / 链路本地地址（NAT 机属正常，测试用面板观测到的出口 IP），'
-                 '也没有探测到可用于测试的全局 IPv6')
+            mid, '本机网卡未探测到全局可路由地址；面板使用连接观测到的公网出口 IP。'
+                 '若没有全局 IPv6，则 IPv6 测试不可用')
     return found

@@ -609,12 +609,9 @@ function addrCell(m) {
     ? ' <span class="muted" title="机器资料里手动指定的测试地址（自动探测结果被忽略）">手动</span>' : '';
   const a4 = testAddr(m, 4);
   const a6 = testAddr(m, 6);
-  // 关键区分：有可用地址时（NAT 机用面板观测到的出口 IP）探测提示只是说明，不是故障；
-  // 一个地址都没有时才用 ⚠️ 提示需要处理
-  const note = m.probe_error
-    ? (a4 || a6
-        ? ` <span style="cursor:help;font-size:11px" class="muted" title="${esc(m.probe_error)}">ℹ️</span>`
-        : ` <span style="cursor:help" title="${esc(m.probe_error)}">⚠️</span>`)
+  // 已经有可用于测试的地址时不显示探测提示；只有完全无地址时才需要警告。
+  const note = m.probe_error && !a4 && !a6
+    ? ` <span style="cursor:help" title="${esc(m.probe_error)}">⚠️</span>`
     : '';
   if (!a4 && !a6) {
     return (m.agent_ip

@@ -540,13 +540,12 @@ def test_probe_error_surfaced():
     assert got['ip6'] == '240e:3b0:1234:5678::9', got
     assert got['probe_error'] == '', got
 
-    # 2) 只有私网 / ULA（NAT 机典型情况）：地址不写，原因留在机器上供面板显示，
-    #    且文案要说清这是正常现象而不是故障
+    # 2) 只有私网 / ULA：地址不写，提示说明会回退到面板观测到的公网出口。
     got = probe_round('IPV4=10.0.0.8\nIPV6=fd00::1\n')
-    assert 'NAT' in got['probe_error'] and '全局' in got['probe_error'], got
-    # NAT 机不该被每 10 分钟反复探测一次
+    assert '全局' in got['probe_error'] and '公网出口 IP' in got['probe_error'], got
+    # 无本机全局地址时不该被每 10 分钟反复探测一次
     assert runner.DISCOVER_COOLDOWN_EMPTY > runner.DISCOVER_COOLDOWN
-    # 有可用地址时（NAT 机用心跳观测到的出口 IP），资料里仍是可测地址
+    # 有可信心跳地址时，使用观测到的公网出口作为测试地址。
     db.touch_machine(m['id'], 'probe', '203.0.113.10')
     assert db.machine_test_ip(db.get_machine(m['id']), 4) == '203.0.113.10'
 
@@ -1666,6 +1665,7 @@ def test_security_hardening():
 
 def test_dashboard_interactions_present():
     html = dashboard_source()
+    assert 'const note = m.probe_error && !a4 && !a6' in html
     for key in ('setChartMode', 'toggleChartMachine', 'setChartDirection',
                 'buildTrendChartSvg', 'copyRichText', 'toggleRunGroup', 'run-group',
                 'AbortController', 'skeleton-chart', 'comparisonTableHtml', '生成报告中',
