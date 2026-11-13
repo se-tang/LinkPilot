@@ -1,5 +1,6 @@
 """用样例数据验证解析/评价/报告逻辑。直接运行: python tests/test_sample.py"""
 import json
+import ipaddress
 import os
 import re
 import sys
@@ -223,6 +224,20 @@ def test_xff_and_limiter():
     assert db.get_machine(m1d['id'])['agent_ip'] == '172.18.0.1', \
         db.get_machine(m1d['id'])['agent_ip']
     app_mod.PROXY_SECRET = old_secret
+
+    # 2c2) 远程反代 IP 显式加入可信 CIDR 后，采信 Cloudflare 写入的客户端地址
+    old_proxy_networks = app_mod.TRUSTED_PROXY_NETWORKS
+    app_mod.TRUSTED_PROXY_NETWORKS = [ipaddress.ip_network('188.68.57.37/32')]
+    m1d2 = db.create_machine({'name': 'xff-trusted-cidr', 'role': 'target',
+                              'region': '', 'bandwidth': ''})
+    c.post('/api/agent/heartbeat',
+           headers={'X-Agent-Token': m1d2['token'],
+                    'X-Agent-Protocol': '2',
+                    'CF-Connecting-IP': '203.0.113.99',
+                    'X-Forwarded-For': '198.51.100.20, 172.70.0.5'},
+           environ_base={'REMOTE_ADDR': '188.68.57.37'})
+    assert db.get_machine(m1d2['id'])['agent_ip'] == '203.0.113.99'
+    app_mod.TRUSTED_PROXY_NETWORKS = old_proxy_networks
 
     # 2d) 管理口仅绑回环时，允许本机 Nginx/SSH 隧道写入 XFF
     old_trust = app_mod.TRUST_LOCAL_PROXY
@@ -1635,6 +1650,7 @@ def test_security_hardening():
     assert '${PANEL_BIND:-0.0.0.0}' in compose
     assert '${PANEL_AGENT_BIND:-127.0.0.1}' in compose
     assert '${PANEL_ALLOW_INSECURE_AGENT:-1}' in compose
+    assert 'PANEL_TRUSTED_PROXY_CIDRS' in compose
     with open(os.path.join(root, 'install.sh'), encoding='utf-8') as f:
         installer = f.read()
     assert 'env_set_default PANEL_BIND 0.0.0.0' in installer

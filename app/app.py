@@ -22,7 +22,7 @@ from . import db, job_types, quality, runner, scheduler
 
 # 版本号：这是唯一权威（面板页面、部署横幅、install.sh 都从/沿用它取）。
 # 还在测试阶段，因此用 0.x 版本号。
-APP_VERSION = '0.10.4'
+APP_VERSION = '0.10.5'
 
 app = Flask(__name__)
 app.json.ensure_ascii = False
@@ -43,6 +43,13 @@ PANEL_HTTPS = os.environ.get('PANEL_HTTPS') == '1'
 ALLOW_INSECURE_AGENT = os.environ.get('PANEL_ALLOW_INSECURE_AGENT') == '1'
 PROXY_SECRET = os.environ.get('PANEL_PROXY_SECRET', '')
 TRUST_LOCAL_PROXY = os.environ.get('PANEL_TRUST_LOCAL_PROXY') == '1'
+TRUSTED_PROXY_NETWORKS = []
+for _network in os.environ.get('PANEL_TRUSTED_PROXY_CIDRS', '').split(','):
+    try:
+        if _network.strip():
+            TRUSTED_PROXY_NETWORKS.append(ipaddress.ip_network(_network.strip(), strict=False))
+    except ValueError:
+        continue
 
 AGENT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'agent')
 
@@ -79,13 +86,15 @@ def _proxy_headers_trusted():
     supplied = request.headers.get('X-LinkPilot-Proxy-Secret', '')
     if PROXY_SECRET and secrets.compare_digest(str(supplied), str(PROXY_SECRET)):
         return True
-    if not TRUST_LOCAL_PROXY:
-        return False
     try:
         if int(request.environ.get('SERVER_PORT', '0')) == AGENT_INTERNAL_PORT:
             return False
         remote = ipaddress.ip_address(request.remote_addr or '')
     except ValueError:
+        return False
+    if any(remote in network for network in TRUSTED_PROXY_NETWORKS):
+        return True
+    if not TRUST_LOCAL_PROXY:
         return False
     return remote.is_loopback or remote.is_private
 

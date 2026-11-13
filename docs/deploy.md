@@ -17,6 +17,7 @@
 - **非 root 也能跑**：会通过 `sudo` 提权（需要机器上有 sudo）。
 - 国内装 Docker 慢/超时：命令改成 `... | DOCKER_MIRROR=Aliyun bash`；机器走代理：命令最前面加 `https_proxy=http://IP:端口`。
 - 环境变量：`LINKPILOT_DIR`（安装目录，默认 `~/LinkPilot`）、`LINKPILOT_REPO_URL`、`LINKPILOT_BRANCH`、`LINKPILOT_TLS=1`（同时启用内置 HTTPS 网关）、`PANEL_PORT`、`PANEL_BIND`、`LINKPILOT_VERBOSE=1`、`LINKPILOT_LOG`、`NO_COLOR=1`、`DOCKER_MIRROR`、`COMPOSE_MIRROR`、`LINKPILOT_TARBALL`。
+- 面板在另一台固定公网 IP 的机器后面做反代时，把反代机 IP 写入 `PANEL_TRUSTED_PROXY_CIDRS`，例如 `188.68.57.37/32`，面板才会采信它转发的 Cloudflare `CF-Connecting-IP` / `X-Forwarded-For`。
 - 脚本需要 `bash`（Alpine 等默认 ash 的系统先 `apk add bash`）；机器上连 `curl` 都没有时先 `apt-get update && apt-get install -y curl`（或 `yum install -y curl` / `apk add curl`）。
 - 管理端口随机生成并记录在 `.env`，升级/重启不变。管理面默认绑定 `0.0.0.0`，安装后会探测公网 IP 并打印 HTTP URL。Agent 独立监听只绑定回环，实际接入通过当前管理域名反代。登录密码只从 `data/.initial_password` 读取一次并由安装脚本展示，不再写入容器日志。
 - 面板容器默认只读文件系统 + 最小权限运行。
