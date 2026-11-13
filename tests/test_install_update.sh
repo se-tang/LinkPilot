@@ -128,3 +128,90 @@ chmod +x "$TMP/nginx-bin/nginx"
 )
 
 printf 'install.sh update / non-interactive log / external TLS detection OK\n'
+
+# 通过 stdin 跑完整脚本，模拟尚未安装 Docker 的机器。
+# PATH 只包含显式允许的工具，安装命令和 Docker 均使用替身。
+mkdir -p "$TMP/bootstrap/bin" "$TMP/bootstrap/panel"
+BOOTSTRAP_BIN="$TMP/bootstrap/bin"
+for tool in awk bash cat chmod cut date getent grep head ln mktemp od rm sed sh sleep tail tr uname; do
+  ln -s "$(command -v "$tool")" "$BOOTSTRAP_BIN/$tool"
+done
+touch "$TMP/bootstrap/panel/docker-compose.yml"
+cat >"$BOOTSTRAP_BIN/id" <<'STUB'
+#!/bin/sh
+echo 0
+STUB
+cat >"$BOOTSTRAP_BIN/curl" <<'STUB'
+#!/bin/sh
+while [ "$1" != "-o" ]; do shift; done
+[ "$3" = https://get.docker.com ] || exit 2
+printf 'official:download\n' >>"$CALLS"
+[ "$SCENARIO" != download_fail ] || exit 22
+cat >"$2" <<'OFFICIAL'
+printf 'official:run %s\n' "$*" >>"$CALLS"
+[ "$SCENARIO" = official ] || exit 1
+ln -s "$MOCK_DOCKER" "$BOOTSTRAP_BIN/docker"
+OFFICIAL
+STUB
+cat >"$BOOTSTRAP_BIN/apt-get" <<'STUB'
+#!/bin/sh
+printf 'apt:%s\n' "$*" >>"$CALLS"
+case "$1 $*" in
+  'update '*) exit 0 ;;
+  'install '*' docker.io')
+    [ "$SCENARIO" != both_fail ] || exit 1
+    ln -s "$MOCK_DOCKER" "$BOOTSTRAP_BIN/docker" ;;
+  *) exit 2 ;;
+esac
+STUB
+cat >"$TMP/bootstrap/docker-mock" <<'STUB'
+#!/bin/sh
+case "$*" in
+  --version) echo 'Docker version test' ;;
+  info) exit 0 ;;
+  'compose version') echo 'Docker Compose version v2.test' ;;
+  *) exit 1 ;;
+esac
+STUB
+chmod +x "$BOOTSTRAP_BIN"/{id,curl,apt-get} "$TMP/bootstrap/docker-mock"
+
+for scenario in official official_fail download_fail both_fail; do
+  rm -f "$BOOTSTRAP_BIN/docker"
+  calls="$TMP/bootstrap/$scenario.calls"
+  log="$TMP/bootstrap/$scenario.log"
+  out="$TMP/bootstrap/$scenario.out"
+  touch "$calls"
+  verbose=0
+  if [ "$scenario" = official_fail ]; then verbose=1; fi
+  rc=0
+  cat "$ROOT/install.sh" | env -u BASH_ENV PATH="$BOOTSTRAP_BIN" \
+    BOOTSTRAP_BIN="$BOOTSTRAP_BIN" MOCK_DOCKER="$TMP/bootstrap/docker-mock" \
+    SCENARIO="$scenario" CALLS="$calls" DOCKER_MIRROR=test-mirror \
+    LINKPILOT_DIR="$TMP/bootstrap/panel" LINKPILOT_LOG="$log" \
+    LINKPILOT_DRY_RUN=1 LINKPILOT_PLAIN=1 LINKPILOT_VERBOSE="$verbose" \
+    bash >"$out" 2>&1 || rc=$?
+  if [ "$scenario" = both_fail ]; then
+    test "$rc" -eq 1
+    grep -q 'Docker 自动安装失败' "$out"
+  elif [ "$rc" -ne 0 ]; then
+    cat "$out" "$log" >&2
+    exit "$rc"
+  else
+    grep -q -- '--dry-run' "$out"
+  fi
+  grep -qx 'official:download' "$calls"
+  if [ "$scenario" = download_fail ]; then
+    ! grep -q '^official:run ' "$calls"
+  else
+    grep -qx 'official:run --mirror test-mirror' "$calls"
+  fi
+  if [ "$scenario" = official ]; then
+    ! grep -q '^apt:' "$calls"
+  else
+    grep -qx 'apt:install -y --no-install-recommends docker.io' "$calls"
+    grep -q '尝试发行版软件源' "$log"
+  fi
+  ! grep -q 'command not found' "$log"
+done
+
+printf 'install.sh Docker bootstrap / package fallback / failure reporting OK\n'

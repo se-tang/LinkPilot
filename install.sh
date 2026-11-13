@@ -124,6 +124,7 @@ die() {
 
 # 跑一条命令并把输出收进日志：失败时自动回显尾部，便于一眼定位
 run_quiet() { # $@ = 命令
+  local rc
   log_file "\$ $*"
   if [ "$VERBOSE" = "1" ]; then
     "$@" 2>&1 | tee -a "$LOG_FILE"
@@ -131,11 +132,12 @@ run_quiet() { # $@ = 命令
   fi
   if "$@" >>"$LOG_FILE" 2>&1; then
     return 0
+  else
+    rc=$?
   fi
-  _rc=$?
   warn "命令失败（详见 $LOG_FILE）：$*"
   tail -n 6 "$LOG_FILE" 2>/dev/null | sed 's/^/      /'
-  return "$_rc"
+  return "$rc"
 }
 
 # 后台运行一段耗时命令 + 前台 spinner：把「卡住了吗」变成「还在跑，已 42s」。
@@ -427,16 +429,17 @@ fi
 # 自检 3/5：docker 与 docker compose v2
 # ---------------------------------------------------------------------------
 install_docker_official() {
-  _tmp="$(mktemp)"
-  if ! fetch https://get.docker.com "$_tmp"; then rm -f "$_tmp"; return 1; fi
+  local tmp
+  tmp="$(mktemp)" || return 1
+  if ! fetch https://get.docker.com "$tmp"; then rm -f "$tmp"; return 1; fi
   if [ -n "${DOCKER_MIRROR:-}" ]; then
     log_file "docker 官方安装脚本（镜像源 $DOCKER_MIRROR）"
-    as_root sh "$_tmp" --mirror "$DOCKER_MIRROR" >>"$LOG_FILE" 2>&1 || { rm -f "$_tmp"; return 1; }
+    as_root sh "$tmp" --mirror "$DOCKER_MIRROR" || { rm -f "$tmp"; return 1; }
   else
     log_file "docker 官方安装脚本 https://get.docker.com"
-    as_root sh "$_tmp" >>"$LOG_FILE" 2>&1 || { rm -f "$_tmp"; return 1; }
+    as_root sh "$tmp" || { rm -f "$tmp"; return 1; }
   fi
-  rm -f "$_tmp"
+  rm -f "$tmp"
   have docker
 }
 
@@ -450,6 +453,12 @@ install_docker_distro() {
     *) return 1 ;;
   esac
   have docker
+}
+
+install_docker() {
+  if install_docker_official; then return 0; fi
+  log_file "Docker 官方安装失败，尝试发行版软件源（$PKG）"
+  install_docker_distro
 }
 
 install_compose_binary() {
@@ -505,7 +514,7 @@ start_docker_daemon() {
 }
 
 if ! have docker; then
-  if ! run_spinner "安装 Docker" bash -c 'install_docker_official || install_docker_distro'; then
+  if ! run_spinner "安装 Docker" install_docker; then
     die "Docker 自动安装失败。请手动安装后重试（参考 https://docs.docker.com/engine/install/）"
   fi
 fi
