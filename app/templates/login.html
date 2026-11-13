@@ -1,172 +1,76 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-appearance="fusion">
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
-<meta name="theme-color" content="#0b0b12"/>
 <title>登录 · LinkPilot</title>
 <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='logo.svg') }}"/>
-<style>
-:root{
-  --bk:#0b0b12; --b1:#3b46f1; --b2:#7b6cf6; --lv:#e8e3ff; --accent:#8d88ff;
-  --yellow:#ffe27a; --green:#7ad3a4; --red:#ffb4b4; --text:#fff;
-}
-*{box-sizing:border-box}
-html,body{margin:0}
-body{
-  min-height:100vh;
-  background:
-    radial-gradient(1000px 600px at 50% -20%,rgba(123,108,246,.14),transparent 68%),
-    var(--bk);
-  color:var(--text);
-  font:600 15px/1.55 Inter,"PingFang SC","Noto Sans SC","Microsoft YaHei",system-ui,sans-serif;
-  overflow-x:hidden;
-}
-button,input{font:inherit}
-.nav{
-  position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:10px;
-  min-height:56px;padding:8px 20px;background:rgba(11,11,18,.8);
-  border-bottom:1px solid rgba(232,227,255,.07);backdrop-filter:blur(16px);
-}
-.nav-logo{width:48px;height:34px;object-fit:contain;flex:none}
-.brand{font-weight:800;font-size:15px}
-.sp{flex:1}
-.pill{
-  min-height:32px;padding:0 14px;border-radius:999px;border:1px solid rgba(255,255,255,.18);
-  background:rgba(255,255,255,.06);color:#fff;display:inline-flex;align-items:center;
-  text-decoration:none;font-size:12px;
-}
-.pill:hover{background:rgba(255,255,255,.12)}
-.panel{
-  position:relative;display:grid;grid-template-columns:minmax(0,1.1fr) 420px;
-  gap:42px;align-items:center;min-height:max(640px,calc(100svh - 130px));
-  margin:8px 12px 0;padding:48px clamp(20px,5vw,72px) 60px;
-  border:1px solid rgba(232,227,255,.13);border-radius:32px;
-  background:
-    radial-gradient(900px 500px at 85% 10%,rgba(123,108,246,.7),transparent 60%),
-    linear-gradient(160deg,var(--b1),#2a33c9);
-  box-shadow:0 24px 80px rgba(0,0,0,.24);overflow:hidden;isolation:isolate;
-}
-.hero{position:relative;z-index:1;min-width:0}
-h1{margin:0;font-size:clamp(68px,11vw,138px);font-weight:800;line-height:.9;letter-spacing:0}
-h1 span{display:block}
-h1 span:last-child{color:var(--lv)}
-.lead{max-width:32em;margin:18px 0 0;color:rgba(255,255,255,.78);font-size:15px;line-height:1.75}
-.flow{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin:32px 0 0}
-.flow-card{
-  min-width:170px;padding:14px 16px;border-radius:18px;background:#fff;color:var(--bk);
-  box-shadow:0 14px 34px rgba(10,12,90,.32);transform:rotate(-2deg);
-}
-.flow-card:nth-child(2){transform:rotate(2deg);margin-bottom:-12px;background:var(--lv)}
-.flow-card small{display:block;color:#6b6890;font-size:11px}
-.flow-card b{display:block;margin-top:2px;font-size:22px;line-height:1.2}
-.bar{height:7px;margin:9px 0 4px;border-radius:99px;background:#e8e3ff;overflow:hidden}
-.bar i{display:block;width:86%;height:100%;border-radius:99px;background:linear-gradient(90deg,var(--b1),var(--b2))}
-.login-card{
-  position:relative;z-index:3;padding:28px 26px 26px;border-radius:26px;
-  border:1px solid rgba(255,255,255,.17);
-  background:linear-gradient(145deg,rgba(255,255,255,.06),transparent 55%),rgba(14,14,32,.8);
-  box-shadow:0 24px 60px rgba(8,10,80,.45);backdrop-filter:blur(18px);
-}
-.login-card h2{margin:0;font-size:27px;line-height:1.15}
-.login-card h2 em{font-style:normal;color:var(--accent)}
-.login-card>p{margin:6px 0 18px;color:rgba(255,255,255,.65);font-size:13px}
-form{display:flex;flex-direction:column;gap:12px}
-label{display:flex;flex-direction:column;gap:5px;font-size:13px;color:rgba(255,255,255,.72)}
-.input-wrap{position:relative}
-input[type=text],input[type=password]{
-  width:100%;height:48px;border-radius:15px;border:1.5px solid rgba(255,255,255,.14);
-  background:rgba(255,255,255,.055);color:#fff;padding:0 16px;font-size:15px;
-  transition:border-color .18s,background .18s,box-shadow .18s;
-}
-input::placeholder{color:rgba(255,255,255,.35)}
-input:focus{outline:none;border-color:var(--yellow);background:rgba(255,255,255,.11);box-shadow:0 0 0 3px rgba(255,226,122,.12)}
-.input-wrap input{padding-right:68px}
-.eye{
-  position:absolute;right:6px;top:6px;height:36px;padding:0 10px;border:0;border-radius:11px;
-  background:transparent;color:rgba(255,255,255,.65);font-size:12px;cursor:pointer;
-}
-.eye:hover{background:rgba(255,255,255,.1);color:#fff}
-.submit{
-  height:50px;margin-top:4px;border:0;border-radius:999px;
-  background:linear-gradient(110deg,#fff,var(--lv));color:var(--bk);
-  font-size:16px;font-weight:800;cursor:pointer;
-  box-shadow:0 8px 24px rgba(8,10,80,.2);transition:transform .18s,background .18s,opacity .18s;
-}
-.submit:hover{transform:translateY(-2px);background:var(--yellow)}
-.submit:disabled{opacity:.6;transform:none;cursor:default}
-.msg{
-  border:1px solid rgba(240,138,138,.4);border-radius:14px;padding:9px 12px;
-  background:rgba(240,138,138,.14);color:var(--red);font-size:13px;
-}
-.msg.ok{border-color:rgba(122,211,164,.4);background:rgba(122,211,164,.14);color:var(--green)}
-.hide{display:none!important}
-.help{display:flex;justify-content:flex-end;margin-top:2px}
-.help button{border:0;background:transparent;color:rgba(255,255,255,.65);padding:2px;font-size:12px;cursor:pointer}
-.help button:hover{color:#fff;text-decoration:underline}
-.footer{
-  display:flex;align-items:center;gap:12px;padding:22px 24px calc(22px + env(safe-area-inset-bottom,0px));
-  color:rgba(255,255,255,.55);font-size:12px;
-}
-.footer-logo{width:30px;height:22px;object-fit:contain;opacity:.9}
-:focus-visible{outline:2px solid var(--yellow);outline-offset:2px}
-@media(max-width:960px){
-  .panel{grid-template-columns:1fr;gap:28px;padding:36px 20px 64px;min-height:0}
-  .flow{display:none}
-  .login-card{width:min(100%,520px)}
-}
-@media(max-width:480px){
-  .nav{padding:8px 14px}
-  .nav .pill{display:none}
-  .panel{margin:6px;border-radius:24px;padding:30px 16px 54px}
-  h1{font-size:clamp(62px,20vw,92px)}
-  .lead{font-size:14px}
-  .login-card{padding:22px 18px;border-radius:22px}
-  .login-card h2{font-size:24px}
-  .footer{padding-left:14px;padding-right:14px;gap:8px}
-  .footer span:last-child{text-align:right}
-}
-@media(prefers-reduced-motion:reduce){
-  *{animation:none!important;transition:none!important}
-}
-</style>
+<script src="{{ url_for('static', filename='appearance.js') }}?v={{ version }}-design"></script>
+<link rel="stylesheet" href="{{ url_for('static', filename='appearance.css') }}?v={{ version }}-design"/>
+<link rel="stylesheet" href="{{ url_for('static', filename='login.css') }}?v={{ version }}"/>
 </head>
 <body>
-<nav class="nav">
-  <img class="nav-logo" src="{{ url_for('static', filename='logo.svg') }}" alt="LinkPilot"/>
-  <span class="brand">LinkPilot</span>
-  <span class="sp"></span>
-  <span class="pill">v{{ version }}</span>
-</nav>
-<main class="panel">
-  <section class="hero">
-    <h1><span>Link</span><span>Pilot</span></h1>
-    <p class="lead">从多台后端机同时测向一台目标机，长期观察吞吐、延迟与丢包趋势。</p>
-    <div class="flow" aria-hidden="true">
-      <div class="flow-card">
-        <small>跨区线路 · 下行</small>
-        <b>稳定吞吐</b>
-        <div class="bar"><i></i></div>
-        <small>趋势持续可见</small>
-      </div>
-      <div class="flow-card">
-        <small>多轮对比</small>
-        <b>一屏看清</b>
-        <small>机器 · 时间 · 线路质量</small>
+<header class="login-header">
+  <span class="login-brand">
+    <img src="{{ url_for('static', filename='logo.svg') }}" width="34" height="28" alt=""/>
+    <span>LinkPilot</span>
+  </span>
+  {% include '_theme_picker.html' %}
+</header>
+<main class="login-stage">
+  <section class="login-story nura-story">
+    <div class="story-brand"><img src="{{ url_for('static', filename='logo.svg') }}" width="29" height="24" alt=""/>LinkPilot</div>
+    <h1>Understand<br/>every <span>connection.</span></h1>
+    <p>从节点状态到链路质量，把网络表现整理成清晰、可追踪的数据。</p>
+    <div class="nura-orbit" aria-hidden="true">
+      <div class="nura-orbit-core"></div>
+      <div class="nura-orbit-card">
+        <b>链路趋势</b>
+        <svg viewBox="0 0 140 44" fill="none">
+          <path d="M0 36C13 35 18 28 30 28S46 31 58 23S75 23 87 16S104 18 115 10S130 13 140 5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
+        </svg>
       </div>
     </div>
+    <div class="nura-links"><span>多节点测试</span><span>链路质量</span><span>长期趋势</span></div>
   </section>
-  <section class="login-card">
-    <h2>欢迎回来，<em>登录面板</em></h2>
+  <section class="login-story nova-story">
+    <div class="story-brand"><img src="{{ url_for('static', filename='logo.svg') }}" width="29" height="24" alt=""/>LinkPilot</div>
+    <h1>See the signal.<br/><span>Know the route.</span></h1>
+    <p>在同一个工作台观察节点、吞吐和历史趋势。</p>
+    <div class="nova-signal" aria-hidden="true">
+      <span>NETWORK SIGNAL</span>
+      <svg viewBox="0 0 360 94" preserveAspectRatio="none" fill="none">
+        <path d="M0 24H360M0 48H360M0 72H360" stroke="#44637e" stroke-dasharray="3 6"/>
+        <path d="M0 75C12 75 18 66 30 66S48 69 60 69S78 51 91 51S108 59 120 59S137 33 149 33S166 45 178 45S197 33 209 33S227 44 239 44S257 22 269 22S287 28 299 28S318 12 330 12S348 18 360 18" stroke="#79b8d8" stroke-width="2.5"/>
+      </svg>
+    </div>
+  </section>
+  <section class="login-story fusion-story">
+    <h1><span>Link</span><span>Pilot.</span></h1>
+    <p>从多台后端机同时测向一台目标机，长期观察吞吐、延迟与丢包趋势。</p>
+    <div class="fusion-floats" aria-hidden="true">
+      <div><small>NETWORK QUALITY</small><b>稳定吞吐</b><span class="fusion-meter"></span></div>
+      <div><small>LONG-TERM INSIGHTS</small><b>多轮对比</b><span>机器 · 时间 · 线路质量</span></div>
+    </div>
+  </section>
+  <section class="login-card" aria-labelledby="loginTitle">
+    <div class="nova-auth-label"><span aria-hidden="true"></span> 管理员入口</div>
+    <img class="pillio-mark" src="{{ url_for('static', filename='logo.svg') }}" width="56" height="56" alt=""/>
+    <h2 id="loginTitle">
+      <span data-login-title="nura">欢迎回来</span>
+      <span data-login-title="pillio">进入你的空间</span>
+      <span data-login-title="nova">登录控制台</span>
+      <span data-login-title="fusion">欢迎回来，<em>登录面板</em></span>
+    </h2>
     <p>使用管理员账号继续。</p>
     <form id="loginForm" novalidate>
       <div id="msg" class="msg hide" role="alert" aria-live="polite"></div>
       <label>用户名
-        <input id="user" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" autofocus/>
+        <input id="user" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="请输入用户名"/>
       </label>
       <label>密码
         <span class="input-wrap">
-          <input id="password" type="password" autocomplete="current-password"/>
+          <input id="password" type="password" autocomplete="current-password" placeholder="请输入密码"/>
           <button class="eye" id="togglePassword" type="button" aria-label="显示密码">显示</button>
         </span>
       </label>
@@ -175,11 +79,7 @@ input:focus{outline:none;border-color:var(--yellow);background:rgba(255,255,255,
     </form>
   </section>
 </main>
-<footer class="footer">
-  <img class="footer-logo" src="{{ url_for('static', filename='logo.svg') }}" alt=""/>
-  <span class="sp"></span>
-  <span>LinkPilot · 多机线路测试面板</span>
-</footer>
+<footer class="login-footer"><span>LinkPilot · 多机线路测试面板</span><span>v{{ version }}</span></footer>
 <script nonce="{{ csp_nonce }}">
 const form = document.getElementById('loginForm');
 const userInput = document.getElementById('user');

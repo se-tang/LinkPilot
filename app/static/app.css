@@ -658,7 +658,7 @@ details{border:0;border-radius:10px;background:var(--surface2)}
 /* 统计卡迷你趋势线 */
 .stat{position:relative}
 .stat-spark{position:absolute;right:14px;bottom:14px;width:64px;height:22px;overflow:visible}
-.stat-spark polyline{fill:none;stroke:var(--accent);stroke-width:1.6;opacity:.6;stroke-linecap:round;stroke-linejoin:round}
+.stat-spark path{fill:none;stroke:var(--accent);stroke-width:1.6;opacity:.6;stroke-linecap:round;stroke-linejoin:round}
 .stat-spark circle{fill:var(--accent);opacity:.85}
 /* 图表 hover 十字线与数值气泡 */
 .chart-box{position:relative}

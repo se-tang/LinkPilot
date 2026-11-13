@@ -86,9 +86,9 @@ function drawSpark(id, data) {
   const min = Math.min(...vals), max = Math.max(...vals);
   const x = i => vals.length === 1 ? W - 4 : pad + (W - pad * 2) * (i / (vals.length - 1));
   const y = v => (max === min ? H / 2 : pad + (H - pad * 2) * (1 - (v - min) / (max - min)));
-  const pts = vals.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`);
-  const last = pts[pts.length - 1].split(',');
-  svg.innerHTML = `<polyline points="${pts.join(' ')}"/><circle cx="${last[0]}" cy="${last[1]}" r="2.4"/>`;
+  const pts = vals.map((v, i) => [x(i), y(v)]);
+  const [lastX, lastY] = pts[pts.length - 1];
+  svg.innerHTML = `<path d="${smoothPath(pts)}"/><circle cx="${lastX}" cy="${lastY}" r="2.4"/>`;
 }
 function pushSpark(id, v) {
   const arr = SPARK_HIST[id];
@@ -264,8 +264,11 @@ function renderMachines() {
   const backendCount = MACHINES.filter(m => m.role === 'backend' && m.online).length;
   setStat('statOnline', onlineCount);
   setStat('statBackends', backendCount);
+  $('railOnline').textContent = `${onlineCount} / ${MACHINES.length}`;
+  $('railBackends').textContent = `${backendCount} 台后端可用`;
   pushSpark('sparkStatOnline', onlineCount);
   pushSpark('sparkStatBackends', backendCount);
+  renderHomeNodes();
   if ($('machinesSummary')) {
     $('machinesSummary').textContent = MACHINES.length
       ? `${MACHINES.length} 台机器 · ${onlineCount} 在线 · ${MACHINES.filter(m => m.role === 'backend').length} 后端`
@@ -1101,6 +1104,8 @@ async function loadRuns() {
   runs.forEach(r => { const d = String(r.created_at || '').slice(0, 10); if (d) byDay[d] = (byDay[d] || 0) + 1; });
   drawSpark('sparkStatRuns', Object.keys(byDay).sort().slice(-8).map(d => byDay[d]));
   renderRuns();
+  renderHomeActivity();
+  renderHomeWorkspace();
   renderHome();
 }
 
@@ -1477,6 +1482,12 @@ function revealThemeWithSnapshot(nextTheme, origin, finish) {
   });
 }
 
+function updateThemeColor() {
+  const meta = $('metaTheme');
+  if (meta) meta.content = getComputedStyle(document.body).getPropertyValue('--bg').trim();
+}
+document.addEventListener('linkpilot:appearance', updateThemeColor);
+
 function applyTheme(t, origin = null) {
   t = t === 'dark' ? 'dark' : 'light';
   const change = () => {
@@ -1492,8 +1503,7 @@ function applyTheme(t, origin = null) {
       button.setAttribute('title', action);
     }
     // 手机状态栏/浏览器 chrome 跟随主题色
-    const meta = $('metaTheme');
-    if (meta) meta.setAttribute('content', t === 'dark' ? '#0b0b12' : '#f7f8fc');
+    updateThemeColor();
   };
   const reduced = window.matchMedia &&
     window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -1800,7 +1810,100 @@ function renderSchedules() {
   }).join('');
 }
 
-/* 总览页（手机端首页）信息卡：最近测试 + 定时任务动态，行可点直达 */
+function renderHomeActivity() {
+  const chart = $('homeActivityChart');
+  if (!chart) return;
+  const today = new Date();
+  const days = Array.from({length: 7}, (_, index) => {
+    const day = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 6 + index);
+    const month = String(day.getMonth() + 1).padStart(2, '0');
+    const date = String(day.getDate()).padStart(2, '0');
+    return {key: `${day.getFullYear()}-${month}-${date}`, label: `${day.getMonth() + 1}/${day.getDate()}`, count: 0, finished: 0, ended: 0};
+  });
+  const counts = new Map(days.map(day => [day.key, day]));
+  for (const run of ALL_RUNS) {
+    const day = counts.get(String(run.created_at || '').slice(0, 10));
+    if (!day) continue;
+    day.count += 1;
+    if (run.status === 'finished') day.finished += 1;
+    if (['finished', 'partial', 'failed', 'stopped'].includes(run.status)) day.ended += 1;
+  }
+  const total = days.reduce((sum, day) => sum + day.count, 0);
+  const max = Math.max(1, ...days.map(day => day.count));
+  const pointAt = (value, index) => [30 + index * 60, 126 - value / max * 105];
+  const line = smoothPath(days.map((day, index) => pointAt(day.count, index)));
+  const completedLine = smoothPath(days.map((day, index) => pointAt(day.finished, index)));
+  chart.innerHTML = `<p class="activity-count"><strong>${total}</strong> 轮测试 <span>按近期记录统计</span></p>
+    <svg class="activity-line" viewBox="0 0 420 134" preserveAspectRatio="none" aria-hidden="true">
+      <path class="activity-guide" d="M0 22H420M0 56H420M0 91H420M0 126H420"/>
+      <defs><linearGradient id="activityFill" x2="0" y2="1">
+        <stop offset="0" stop-color="var(--lp-tint)" stop-opacity=".36"/>
+        <stop offset="1" stop-color="var(--lp-tint)" stop-opacity=".035"/>
+      </linearGradient></defs>
+      <path class="activity-area" d="${line} L390 126 L30 126 Z"/>
+      <path class="activity-curve" d="${line}"/>
+      <path class="activity-curve activity-completed" d="${completedLine}"/>
+    </svg>
+    <ol class="activity-bars" aria-label="过去七天每天的测试次数">${days.map(day => `
+      <li aria-label="${day.label}，${day.count} 轮，完成 ${day.finished} 轮" title="${day.label} · ${day.count} 轮，完成 ${day.finished} 轮">
+        <span class="activity-track" aria-hidden="true"><i style="height:${day.count / max * 100}%"></i></span>
+        <time datetime="${day.key}">${day.label}</time>
+      </li>`).join('')}</ol>`;
+  renderHomeQuality(days);
+}
+
+function renderHomeQuality(days) {
+  const finished = days.reduce((sum, day) => sum + day.finished, 0);
+  const ended = days.reduce((sum, day) => sum + day.ended, 0);
+  const unfinished = days.reduce((sum, day) => sum + day.count - day.ended, 0);
+  const percent = ended ? Math.round(finished / ended * 100) : 0;
+  const summary = $('homeQualitySummary');
+  summary.innerHTML = `<div class="quality-value"><strong>${ended ? percent + '%' : '—'}</strong><span>${finished} / ${ended} 轮完成</span></div>
+    <svg class="quality-gauge" viewBox="0 0 160 86" aria-hidden="true">
+      <path class="quality-track" pathLength="100" d="M16 80a64 64 0 0 1 128 0"/>
+      <path class="quality-progress-arc" pathLength="100" d="M16 80a64 64 0 0 1 128 0" stroke-dasharray="${percent} 100"/>
+    </svg><progress class="quality-progress-bar" value="${percent}" max="100" aria-label="近七天测试完成率"></progress>
+    <dl class="quality-breakdown">
+      <div><dt>完整完成</dt><dd>${finished}</dd></div>
+      <div><dt>未完整完成</dt><dd>${ended - finished}</dd></div>
+      <div><dt>尚未结束</dt><dd>${unfinished}</dd></div>
+    </dl>`;
+}
+
+function renderHomeWorkspace() {
+  const run = ALL_RUNS[0];
+  const summary = $('homeWorkspaceSummary');
+  if (!run) {
+    summary.innerHTML = '<p class="muted home-empty">发起测试后，会在这里显示最近一次配置。</p>';
+    return;
+  }
+  const entries = [
+    ['目标机器', run.target_name],
+    ['后端机器', `${run.backend_total || 0} 台`],
+    ['测试协议', `${run.udp ? 'UDP' : 'TCP'} / IPv${run.ip_version || 4}`],
+    ['测试参数', `${run.streams} 线程 · ${run.duration} 秒`],
+  ];
+  summary.innerHTML = '<dl class="workspace-facts">' +
+    entries.map(([label, value]) => `<div><dt>${label}</dt><dd>${esc(value || '—')}</dd></div>`).join('') + '</dl>';
+}
+
+function renderHomeNodes() {
+  const regions = new Map();
+  for (const machine of MACHINES) {
+    const region = machine.region || '未分区';
+    if (!regions.has(region)) regions.set(region, {online: 0, total: 0});
+    const count = regions.get(region);
+    count.total += 1;
+    count.online += Number(Boolean(machine.online));
+  }
+  const items = [...regions].slice(0, 5).map(([name, count]) =>
+    `<li><span>${esc(name)}</span><progress value="${count.online}" max="${count.total}" aria-label="${esc(name)}在线"></progress><b>${count.online}/${count.total}</b></li>`);
+  $('homeNodesList').innerHTML = items.length
+    ? '<ul class="home-regions">' + items.join('') + '</ul>'
+    : '<p class="muted home-empty">添加机器后，可以按地区查看在线状态。</p>';
+}
+
+/* 总览信息卡：最近测试和定时任务动态，行可点直达。 */
 function renderHome() {
   const runsBox = $('homeRunsList');
   if (runsBox) {
@@ -1814,7 +1917,7 @@ function renderHome() {
         </span>
         <span class="home-row-chev">›</span>
       </button>`).join('')
-      : '<p class="muted home-empty">还没有测试记录，点上方「发起一次测试」跑一轮</p>';
+      : '<p class="muted home-empty">还没有测试记录。发起测试后，结果会显示在这里。</p>';
   }
   const schedBox = $('homeSchedList');
   if (schedBox) {
@@ -2398,15 +2501,18 @@ function toggleChartMachine(key) {
 const CHART_COLORS = ['#4f5cff', '#8b5cf6', '#0ea5a4', '#e05a8b', '#f59e0b',
                       '#6366f1', '#14b8a6', '#d946ef', '#f43f5e', '#84cc16'];
 
-/* Catmull-Rom 转三次贝塞尔：折线平滑但仍保留转折趋势 */
+/* Catmull-Rom 转三次贝塞尔，限制控制点高度，避免曲线越过相邻数据点的范围。 */
 function smoothPath(pts) {
   if (pts.length < 2) return '';
   if (pts.length === 2) return `M ${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)} L ${pts[1][0].toFixed(1)} ${pts[1][1].toFixed(1)}`;
   let d = `M ${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
   for (let i = 0; i < pts.length - 1; i++) {
     const p0 = pts[Math.max(0, i - 1)], p1 = pts[i], p2 = pts[i + 1], p3 = pts[Math.min(pts.length - 1, i + 2)];
-    const c1x = p1[0] + (p2[0] - p0[0]) / 6, c1y = p1[1] + (p2[1] - p0[1]) / 6;
-    const c2x = p2[0] - (p3[0] - p1[0]) / 6, c2y = p2[1] - (p3[1] - p1[1]) / 6;
+    const yMin = Math.min(p1[1], p2[1]), yMax = Math.max(p1[1], p2[1]);
+    const c1x = p1[0] + (p2[0] - p0[0]) / 6;
+    const c2x = p2[0] - (p3[0] - p1[0]) / 6;
+    const c1y = Math.min(yMax, Math.max(yMin, p1[1] + (p2[1] - p0[1]) / 6));
+    const c2y = Math.min(yMax, Math.max(yMin, p2[1] - (p3[1] - p1[1]) / 6));
     d += ` C ${c1x.toFixed(1)} ${c1y.toFixed(1)}, ${c2x.toFixed(1)} ${c2y.toFixed(1)}, ${p2[0].toFixed(1)} ${p2[1].toFixed(1)}`;
   }
   return d;
@@ -2591,6 +2697,7 @@ function moveNavInd() {
   ind.style.transform = `translateX(${btn.offsetLeft}px)`;
 }
 window.addEventListener('resize', moveNavInd);
+document.addEventListener('linkpilot:appearance', moveNavInd);
 
 function setAppTab(tab) {
   if (!APP_TABS.includes(tab)) return;
@@ -2599,8 +2706,10 @@ function setAppTab(tab) {
   document.querySelectorAll('#appNav button').forEach(btn => {
     const on = btn.dataset.tab === tab;
     btn.classList.toggle('active', on);
-    if (on) btn.setAttribute('aria-current', 'page');
-    else btn.removeAttribute('aria-current');
+    if (on) {
+      btn.setAttribute('aria-current', 'page');
+      $('dashboardContext').textContent = btn.textContent.trim();
+    } else btn.removeAttribute('aria-current');
   });
   moveNavInd();
   // 重新触发新页面卡片的淡入动画
@@ -2691,10 +2800,7 @@ const ACTIONS = {
   downloadSchedReport,
   setAppTab: (d) => setAppTab(d.tab),
   toggleSchedCard: (d) => toggleSchedCard(d.id),
-  gotoRun: () => {
-    if (window.innerWidth <= 720) setAppTab('run');
-    else $('runCard').scrollIntoView({behavior: 'smooth'});
-  },
+  gotoRun: () => setAppTab('run'),
   closeRunDetail,
 };
 

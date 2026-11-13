@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-appearance="fusion">
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
@@ -11,14 +11,19 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
 <meta name="apple-mobile-web-app-title" content="LinkPilot"/>
-<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}?v={{ version }}"/>
-<script src="{{ url_for('static', filename='app.js') }}?v={{ version }}" defer></script>
+<script src="{{ url_for('static', filename='appearance.js') }}?v={{ version }}-design"></script>
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}?v={{ version }}-themes"/>
+<link rel="stylesheet" href="{{ url_for('static', filename='appearance.css') }}?v={{ version }}-design"/>
+<link rel="stylesheet" href="{{ url_for('static', filename='dashboard-themes.css') }}?v={{ version }}-rail"/>
+<script src="{{ url_for('static', filename='app.js') }}?v={{ version }}-themes" defer></script>
 </head>
-<body data-agent-url="{{ agent_url }}" data-allow-insecure-agent="{{ 1 if allow_insecure_agent else 0 }}">
+<body class="dashboard" data-app-tab="home" data-agent-url="{{ agent_url }}" data-allow-insecure-agent="{{ 1 if allow_insecure_agent else 0 }}">
 <header>
   <h1><img class="brand-mark" src="{{ url_for('static', filename='logo.svg') }}" alt="LinkPilot"/>
     <span class="brand-text">LinkPilot <span class="brand-product">线路测试面板</span>
       <span class="muted" style="font-size:12px;font-weight:400">v{{ version }}</span></span></h1>
+  <div class="dashboard-context"><span>工作台</span><span aria-hidden="true">/</span><b id="dashboardContext">总览</b></div>
+  {% include '_theme_picker.html' %}
   <div class="actions">
     <span id="meUser" class="muted" style="font-size:12px"></span>
     <button class="small theme-toggle" data-action="toggleTheme" id="themeBtn"
@@ -35,20 +40,67 @@
       <span class="theme-toggle-track" aria-hidden="true"><span class="theme-toggle-knob"></span></span>
       <span class="theme-toggle-label" id="themeLabel">深色</span>
     </button>
+    <span class="fusion-profile" aria-hidden="true">
+      <img src="{{ url_for('static', filename='logo.svg') }}" alt="" width="24" height="18"/>
+    </span>
     <button class="small" data-action="logout">退出登录</button>
   </div>
 </header>
+<nav id="appNav" aria-label="主导航">
+  <span class="nav-ind" aria-hidden="true"></span>
+  <div class="workspace-brand">
+    <img src="{{ url_for('static', filename='logo.svg') }}" width="34" height="34" alt=""/>
+    <span>LinkPilot <small>Network Lab</small></span>
+  </div>
+  <button data-action="setAppTab" data-tab="home" class="active" aria-current="page">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10.8 12 4l8 6.8V20a1 1 0 0 1-1 1h-4.4v-6.4H9.4V21H5a1 1 0 0 1-1-1z"/></svg>
+    <span>总览</span>
+  </button>
+  <button data-action="setAppTab" data-tab="machines">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>
+    <span>机器</span>
+  </button>
+  <button data-action="setAppTab" data-tab="run">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2.5 5.2 13.4h5.6l-0.6 8.1 8.8-11.9H15.2z"/></svg>
+    <span>测试</span>
+  </button>
+  <button data-action="setAppTab" data-tab="tasks">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.6"/><path d="M12 7.4V12l3.2 1.9"/></svg>
+    <span>任务</span>
+  </button>
+  <button data-action="setAppTab" data-tab="records">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 3.5h7.4l4 4v13H6.5z"/><path d="M13.6 3.5v4.2h4.3"/><path d="M9.6 12.6h5M9.6 16.1h5"/></svg>
+    <span>记录</span>
+  </button>
+  <div class="workspace-status">
+    <span>节点在线</span>
+    <strong id="railOnline">—</strong>
+    <span id="railBackends">—</span>
+  </div>
+</nav>
 <main>
-  <section class="overview">
+  <div id="homeQuick" class="home-quick">
+    <div>
+      <h2>网络总览</h2>
+      <p>查看机器状态、最近测试和定时任务。</p>
+    </div>
+    <button class="primary" data-action="setAppTab" data-tab="run">发起测试</button>
+  </div>
+  <div id="homeFeed">
+  <section class="overview" aria-label="运行概况">
     <div class="stat"><b id="statOnline">—</b><span>在线机器</span><svg class="stat-spark" id="sparkStatOnline" viewBox="0 0 64 22" preserveAspectRatio="none" aria-hidden="true"></svg></div>
     <div class="stat"><b id="statBackends">—</b><span>可用后端</span><svg class="stat-spark" id="sparkStatBackends" viewBox="0 0 64 22" preserveAspectRatio="none" aria-hidden="true"></svg></div>
     <div class="stat"><b id="statSchedules">—</b><span>启用中的定时任务</span><svg class="stat-spark" id="sparkStatSchedules" viewBox="0 0 64 22" preserveAspectRatio="none" aria-hidden="true"></svg></div>
     <div class="stat"><b id="statRuns">—</b><span>最近测试记录</span><svg class="stat-spark" id="sparkStatRuns" viewBox="0 0 64 22" preserveAspectRatio="none" aria-hidden="true"></svg></div>
   </section>
-  <div id="homeQuick" class="home-quick">
-    <button class="primary" data-action="setAppTab" data-tab="run">⚡ 发起一次测试</button>
-  </div>
-  <div id="homeFeed">
+    <section class="card" id="homeActivityCard">
+      <div class="card-head">
+        <h2>测试活动</h2>
+        <div class="activity-legend" aria-label="图例"><span>发起</span><span>完成</span></div>
+        <span class="muted home-activity-period">近 7 天</span>
+      </div>
+      <div id="homeActivityChart" class="home-activity" aria-live="polite"></div>
+    </section>
     <section class="card" id="homeRunsCard">
       <div class="card-head"><h2>最近测试</h2>
         <button class="small" data-action="setAppTab" data-tab="records">全部 ›</button></div>
@@ -58,6 +110,20 @@
       <div class="card-head"><h2>定时任务动态</h2>
         <button class="small" data-action="setAppTab" data-tab="tasks">管理 ›</button></div>
       <div id="homeSchedList"></div>
+    </section>
+    <section class="card" id="homeNodesCard">
+      <div class="card-head"><h2>节点在线状态</h2>
+        <button class="small" data-action="setAppTab" data-tab="machines">机器 ›</button></div>
+      <div id="homeNodesList"></div>
+    </section>
+    <section class="card" id="homeQualityCard">
+      <div class="card-head"><h2>测试完成率</h2><span class="muted home-activity-period">近 7 天</span></div>
+      <div id="homeQualitySummary"></div>
+    </section>
+    <section class="card" id="homeWorkspaceCard">
+      <div class="card-head"><h2>最近测试配置</h2>
+        <button class="small" data-action="setAppTab" data-tab="run">去测试 ›</button></div>
+      <div id="homeWorkspaceSummary"></div>
     </section>
   </div>
   <div class="dashboard-grid">
@@ -246,29 +312,6 @@
   </section>
 </main>
 
-<nav id="appNav" aria-label="主导航">
-  <span class="nav-ind" aria-hidden="true"></span>
-  <button data-action="setAppTab" data-tab="home" class="active" aria-current="page">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10.8 12 4l8 6.8V20a1 1 0 0 1-1 1h-4.4v-6.4H9.4V21H5a1 1 0 0 1-1-1z"/></svg>
-    <span>总览</span>
-  </button>
-  <button data-action="setAppTab" data-tab="machines">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>
-    <span>机器</span>
-  </button>
-  <button data-action="setAppTab" data-tab="run">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2.5 5.2 13.4h5.6l-0.6 8.1 8.8-11.9H15.2z"/></svg>
-    <span>测试</span>
-  </button>
-  <button data-action="setAppTab" data-tab="tasks">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.6"/><path d="M12 7.4V12l3.2 1.9"/></svg>
-    <span>任务</span>
-  </button>
-  <button data-action="setAppTab" data-tab="records">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 3.5h7.4l4 4v13H6.5z"/><path d="M13.6 3.5v4.2h4.3"/><path d="M9.6 12.6h5M9.6 16.1h5"/></svg>
-    <span>记录</span>
-  </button>
-</nav>
 
 <div id="modal" class="modal-mask hidden">
   <div class="modal">
