@@ -7,7 +7,8 @@
 - 无 systemd 的受限容器也会在 nohup/crontab 启动路径中补齐 ping 组权限。
 - 重跑接入命令会自动清理旧版手工兼容 drop-in，并刷新为安装器生成的完整 systemd 单元。
 - Alpine 使用原生 OpenRC 服务：安装器自动生成 `linkpilot-agent` 和 root 更新 watcher，使用 `supervise-daemon` 自动拉起、`NoNewPrivs`、UID `linkpilot` 和有效 GID `root`，无需 systemd 兼容层。
-- Alpine 自动安装 `iputils-ping`，改用无 setuid、无文件能力的私有 ping；浏览器接入命令先用 POSIX `sh` 检查并按 `apk` 等包管理器安装 bash，再执行原安装器。
+- Alpine 自动安装 `iputils-ping`，改用无 setuid、无文件能力的私有 ping；面板新增短启动脚本，由 POSIX `sh` 自动安装 bash 后再执行原安装器。
+- 机器接入命令缩减为 `( curl .../agent/install/<接入码>.sh || wget ... ) | sh`，面板域名、接入码和 bash 引导都封装在短脚本中。
 
 ## 0.10.6 - 2026-11-13
 

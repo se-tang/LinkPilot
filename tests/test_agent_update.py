@@ -4,6 +4,7 @@
 """
 import hashlib
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -51,6 +52,30 @@ class AgentScriptTest(unittest.TestCase):
         resp = client.get('/agent/agent.sh')
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.get_data(as_text=True), body)
+
+    def test_short_bootstrap_embeds_origin_and_code(self):
+        client = flask_app.test_client()
+        resp = client.get(
+            '/agent/install/ABCDEFGHIJ.sh',
+            base_url='https://fleet.example')
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('text/x-shellscript', resp.content_type)
+        self.assertEqual(resp.headers.get('Cache-Control'), 'no-store')
+        body = resp.get_data(as_text=True)
+        self.assertTrue(body.startswith('#!/bin/sh'))
+        self.assertIn('PANEL_URL=https://fleet.example', body)
+        self.assertIn('REG_CODE=ABCDEFGHIJ', body)
+        self.assertIn('apk add --no-cache bash', body)
+        self.assertIn('bash -s -- "$PANEL_URL" "$REG_CODE"', body)
+        checked = subprocess.run(
+            ['sh', '-n'], input=body, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+        self.assertEqual(checked.returncode, 0, checked.stderr)
+
+    def test_short_bootstrap_rejects_bad_code(self):
+        client = flask_app.test_client()
+        resp = client.get('/agent/install/bad.sh')
+        self.assertEqual(resp.status_code, 400)
 
 
 class UpdateEndpointTest(unittest.TestCase):
@@ -233,11 +258,10 @@ class AlpineCompatTest(unittest.TestCase):
         self.text = (ROOT / 'app' / 'agent' / 'install.sh').read_text(encoding='utf-8')
         self.app_js = (ROOT / 'app' / 'static' / 'app.js').read_text(encoding='utf-8')
 
-    def test_browser_command_bootstraps_bash_with_posix_sh(self):
-        self.assertIn('command -v apk', self.app_js)
-        self.assertIn('apk add --no-cache bash', self.app_js)
-        self.assertIn('sh -c', self.app_js)
-        self.assertIn('exec bash -s -- "$@"', self.app_js)
+    def test_browser_command_is_short_and_downloads_bootstrap(self):
+        self.assertIn('/agent/install/${encodeURIComponent(', self.app_js)
+        self.assertIn('|| wget -qO-', self.app_js)
+        self.assertIn(') | sh`', self.app_js)
 
     def test_installer_emits_openrc_services(self):
         self.assertIn('HAS_OPENRC', self.text)

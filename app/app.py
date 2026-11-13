@@ -10,6 +10,7 @@ import json
 import os
 import re
 import secrets
+import shlex
 import threading
 import time
 from urllib.parse import urlsplit
@@ -507,6 +508,57 @@ def _serve_agent_file(name):
 @app.get('/agent/install.sh')
 def agent_install():
     return _serve_agent_file('install.sh')
+
+
+@app.get('/agent/install/<code>.sh')
+def agent_install_bootstrap(code):
+    """Serve a short POSIX bootstrap carrying the one-time code and panel URL."""
+    code = str(code or '').strip().upper()
+    if not re.fullmatch(r'[A-Z0-9]{10}', code):
+        return Response('invalid registration code\n', status=400, mimetype='text/plain')
+    panel_url = _request_origin()
+    script = f'''#!/bin/sh
+set -eu
+PANEL_URL={shlex.quote(panel_url)}
+REG_CODE={shlex.quote(code)}
+
+if ! command -v bash >/dev/null 2>&1; then
+  if command -v apk >/dev/null 2>&1; then
+    apk add --no-cache bash
+  elif command -v apt-get >/dev/null 2>&1; then
+    apt-get update
+    DEBIAN_FRONTEND=noninteractive apt-get install -y bash
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y bash
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y bash
+  elif command -v zypper >/dev/null 2>&1; then
+    zypper --non-interactive install bash
+  else
+    printf "LinkPilot requires bash\\n" >&2
+    exit 1
+  fi
+fi
+
+download_installer() {{
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$PANEL_URL/agent/install.sh"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO- "$PANEL_URL/agent/install.sh"
+  else
+    printf "LinkPilot requires curl or wget\\n" >&2
+    return 1
+  fi
+}}
+
+case "$PANEL_URL" in
+  http://*) download_installer | LINKPILOT_INSECURE_HTTP=1 bash -s -- "$PANEL_URL" "$REG_CODE" ;;
+  *) download_installer | bash -s -- "$PANEL_URL" "$REG_CODE" ;;
+esac
+'''
+    resp = Response(script, mimetype='text/x-shellscript; charset=utf-8')
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
 
 
 @app.get('/agent/uninstall.sh')
