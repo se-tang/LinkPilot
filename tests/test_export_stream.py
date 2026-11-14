@@ -96,6 +96,35 @@ class ExportTest(unittest.TestCase):
         self.assertEqual(self.client.get('/api/runs/999999/export.csv').status_code, 404)
         self.assertEqual(self.client.get('/api/runs/999999/export.json').status_code, 404)
 
+    def test_historical_markdown_uses_current_iperf_format(self):
+        rid = make_run(machines=1)
+        item = db.get_run_items(rid)[0]
+        raw = json.dumps({
+            'start': {'connected': [{'socket': 5}], 'test_start': {'num_streams': 1}},
+            'end': {
+                'sum_sent': dict(start=0, end=10, bytes=253750000,
+                                 bits_per_second=203e6, retransmits=320),
+                'sum_received': dict(start=0, end=10, bytes=253750000,
+                                     bits_per_second=203e6),
+            },
+        })
+        historical = '[SUM] sender   203 Mbits/sec  retr 320\n# 稳定性：CV 6.5% · P95 218.3 Mbit/s'
+        metrics = json.dumps(dict(json.loads(METRICS_OK), up_block=historical, down_block=historical,
+                                  up_cv_pct=6.5), ensure_ascii=False)
+        db.update_item(item['id'], metrics=metrics, up_raw=raw)
+
+        detail = self.client.get(f'/api/runs/{rid}').get_json()
+        report = self.client.get(f'/api/runs/{rid}/report').get_data(as_text=True)
+        self.assertEqual(detail['run']['report'], report)
+        self.assertIn('[  5]   0.00-10.00  sec', report)
+        self.assertIn('203 Mbits/sec  320', report)
+        self.assertNotIn('[SUM]', report)
+        self.assertNotIn('稳定性：CV', report)
+        refreshed = detail['items'][0]['metrics_obj']
+        self.assertEqual(refreshed['up_cv_pct'], 6.5)
+        self.assertEqual(refreshed['down_block'], 'sender   203 Mbits/sec  retr 320')
+        self.assertEqual(db.get_run_item(item['id'])['metrics'], metrics)
+
 
 class StreamTest(unittest.TestCase):
     def setUp(self):

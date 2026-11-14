@@ -13,6 +13,8 @@ SUM_RE = re.compile(
     re.IGNORECASE)
 # 汇总区表头，如: [ ID] Interval           Transfer     Bitrate         Retr
 HEADER_RE = re.compile(r'^\[\s*ID\s*\]')
+LEGACY_IPERF_LINE_RE = re.compile(r'^([ \t]*\[SUM\][ \t]+)(?=sender\b|receiver\b)')
+STABILITY_LINE_RE = re.compile(r'^\s*#\s*稳定性[：:]')
 
 # 项目自定义的初始经验阈值，不是行业标准。后续应根据真实线路样本校准。
 RATING_THRESHOLDS = {
@@ -72,13 +74,26 @@ def parse_iperf_json(out):
     if not isinstance(doc, dict) or not isinstance(doc.get('end'), dict):
         return None
     end = doc['end']
+    start_info = doc.get('start') or {}
+    connected = start_info.get('connected') or []
+    stream_count = (start_info.get('test_start') or {}).get('num_streams')
+    stream_id = '—'
+    if len(connected) > 1 or (isinstance(stream_count, int) and stream_count > 1):
+        stream_id = 'SUM'
+    elif len(connected) == 1:
+        stream_id = connected[0].get('socket', '—')
 
     def entry(node, retr=False):
         try:
             bps = float(node.get('bits_per_second'))
         except (TypeError, ValueError):
             return None
-        out_entry = {'mbits': bps / 1e6}
+        out_entry = {'mbits': bps / 1e6, 'stream_id': stream_id}
+        try:
+            out_entry['start'] = float(node.get('start', 0))
+            out_entry['end'] = float(node.get('end', node.get('seconds')))
+        except (TypeError, ValueError):
+            pass
         try:
             out_entry['transfer_mb'] = float(node.get('bytes')) / 1048576.0
         except (TypeError, ValueError):
@@ -90,18 +105,22 @@ def parse_iperf_json(out):
                 pass
         return out_entry
 
-    sender = entry(end.get('sum_sent') or {}, retr=True)
+    def udp_stats(result, node):
+        if result is None:
+            return
+        try:
+            stats = {'jitter_ms': float(node['jitter_ms']), 'lost': int(node['lost_packets']),
+                     'total': int(node['packets']), 'loss_pct': float(node['lost_percent'])}
+        except (KeyError, TypeError, ValueError):
+            return
+        result.update(stats)
+
+    sent = end.get('sum_sent') or {}
+    sender = entry(sent, retr=True)
+    udp_stats(sender, sent)
     receiver = entry(end.get('sum_received') or {})
     # UDP 的抖动/丢包只有接收侧统计得准，iperf3 放在 end.sum
-    udp_sum = end.get('sum') or {}
-    if receiver is not None and udp_sum.get('lost_percent') is not None:
-        try:
-            receiver['jitter_ms'] = float(udp_sum.get('jitter_ms'))
-            receiver['lost'] = int(udp_sum.get('lost_packets'))
-            receiver['total'] = int(udp_sum.get('packets'))
-            receiver['loss_pct'] = float(udp_sum['lost_percent'])
-        except (TypeError, ValueError):
-            pass
+    udp_stats(receiver, end.get('sum') or {})
     intervals = []
     for item in doc.get('intervals') or []:
         s = item.get('sum') or {}
@@ -140,22 +159,48 @@ def stability(intervals):
             'p95_mbits': ordered[idx], 'avg_mbits': mean}
 
 
-def json_block(sender, receiver, intervals, omit=0):
-    """把 JSON 结果压成报告里能看的几行（原始 JSON 太长，不适合塞进报告）。"""
-    lines = []
-    if sender:
-        lines.append(f"[SUM] sender   {fmt_num(sender.get('mbits'))} Mbits/sec"
-                     + (f"  retr {int(sender['retr'])}" if sender.get('retr') is not None else ''))
-    if receiver:
-        extra = ''
-        if receiver.get('loss_pct') is not None:
-            extra = (f"  jitter {fmt_num(receiver.get('jitter_ms'), 2)} ms"
-                     f"  loss {fmt_num(receiver.get('loss_pct'), 2)}%")
-        lines.append(f"[SUM] receiver {fmt_num(receiver.get('mbits'))} Mbits/sec{extra}")
-    st = stability(intervals)
-    if st:
-        lines.append(f"# 稳定性：CV {fmt_num(st['cv_pct'], 1)}% · P95 {fmt_num(st['p95_mbits'])} Mbit/s"
-                     f"（{st['samples']} 个区间" + (f"，已剔除前 {omit} 秒" if omit else '') + '）')
+def _fmt_iperf_amount(value, units, base):
+    if value is None:
+        return '—'
+    for unit in units[:-1]:
+        if abs(value) < base:
+            break
+        value /= base
+    else:
+        unit = units[-1]
+    decimals = 2 if abs(value) < 10 else 1 if abs(value) < 100 else 0
+    return f'{value:.{decimals}f} {unit}'
+
+
+def json_block(sender, receiver):
+    """用 iperf3 的表头和列展示 JSON 汇总。"""
+    if not (sender or receiver):
+        return ''
+    udp = any(node and 'loss_pct' in node for node in (sender, receiver))
+    lines = ['[ ID] Interval           Transfer     Bitrate         '
+             + ('Jitter    Lost/Total Datagrams' if udp else 'Retr')]
+    for kind, node in (('sender', sender), ('receiver', receiver)):
+        if not node:
+            continue
+        interval = (f"{node['start']:6.2f}-{node['end']:<6.2f}"
+                    if 'end' in node else ' ' * 13)
+        transfer_mb = node.get('transfer_mb')
+        transfer = _fmt_iperf_amount(
+            transfer_mb * 1048576 if transfer_mb is not None else None,
+            ('Bytes', 'KBytes', 'MBytes', 'GBytes', 'TBytes'), 1024)
+        bitrate = _fmt_iperf_amount(node['mbits'] * 1e6,
+                                    ('bits/sec', 'Kbits/sec', 'Mbits/sec', 'Gbits/sec', 'Tbits/sec'), 1000)
+        stream_id = node['stream_id']
+        head = f'[{stream_id:>3}] {interval} sec{transfer:>13}{bitrate:>16}'
+        if udp and 'loss_pct' in node:
+            lines.append(f"{head}  {node['jitter_ms']:5.3f} ms  {node['lost']}/{node['total']}"
+                         f" ({node['loss_pct']:.2g}%)  {kind}")
+        elif not udp and kind == 'sender':
+            retr = node.get('retr', '')
+            gap = 13 if stream_id == 'SUM' else 12
+            lines.append(f'{head}  {retr:>3}{" " * gap}{kind}')
+        else:
+            lines.append(f'{head}                  {kind}')
     return '\n'.join(lines)
 
 
@@ -240,8 +285,10 @@ def parse_metrics(ping_raw, up_raw, down_raw, omit=0):
     （区间吞吐的 CV 与 P95）；旧 Agent 的文本输出仍走原来的正则解析。
     """
     mt = parse_ping(ping_raw)
-    us, ur, up_iv = parse_iperf_any(up_raw)
-    ds, dr, down_iv = parse_iperf_any(down_raw)
+    up_json = parse_iperf_json(up_raw)
+    down_json = parse_iperf_json(down_raw)
+    us, ur, up_iv = up_json if up_json else (*parse_iperf(up_raw), [])
+    ds, dr, down_iv = down_json if down_json else (*parse_iperf(down_raw), [])
     mt['up_sender_mbits'] = us['mbits'] if us else None
     mt['up_receiver_mbits'] = ur['mbits'] if ur else None
     mt['down_sender_mbits'] = ds['mbits'] if ds else None
@@ -273,10 +320,8 @@ def parse_metrics(ping_raw, up_raw, down_raw, omit=0):
         mt[f'{tag}_p95_mbits'] = st['p95_mbits'] if st else None
     mt['omit_seconds'] = int(omit or 0)
     mt['ping_block'] = ping_block(ping_raw)
-    mt['up_block'] = (json_block(us, ur, up_iv, omit) if up_iv
-                      else summary_block(up_raw))
-    mt['down_block'] = (json_block(ds, dr, down_iv, omit) if down_iv
-                        else summary_block(down_raw))
+    mt['up_block'] = json_block(us, ur) if up_json else summary_block(up_raw)
+    mt['down_block'] = json_block(ds, dr) if down_json else summary_block(down_raw)
     return mt
 
 
@@ -495,7 +540,7 @@ def evaluate(mt, machine, run=None):
 
 
 def refresh_item_rating(item, run):
-    """用开测时的带宽快照重算展示评级；只改返回对象，不回写历史原始数据。"""
+    """重算展示评级并更新旧报告的格式，只改返回对象。"""
     if item.get('status') != 'done' or not item.get('metrics'):
         return item
     try:
@@ -504,6 +549,18 @@ def refresh_item_rating(item, run):
         return item
     if not isinstance(metrics, dict):
         return item
+    for direction in ('up', 'down'):
+        key = f'{direction}_block'
+        lines = (metrics.get(key) or '').splitlines()
+        if lines and not any(LEGACY_IPERF_LINE_RE.match(line) or STABILITY_LINE_RE.match(line)
+                             for line in lines):
+            continue
+        parsed = parse_iperf_json(item.get(f'{direction}_raw'))
+        updated = json_block(*parsed[:2]) if parsed else ''
+        if updated or lines:
+            metrics[key] = updated or '\n'.join(
+                LEGACY_IPERF_LINE_RE.sub('', line) for line in lines
+                if not STABILITY_LINE_RE.match(line))
     evaluate(metrics, item, run)
     item['metrics'] = json.dumps(metrics, ensure_ascii=False)
     item['metrics_obj'] = metrics

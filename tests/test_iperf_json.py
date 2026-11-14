@@ -59,9 +59,10 @@ class IperfJsonTest(unittest.TestCase):
         self.assertIsNotNone(mt['down_cv_pct'])
         self.assertIsNotNone(mt['up_p95_mbits'])
         self.assertEqual(mt['loss_pct'], 0.0)
-        # 报告块用摘要而不是把整段 JSON 塞进去
-        self.assertIn('[SUM] sender', mt['up_block'])
-        self.assertIn('稳定性', mt['up_block'])
+        self.assertTrue(mt['up_block'].startswith('[ ID] Interval           Transfer     Bitrate         Retr'))
+        self.assertIn('[SUM]   0.00-5.00', mt['up_block'])
+        self.assertIn('19.1 Mbits/sec', mt['up_block'])
+        self.assertNotIn('稳定性', mt['up_block'])
         self.assertNotIn('"intervals"', mt['up_block'])
         # 评级逻辑不受影响
         quality.evaluate(mt, {'machine_bandwidth': '1G'}, {'target_bandwidth': '1G'})
@@ -76,7 +77,7 @@ class IperfJsonTest(unittest.TestCase):
 
     def test_udp_json_uses_end_sum(self):
         doc = {
-            'start': {},
+            'start': {'connected': [{'socket': 4}]},
             'end': {
                 'sum_sent': {'bits_per_second': 100e6, 'bytes': 60e6, 'sender': True},
                 'sum_received': {'bits_per_second': 99e6, 'bytes': 59.4e6},
@@ -91,6 +92,9 @@ class IperfJsonTest(unittest.TestCase):
         self.assertAlmostEqual(mt['down_jitter_ms'], 0.42)
         self.assertEqual(mt['up_mbits'], 100.0)
         self.assertEqual(mt['down_mbits'], 99.0)
+        self.assertIn('Jitter    Lost/Total Datagrams', mt['up_block'])
+        self.assertIn('0.420 ms  7/70000 (0.01%)  receiver', mt['up_block'])
+        self.assertNotIn('[SUM]', mt['up_block'])
 
     def test_stability_edges(self):
         self.assertIsNone(quality.stability([]))
@@ -101,13 +105,18 @@ class IperfJsonTest(unittest.TestCase):
         # 均值 0（全挂）不应产生除零
         self.assertIsNone(quality.stability([0.0, 0.0, 0.0]))
 
-    def test_json_block_with_omit_note(self):
-        sender = {'mbits': 100.0, 'retr': 2}
-        receiver = {'mbits': 99.0, 'loss_pct': 0.5, 'jitter_ms': 0.2}
-        block = quality.json_block(sender, receiver, [90.0, 99.0, 101.0, 100.0], omit=3)
-        self.assertIn('retr 2', block)
-        self.assertIn('loss 0.5%', block)
-        self.assertIn('已剔除前 3 秒', block)
+    def test_single_stream_without_intervals_uses_socket_id(self):
+        doc = {
+            'start': {'connected': [{'socket': 5}]},
+            'end': {
+                'sum_sent': dict(start=0, end=10, bytes=163 * 1048576,
+                                 bits_per_second=137e6, retransmits=0),
+                'sum_received': dict(start=0, end=10.15, bytes=163 * 1048576,
+                                     bits_per_second=135e6),
+            },
+        }
+        block = quality.parse_metrics(PING_RAW, json.dumps(doc), '', omit=3)['up_block']
+        self.assertEqual(block, TEXT_UP.strip())
 
     def test_job_params_omit_and_json(self):
         clean = job_types.normalize('iperf_client', {
