@@ -125,7 +125,16 @@ def _client_ip():
             return cf_header[:64]
         xff = request.headers.get('X-Forwarded-For', '')
         if xff:
-            last = xff.split(',')[-1].strip()
+            parts = [p.strip() for p in xff.split(',') if p.strip()]
+            # 反向代理在 Cloudflare 后方时：若 XFF 最右跳是 Cloudflare 回源网段且
+            # 前一跳是合法 IP，则取 Cloudflare 注入的真实客户端 IP，避免把 CF 边缘
+            # 节点 IP 当成 Agent 的公网测试地址。
+            if len(parts) >= 2 and _is_cloudflare_ip(parts[-1]):
+                try:
+                    return ipaddress.ip_address(parts[-2]).compressed[:64]
+                except ValueError:
+                    pass
+            last = parts[-1]
             try:
                 return ipaddress.ip_address(last).compressed[:64]
             except ValueError:

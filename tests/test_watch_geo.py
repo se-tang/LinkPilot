@@ -486,6 +486,38 @@ class GeoApiTest(unittest.TestCase):
             resp = c.post('/api/watch/settings', json={'count': 99})
             self.assertEqual(resp.status_code, 400)
 
+    def test_client_ip_behind_cloudflare_and_local_proxy(self):
+        # 反向代理在 Cloudflare 之后时，XFF 形如 "<真实客户端IP>, <Cloudflare边缘IP>"；
+        # 面板应提取真实客户端 IP，避免把 CF 节点 IP 记成 Agent 测试地址。
+        with patch('app.app.TRUST_LOCAL_PROXY', True):
+            self.client.post(
+                '/api/agent/heartbeat',
+                headers=self.agent_headers(
+                    self.backend,
+                    **{'X-Forwarded-For': '198.51.100.42, 172.71.219.115'}),
+                environ_base={'REMOTE_ADDR': '127.0.0.1'})
+        m = db.get_machine(self.backend['id'])
+        self.assertEqual(m['ip4'], '198.51.100.42')
+        # 即使双栈场景下 CF 用 IPv4 回源而 CF-Connecting-IP 是 IPv6（或未能解出真实 IPv4），
+        # touch_machine 也绝不能用 Cloudflare 边缘 IP 覆盖已有真实 ip4。
+        db.touch_machine(self.backend['id'], 'h', '172.71.219.115')
+        m2 = db.get_machine(self.backend['id'])
+        self.assertEqual(m2['ip4'], '198.51.100.42')
+        # 历史偶发单轮丢 1 包但最新一轮已恢复 0 丢包 → 状态应恢复为 ok
+        t1, _ = db.watch_task_create({
+            'name': 'T-recover', 'mode': 'B', 'backend_ids': [self.backend['id']],
+            'interval': 10})
+        now = int(time.time())
+        db.insert_watch_samples(self.backend['id'], '\n'.join([
+            watch_line(now - 30, t1['id'], 0, 'B', 40.0, 1.0, 4, 4),
+            watch_line(now - 20, t1['id'], 0, 'B', 41.0, 1.0, 4, 3),   # 历史偶发单包丢失
+            watch_line(now - 10, t1['id'], 0, 'B', 40.0, 1.0, 4, 4),
+            watch_line(now, t1['id'], 0, 'B', 40.0, 1.0, 4, 4),        # 最新已恢复
+        ]))
+        link = next(l for l in db.watch_view('B', t1['id'])['links']
+                    if l['machine_id'] == self.backend['id'])
+        self.assertEqual(link['status'], 'ok')
+
 
 if __name__ == '__main__':
     try:

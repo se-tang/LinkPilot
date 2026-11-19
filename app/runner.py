@@ -774,8 +774,10 @@ def _discovery_pass():
         return                      # 测试进行中不打扰
     now = time.time()
     for m in db.get_machines():
-        if m['ip4'] and m['ip6']:
-            continue                # 两族地址都已知
+        ip4_ok = bool(m['ip4']) and not db.is_cloudflare_ip(m['ip4'])
+        ip6_ok = bool(m['ip6']) and not db.is_cloudflare_ip(m['ip6'])
+        if ip4_ok and ip6_ok:
+            continue                # 两族地址都已知且非 Cloudflare 回源边缘 IP
         if not db.machine_online(m):
             continue
         if now < _discover_next.get(m['id'], 0):

@@ -834,6 +834,26 @@ def clear_auth_failures(key):
     get_db().commit()
 
 
+# Cloudflare 官方回源网段（https://www.cloudflare.com/ips/）：
+# 绝不能被当作机器的测试地址写入 ip4/ip6。
+CF_NETWORKS = [ipaddress.ip_network(n) for n in (
+    '173.245.48.0/20', '103.21.244.0/22', '103.22.200.0/22', '103.31.4.0/22',
+    '141.101.64.0/18', '108.162.192.0/18', '190.93.240.0/20', '188.114.96.0/20',
+    '197.234.240.0/22', '198.41.128.0/17', '162.158.0.0/15', '104.16.0.0/13',
+    '104.24.0.0/14', '172.64.0.0/13', '131.0.72.0/22',
+    '2400:cb00::/32', '2606:4700::/32', '2803:f800::/32', '2405:b500::/32',
+    '2405:8100::/32', '2a06:98c0::/29', '2c0f:f248::/32',
+)]
+
+
+def is_cloudflare_ip(ip):
+    try:
+        a = ipaddress.ip_address(str(ip).strip())
+    except ValueError:
+        return False
+    return any(a in n for n in CF_NETWORKS)
+
+
 def ip_family(ip):
     """IP 协议族：4 / 6；非法地址返回 None。"""
     try:
@@ -859,19 +879,25 @@ def touch_machine(mid, hostname, ip):
     """记录心跳：agent_ip 存最近一次来源 IP；同时按协议族写入 ip4/ip6。
 
     双栈面板下心跳来源可能是 v4 也可能是 v6，按族分别保存后就不会互相覆盖，
-    测试地址不会在两族之间跳动。
+    测试地址不会在两族之间跳动。若 ip4/ip6 已有非 Cloudflare 的真实公网地址，
+    不会被 Cloudflare 回源边缘 IP 覆盖。
     """
     db = get_db()
     ip = (ip or '')[:64]
+    row = db.execute('SELECT ip4, ip6 FROM machines WHERE id=?', (mid,)).fetchone()
     sets = ['last_seen=?', 'hostname=?', 'agent_ip=?']
     args = [int(time.time()), (hostname or '')[:128], ip]
     fam = ip_family(ip)
     if fam == 4:
-        sets.append('ip4=?')
-        args.append(ip)
+        cur4 = (row['ip4'] or '') if row else ''
+        if not (is_cloudflare_ip(ip) and cur4 and not is_cloudflare_ip(cur4)):
+            sets.append('ip4=?')
+            args.append(ip)
     elif fam == 6:
-        sets.append('ip6=?')
-        args.append(ip)
+        cur6 = (row['ip6'] or '') if row else ''
+        if not (is_cloudflare_ip(ip) and cur6 and not is_cloudflare_ip(cur6)):
+            sets.append('ip6=?')
+            args.append(ip)
     args.append(mid)
     db.execute('UPDATE machines SET ' + ', '.join(sets) + ' WHERE id=?', args)
     db.commit()
@@ -940,7 +966,8 @@ def mark_agent_incompatible(mid, reason):
 
 def set_machine_ips(mid, values, force=False):
     """写回面板探测到的地址。默认只补空缺（心跳观测到的地址更可信，不覆盖），
-    force=True 用于用户手动「探测地址」时的强制刷新。"""
+    force=True 用于用户手动「探测地址」时的强制刷新；若已存地址是 Cloudflare
+    回源边缘 IP，也允许被探测结果直接覆盖纠正。"""
     db = get_db()
     row = db.execute('SELECT ip4, ip6 FROM machines WHERE id=?', (mid,)).fetchone()
     if not row:
@@ -950,7 +977,7 @@ def set_machine_ips(mid, values, force=False):
         v = str(values.get(col) or '')[:64]
         if not v:
             continue
-        if not force and row[col]:
+        if not force and row[col] and not is_cloudflare_ip(row[col]):
             continue
         sets.append(f'{col}=?')
         args.append(v)
@@ -1981,7 +2008,8 @@ def _link_status(series, interval, now):
 
     - stale  数据过期：最近样本太久（Agent 掉线 / 任务暂停后残留窗口）
     - down   不可达：最近几轮全部丢包
-    - warn   网络异常：最近几轮存在丢包
+    - warn   网络异常：最新一轮严重丢包（≥ 25%）或近 5 轮累计丢包率 ≥ 15%
+             （避免每轮 10 包中偶发丢 1 包或目标机微弱 ICMP 限速导致正常链路频繁闪黄）
     - ok     在线
     """
     if not series:
@@ -1995,7 +2023,12 @@ def _link_status(series, interval, now):
     tail_recv = sum(x[3] for x in tail)
     if tail_sent and tail_recv == 0:
         return 'down'
-    if any(x[3] < x[2] for x in recent):
+    last_sent, last_recv = recent[-1][2], recent[-1][3]
+    if last_sent and (last_sent - last_recv) / last_sent >= 0.25:
+        return 'warn'
+    tot_sent = sum(x[2] for x in recent)
+    tot_recv = sum(x[3] for x in recent)
+    if tot_sent and (tot_sent - tot_recv) / tot_sent >= 0.15:
         return 'warn'
     return 'ok'
 
@@ -2047,16 +2080,26 @@ def watch_view(mode, task_id=None):
             _link_status(series, task['interval_seconds'], now)
         if not machine_online and status == 'ok' and now - last_ts > max(3 * task['interval_seconds'], 120):
             status = 'stale'
+        def _display_ip(m_dict):
+            if not m_dict:
+                return ''
+            v4, v6 = m_dict.get('ip4') or '', m_dict.get('ip6') or ''
+            if v4 and not is_cloudflare_ip(v4):
+                return v4
+            if v6 and not is_cloudflare_ip(v6):
+                return v6
+            return v4 or v6
+
         links.append({
             'task_id': tid, 'task_name': task['name'],
             'machine_id': mid, 'machine_name': machine.get('name', f'#{mid}'),
             'machine_region': machine.get('region', ''),
-            'machine_ip': machine.get('ip4') or machine.get('ip6') or '',
+            'machine_ip': _display_ip(machine),
             'machine_isp': machine.get('isp') or '',
             'dest_id': did,
             'dest_name': dest.get('name', '') if did else '面板端',
             'dest_region': dest.get('region', '') if did else '',
-            'dest_ip': (dest.get('ip4') or dest.get('ip6') or '') if did else '',
+            'dest_ip': _display_ip(dest) if did else '',
             'rtt': last_rtt,
             'avg': (sum(valid) / len(valid)) if valid else None,
             'avg1m': (sum(avg1) / len(avg1)) if avg1 else None,

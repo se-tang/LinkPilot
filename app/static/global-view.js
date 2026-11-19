@@ -44,15 +44,46 @@ const GEO_COORDS = {
   '拉各斯': [3.38, 6.52], '卡萨布兰卡': [-7.59, 33.57], '毛里求斯': [57.50, -20.16],
   '悉尼': [151.21, -33.87], '墨尔本': [144.96, -37.81], '布里斯班': [153.03, -27.47], '珀斯': [115.86, -31.95],
   '奥克兰': [174.76, -36.85], '惠灵顿': [174.78, -41.29],
-  // 常见英文别名
-  'Hong Kong': [114.17, 22.32], 'Taipei': [121.56, 25.03], 'Tokyo': [139.69, 35.69],
-  'Seoul': [126.98, 37.57], 'Singapore': [103.82, 1.35], 'Los Angeles': [-118.24, 34.05],
-  'San Jose': [-121.89, 37.34], 'Silicon Valley': [-121.89, 37.34], 'Seattle': [-122.33, 47.61],
-  'Frankfurt': [8.68, 50.11], 'London': [-0.13, 51.51], 'Amsterdam': [4.90, 52.37],
-  'Paris': [2.35, 48.86], 'Dubai': [55.27, 25.20], 'Mumbai': [72.88, 19.08],
-  'Ashburn': [-77.49, 39.04], 'Virginia': [-77.49, 39.04], 'Sydney': [151.21, -33.87],
-  'Moscow': [37.62, 55.76], 'Sao Paulo': [-46.63, -23.55], 'Istanbul': [28.98, 41.01],
+  // 常见省份 / 国家 / 英文别名
+  '广东': [113.26, 23.13], '江苏': [118.80, 32.06], '浙江': [120.16, 30.27], '山东': [117.12, 36.65],
+  '四川': [104.07, 30.57], '湖北': [114.31, 30.59], '湖南': [112.94, 28.23], '福建': [119.30, 26.08],
+  '河南': [113.63, 34.75], '河北': [114.51, 38.04], '陕西': [108.94, 34.34], '辽宁': [123.43, 41.81],
+  '安徽': [117.28, 31.86], '江西': [115.89, 28.68], '广西': [108.37, 22.82], '云南': [102.83, 24.88],
+  '贵州': [106.63, 26.65], '山西': [112.55, 37.87], '吉林': [125.32, 43.90], '黑龙江': [126.53, 45.80],
+  '海南': [110.20, 20.04], '甘肃': [103.83, 36.06], '青海': [101.78, 36.62], '内蒙古': [111.75, 40.84],
+  '新疆': [87.62, 43.83], '西藏': [91.11, 29.66], '宁夏': [106.23, 38.49], '台湾': [121.56, 25.03],
+  '日本': [139.69, 35.69], '韩国': [126.98, 37.57], '美国': [-118.24, 34.05], '美西': [-118.24, 34.05],
+  '美东': [-74.01, 40.71], '德国': [8.68, 50.11], '英国': [-0.13, 51.51], '法国': [2.35, 48.86],
+  '荷兰': [4.90, 52.37], '俄罗斯': [37.62, 55.76], '加拿大': [-79.38, 43.65], '澳大利亚': [151.21, -33.87],
+  '澳洲': [151.21, -33.87], '马来西亚': [101.69, 3.14], '泰国': [100.50, 13.76], '越南': [105.83, 21.03],
+  '印尼': [106.85, -6.21], '印度': [72.88, 19.08], '阿联酋': [55.27, 25.20], '土耳其': [28.98, 41.01],
+  '巴西': [-46.63, -23.55], '瑞士': [8.54, 47.38], '意大利': [9.19, 45.46], '西班牙': [-3.70, 40.42],
+  '瑞典': [18.07, 59.33], '芬兰': [24.94, 60.17], '波兰': [21.01, 52.23], '奥地利': [16.37, 48.21],
+  '爱尔兰': [-6.26, 53.35], '菲律宾': [120.98, 14.60],
+  'Hong Kong': [114.17, 22.32], 'HK': [114.17, 22.32], 'Taipei': [121.56, 25.03], 'TW': [121.56, 25.03],
+  'Tokyo': [139.69, 35.69], 'Osaka': [135.50, 34.69], 'Japan': [139.69, 35.69], 'JP': [139.69, 35.69],
+  'Seoul': [126.98, 37.57], 'Korea': [126.98, 37.57], 'KR': [126.98, 37.57],
+  'Singapore': [103.82, 1.35], 'SG': [103.82, 1.35], 'Los Angeles': [-118.24, 34.05], 'LAX': [-118.24, 34.05],
+  'San Jose': [-121.89, 37.34], 'SJC': [-121.89, 37.34], 'Silicon Valley': [-121.89, 37.34],
+  'Seattle': [-122.33, 47.61], 'New York': [-74.01, 40.71], 'US': [-118.24, 34.05], 'USA': [-118.24, 34.05],
+  'Frankfurt': [8.68, 50.11], 'DE': [8.68, 50.11], 'London': [-0.13, 51.51], 'UK': [-0.13, 51.51],
+  'Amsterdam': [4.90, 52.37], 'NL': [4.90, 52.37], 'Paris': [2.35, 48.86], 'FR': [2.35, 48.86],
+  'Dubai': [55.27, 25.20], 'Mumbai': [72.88, 19.08], 'Ashburn': [-77.49, 39.04], 'Virginia': [-77.49, 39.04],
+  'Sydney': [151.21, -33.87], 'Moscow': [37.62, 55.76], 'Sao Paulo': [-46.63, -23.55], 'Istanbul': [28.98, 41.01],
 };
+
+const GEO_KEYS_BY_LEN = Object.keys(GEO_COORDS).sort((a, b) => b.length - a.length);
+function resolveRegionCoord(raw) {
+  const r = String(raw || '').trim();
+  if (!r) return null;
+  if (GEO_COORDS[r]) return GEO_COORDS[r];
+  const stripped = r.replace(/(?:电信|联通|移动|广电|教育网|多线|三网|双线|BGP|CN2|GIA|CMIN2|9929|4837|163|家宽|商宽|专线|内网)+$/i, '').trim();
+  if (stripped && GEO_COORDS[stripped]) return GEO_COORDS[stripped];
+  for (const k of GEO_KEYS_BY_LEN) {
+    if (k.length >= 2 && r.includes(k)) return GEO_COORDS[k];
+  }
+  return null;
+}
 
 const GEO = (() => {
   const RATING_STEPS = [[60, 's', '优', '--green'], [120, 'a', '良', '--lime'],
@@ -96,33 +127,60 @@ const GEO = (() => {
     catch (e) {}
   };
 
-  const rating = (rtt) => {
-    if (rtt == null) return {k: 'off', label: '无数据', color: 'var(--muted)'};
-    for (const [max, k, label, v] of RATING_STEPS) {
-      if (rtt < max) return {k, label, color: `var(${v})`};
-    }
-    return RATING_STEPS[RATING_STEPS.length - 1];
+  // 球面大圆距离（km）：输入两端 [lon, lat]，坐标缺失返回 null
+  const haversineKm = (c1, c2) => {
+    if (!c1 || !c2) return null;
+    const rad = Math.PI / 180;
+    const dLat = (c2[1] - c1[1]) * rad, dLon = (c2[0] - c1[0]) * rad;
+    const lat1 = c1[1] * rad, lat2 = c2[1] * rad;
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+    return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(Math.max(0, 1 - a)));
   };
+
+  // 结合两端物理距离动态计算 RTT 评级阈值（光纤往返理论下限 ≈ 0.01ms/km，实际海缆/陆缆直连约 0.014~0.018ms/km）
+  const ratingThresholds = (distKm) => {
+    if (distKm == null || !isFinite(distKm)) return [60, 120, 200];
+    return [
+      Math.max(35, Math.round(18 + distKm * 0.015)),
+      Math.max(75, Math.round(36 + distKm * 0.022)),
+      Math.max(140, Math.round(70 + distKm * 0.032)),
+    ];
+  };
+
+  const rating = (rtt, cFrom, cTo) => {
+    if (rtt == null) return {k: 'off', label: '无数据', color: 'var(--muted)', distKm: null};
+    const distKm = (cFrom && cTo) ? haversineKm(cFrom, cTo) : null;
+    const [sMax, aMax, bMax] = ratingThresholds(distKm);
+    const steps = [[sMax, 's', '优', '--green'], [aMax, 'a', '良', '--lime'],
+                   [bMax, 'b', '中', '--orange'], [Infinity, 'c', '差', '--red']];
+    for (const [max, k, label, v] of steps) {
+      if (rtt < max) return {k, label, color: `var(${v})`, distKm, steps: [sMax, aMax, bMax]};
+    }
+    return {k: 'c', label: '差', color: 'var(--red)', distKm, steps: [sMax, aMax, bMax]};
+  };
+  const linkRating = (l) => rating(linkRtt(l), l && l.from && l.from.c, l && l.to && l.to.c);
   const statusBadge = (s) => {
     const it = STATUS_BADGE[s];
     return it ? `<span class="geo-status ${it[1]}">${it[0]}</span>` : '';
   };
   const coord = (m) => {
-    // 优先机器上手动填写的坐标（十进制小数），其次地区标记匹配
+    // 优先机器上手动填写的坐标（十进制小数），其次地区标记匹配（含国家/省份/运营商后缀智能解析）
     if (m && m.lat && m.lng) {
       const lat = parseFloat(m.lat), lng = parseFloat(m.lng);
       if (isFinite(lat) && isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
         return [lng, lat];
       }
     }
-    const r = String((m && m.region) || '').trim();
-    return (r && GEO_COORDS[r]) || null;
+    return resolveRegionCoord(m && m.region);
   };
   const linkCoord = (l, which) => {
     if (source === 'daily' && daily) {
       const mid = which === 'from' ? l.machine_id : l.dest_id;
       const m = (daily.machines || []).find(x => x.id === mid);
-      if (m) return coord(m);
+      if (m) {
+        const mc = coord(m);
+        if (mc) return mc;
+      }
       if (which === 'to' && l.dest_id === 0) {
         // 模式 B 的面板端：按面板地区设置落点
         const region = (daily.settings || {}).panel_region || '';
@@ -139,7 +197,7 @@ const GEO = (() => {
     }
     const r = String((which === 'from' ? (l.machine_region || l.from?.region) :
                       (l.dest_region || l.to?.region)) || '').trim();
-    return (r && GEO_COORDS[r]) || null;
+    return resolveRegionCoord(r);
   };
   const pct = (v) => v == null ? '—' : (+v).toFixed(1) + '%';
   const ms = (v) => v == null ? '—' : Math.round(v);
@@ -490,13 +548,13 @@ const GEO = (() => {
           from: {
             name: l.machine_name || ('#' + l.machine_id),
             region: l.region || '', ip: '', isp: '',
-            c: linkCoord({machine_id: l.machine_id}, 'from') ||
-               (GEO_COORDS[l.region] || null),
+            c: linkCoord({machine_id: l.machine_id, machine_region: l.region}, 'from') ||
+               resolveRegionCoord(l.region),
           },
           to: {
             name: run.target_name, region: run.target_region, ip: '',
             c: linkCoord({dest_id: run.target_id, dest_region: run.target_region}, 'to') ||
-               (GEO_COORDS[run.target_region] || null),
+               resolveRegionCoord(run.target_region),
             target: true,
           },
           rtt: l.rtt, avg: l.rtt, jit: l.jit, loss: l.loss,
@@ -547,12 +605,14 @@ const GEO = (() => {
     const good = links.filter(x => linkRtt(x) != null);
     const avg = good.length ? good.reduce((s, x) => s + linkRtt(x), 0) / good.length : null;
     const bad = links.filter(x => x.status && x.status !== 'ok').length;
-    const best = good.length ? Math.min(...good.map(linkRtt)) : null;
+    const bestLink = [...good].sort((a, b) => linkRtt(a) - linkRtt(b))[0];
+    const best = bestLink ? linkRtt(bestLink) : null;
+    const bestColor = bestLink ? linkRating(bestLink).color : 'var(--muted)';
     hud.classList.toggle('empty', !links.length);
     hud.innerHTML = links.length ? `
       <div class="hud-k"><b>${good.length}<small>/${links.length}</small></b><span>在线链路</span></div>
-      <div class="hud-k"><b style="color:${avg == null ? 'var(--muted)' : rating(avg).color}">${avg == null ? '—' : Math.round(avg)}<small>ms</small></b><span>平均 RTT</span></div>
-      <div class="hud-k"><b style="color:${best == null ? 'var(--muted)' : rating(best).color}">${best == null ? '—' : Math.round(best)}<small>ms</small></b><span>最佳</span></div>
+      <div class="hud-k"><b style="color:${avg == null ? 'var(--muted)' : 'var(--text)'}">${avg == null ? '—' : Math.round(avg)}<small>ms</small></b><span>平均 RTT</span></div>
+      <div class="hud-k"><b style="color:${bestColor}">${best == null ? '—' : Math.round(best)}<small>ms</small></b><span>最佳</span></div>
       <div class="hud-k"><b class="${bad ? 'bad' : 'okc'}">${bad}</b><span>异常</span></div>`
       : `<div class="hud-empty">${source === 'test' ? '还没有已完成的测试' : '当前视图暂无监控链路'}</div>`;
   }
@@ -594,7 +654,7 @@ const GEO = (() => {
       const a = nodeOf(l.from), b = nodeOf(l.to);
       if (!a || !b) continue;
       a.links.push(l); b.links.push(l);
-      const st = rating(linkRtt(l));
+      const st = linkRating(l);
       const arc = arcPath(a.p, b.p, 0.14 + (i++ % 4) * 0.035);
       const isSel = selected === l.key, isHov = hoverKey === l.key;
       const dim = selected && !isSel;
@@ -632,7 +692,7 @@ const GEO = (() => {
       const g = anchor(n.p[0], n.p[1], gNodes, 'geo-node' + (n.target ? ' is-target' : ''));
       const touching = n.links;
       const worst = touching.reduce((w, l) => (l.status && l.status !== 'ok') ? l : w, null);
-      const st = rating(touching.length ? linkRtt(touching[0]) : null);
+      const st = touching.length ? linkRating(touching[0]) : rating(null);
       const isOn = touching.some(l => l.key === selected || l.key === hoverKey);
       if (n.target) {
         el('circle', {r: 15, class: 'tgt-pulse'}, g);
@@ -719,7 +779,7 @@ const GEO = (() => {
   function renderTable(links) {
     const sorted = [...links].sort((a, b) => (linkRtt(a) ?? 1e9) - (linkRtt(b) ?? 1e9));
     $('geoTbody').innerHTML = sorted.map(l => {
-      const st = rating(linkRtt(l));
+      const st = linkRating(l);
       const sel = selected === l.key ? ' class="sel"' : '';
       const sub = [l.from.region, l.from.isp, l.from.bw].filter(Boolean).join(' · ');
       const taskTxt = source === 'daily' && !taskFilter && l.task_name ? `<em>${esc(l.task_name)}</em>` : '';
@@ -836,9 +896,10 @@ const GEO = (() => {
       const good = links.filter(x => linkRtt(x) != null);
       const avg = good.length ? good.reduce((s, x) => s + linkRtt(x), 0) / good.length : null;
       const worst = [...links].sort((a, b) => (linkRtt(b) ?? -1) - (linkRtt(a) ?? -1))[0];
+      const worstSt = worst ? linkRating(worst) : null;
       const avgLoss = links.length ? links.reduce((s, x) => s + (x.loss ?? 0), 0) / links.length : null;
       const dist = {s: 0, a: 0, b: 0, c: 0, off: 0};
-      links.forEach(x => { dist[rating(linkRtt(x)).k]++; });
+      links.forEach(x => { dist[linkRating(x).k]++; });
       const tot = links.length || 1;
       const distBar = ['s', 'a', 'b', 'c', 'off'].map(k => dist[k]
         ? `<i class="d-${k}" style="flex:${dist[k]}" title="${dist[k]}"></i>` : '').join('');
@@ -846,17 +907,20 @@ const GEO = (() => {
           <span class="muted">${links.length} 条链路</span></div>
         <div class="sum-grid">
           <div class="st"><span>${source === 'test' ? '有效链路' : '有数据链路'}</span><b>${good.length}<small> / ${links.length}</small></b></div>
-          <div class="st"><span>平均 RTT</span><b style="color:${avg == null ? 'var(--muted)' : rating(avg).color}">${avg == null ? '—' : Math.round(avg)}<small> ms</small></b></div>
-          <div class="st"><span>最差链路</span><b class="sm">${worst && linkRtt(worst) != null ? `${esc(worst.from.name)} <small style="color:${rating(linkRtt(worst)).color}">${Math.round(linkRtt(worst))}ms</small>` : '—'}</b></div>
+          <div class="st"><span>平均 RTT</span><b style="color:${avg == null ? 'var(--muted)' : 'var(--text)'}">${avg == null ? '—' : Math.round(avg)}<small> ms</small></b></div>
+          <div class="st"><span>最高 RTT</span><b class="sm">${worst && linkRtt(worst) != null ? `${esc(worst.from.name)} <small style="color:${worstSt.color}">${Math.round(linkRtt(worst))}ms</small>` : '—'}</b></div>
           <div class="st"><span>丢包均值</span><b>${avgLoss == null ? '—' : avgLoss.toFixed(1)}<small>${avgLoss == null ? '' : ' %'}</small></b></div>
         </div>
-        ${links.length ? `<div class="geo-dist"><div class="cap"><span>质量分布</span><span>${Math.round((dist.s + dist.a) / tot * 100)}% 优良</span></div>
+        ${links.length ? `<div class="geo-dist"><div class="cap"><span>质量分布（结合两端物理距离）</span><span>${Math.round((dist.s + dist.a) / tot * 100)}% 优良</span></div>
           <div class="bar">${distBar}</div>
           <div class="keys"><span><i class="d-s"></i>优 ${dist.s}</span><span><i class="d-a"></i>良 ${dist.a}</span><span><i class="d-b"></i>中 ${dist.b}</span><span><i class="d-c"></i>差 ${dist.c}</span><span><i class="d-off"></i>无数据 ${dist.off}</span></div></div>` : ''}
         <p class="hint">点击地图上的节点、连线或列表行，查看单条链路详情。</p>`;
       return;
     }
-    const st = rating(linkRtt(l));
+    const st = linkRating(l);
+    const distInfo = st.distKm != null
+      ? ` · 约 ${Math.round(st.distKm).toLocaleString()} km`
+      : '';
     const spark = l.spark || [];
     const good = spark.filter(v => v != null);
     const mn = good.length ? Math.min(...good) : null;
@@ -865,7 +929,7 @@ const GEO = (() => {
         <button type="button" class="geo-x" data-geo-close aria-label="关闭详情">✕</button></div>
       <div class="geo-path" style="--c:${st.color}">
         <div class="end"><i class="pt"></i><b>${esc(l.from.name)}</b><span>${esc(l.from.region) || '—'}</span></div>
-        <div class="wire"><span class="rb rating-${st.k}">${st.k === 'off' ? '无数据' : st.k.toUpperCase() + ' ' + st.label}</span>${extra || ''}</div>
+        <div class="wire"><span class="rb rating-${st.k}" title="${st.steps ? `按该距离参考阈值：优<${st.steps[0]}ms / 良<${st.steps[1]}ms / 中<${st.steps[2]}ms` : ''}">${st.k === 'off' ? '无数据' : st.k.toUpperCase() + ' ' + st.label}</span>${extra || ''}</div>
         <div class="end r"><i class="pt tgt"></i><b>${esc(l.to.name)}</b><span>${esc(l.to.region) || (l.to.ip ? esc(l.to.ip) : '—')}</span></div>
       </div>`;
     const bindClose = () => {
@@ -874,7 +938,7 @@ const GEO = (() => {
     };
     if (source === 'test') {
       box.innerHTML = `${head()}
-        <div class="big"><b style="color:${st.color}">${l.rtt == null ? '—' : Math.round(l.rtt)}</b><small>ms · RTT avg</small></div>
+        <div class="big"><b style="color:${st.color}">${l.rtt == null ? '—' : Math.round(l.rtt)}</b><small>ms · RTT avg${distInfo}</small></div>
         <div class="kpis">
           ${kpi('抖动', l.jit == null ? '—' : (+l.jit).toFixed(1), 'ms')}
           ${kpi('丢包', l.loss == null ? '—' : (+l.loss).toFixed(1), '%', l.loss > 0 ? 'var(--orange)' : '')}
@@ -891,7 +955,7 @@ const GEO = (() => {
     // 日常链路：多窗口指标 + 可切换时间范围的历史趋势
     box.innerHTML = `${head(statusBadge(l.status))}
       <div class="big"><b style="color:${st.color}">${l.rtt == null ? '—' : Math.round(l.rtt)}</b>
-        <small>ms · 最近一次探测</small><span class="ago">${fmtAgo(l.lastTs)}</span></div>
+        <small>ms · 最近一次探测${distInfo}</small><span class="ago">${fmtAgo(l.lastTs)}</span></div>
       <div class="kpis">
         ${kpi('窗口均值', l.avg == null ? '—' : Math.round(l.avg), 'ms')}
         ${kpi('1 分钟均值', l.avg1m == null ? '—' : Math.round(l.avg1m), 'ms')}
@@ -952,7 +1016,8 @@ const GEO = (() => {
     const coords = pts.map((p, i) => [X(i), Y(p.rtt)]);
     const line = smoothCurve(coords);
     const avg = vals.reduce((s, v) => s + v, 0) / vals.length;
-    const c = rating(avg).color;
+    const curLink = buildLinks().find(x => x.key === selected);
+    const c = rating(avg, curLink && curLink.from && curLink.from.c, curLink && curLink.to && curLink.to.c).color;
     const cap = $('geoHistoryCap');
     if (cap) cap.textContent = `${Math.round(Math.min(...vals))}–${Math.round(Math.max(...vals))}ms · 均值 ${Math.round(avg)}ms · ${pts.length} 点`;
     const grid = [0.25, 0.5, 0.75].map(f => `<line x1="0" x2="${w}" y1="${(hgt * f).toFixed(1)}" y2="${(hgt * f).toFixed(1)}" class="grid"/>`).join('');
@@ -982,10 +1047,11 @@ const GEO = (() => {
   function showTip(l, e) {
     const tip = $('geoTip');
     const box = $('geoMapBox').getBoundingClientRect();
-    const st = rating(linkRtt(l));
+    const st = linkRating(l);
+    const distTxt = st.distKm != null ? ` · 约 ${Math.round(st.distKm).toLocaleString()} km` : '';
     tip.style.setProperty('--c', st.color);
     tip.innerHTML = `<div class="tip-h"><b>${esc(l.from.name)}</b><span class="rb rating-${st.k}">${st.k === 'off' ? '–' : st.k.toUpperCase()}</span></div>
-      <span class="sub">${esc(l.from.region || '')} → ${esc(l.to.name)}${l.task_name ? ' · ' + esc(l.task_name) : ''}</span>
+      <span class="sub">${esc(l.from.region || '')} → ${esc(l.to.name)}${distTxt}${l.task_name ? ' · ' + esc(l.task_name) : ''}</span>
       <div class="tip-big"><b>${l.rtt == null ? '—' : Math.round(l.rtt)}</b><small>${l.rtt == null ? '无数据' : 'ms RTT'}</small>${statusBadge(l.status)}</div>
       <div class="r"><span>窗口均值</span><b>${l.avg == null ? '—' : Math.round(l.avg) + ' ms'}</b></div>
       <div class="r"><span>抖动</span><b>${l.jit == null ? '—' : (+l.jit).toFixed(1) + ' ms'}</b></div>

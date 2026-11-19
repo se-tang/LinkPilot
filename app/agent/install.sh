@@ -305,7 +305,7 @@ fi
 echo "$(date '+%F %T') Agent 启动 hash=${AGENT_HASH:0:12} caps=${AGENT_CAPS:-none}" >> "$SPOOL/agent.log"
 
 # 服务 stop/restart（包括推送更新后的重启）时优雅退出，不要卡在 sleep/心跳里被强杀
-trap 'exit 0' TERM INT
+trap 'stop_watch; exit 0' TERM INT EXIT
 
 token_mark="$SPOOL/token_mark"
 if [ "$(cat "$token_mark" 2>/dev/null || echo '')" != "$TOKEN" ]; then
@@ -412,7 +412,10 @@ run_watch_loop() {
   # 每个任务独立的下一轮时间戳：改一个任务的间隔、暂停一个任务，互不影响
   now=$(date +%s)
   for id in $tasks; do
-    printf '%s' "$((now + $(wval interval_$id)))" > "$SPOOL/watch.next.$id"
+    iv="$(wval interval_$id)"; valid_int "$iv" || iv=10
+    in_range "$iv" 5 3600 || iv=10
+    skew=$(printf '%s:%s' "$(hostname)" "$id" | cksum | awk '{print $1}')
+    printf '%s' "$((now + 1 + (skew % iv)))" > "$SPOOL/watch.next.$id"
   done
   while :; do
     now=$(date +%s)
@@ -430,14 +433,19 @@ run_watch_loop() {
         did="${item%%:*}"; host="${item#*:}"
         # 目标地址白名单字符（IP / IPv6 / 域名）；IPv6 自带冒号，靠最长/最短匹配拆分
         case "$host" in ''|*[!0-9A-Fa-f.:\-_]*) continue ;; esac
-        out="$(LC_ALL=C timeout 15 ping -n -c "$count" -i 0.3 -W 2 "$host" 2>/dev/null || true)"
-        # 统计行以数字开头（"4 packets transmitted, ..."）：锚定行首，避免贪婪匹配吞掉数字
+        out="$(LC_ALL=C timeout 15 ping -n -c "$count" -i 0.5 -W 2 "$host" 2>/dev/null || true)"
+        # 统计行以数字开头（"4 packets transmitted, ..."）：锚定行首，避免贪婪匹配吞掉数字；
+        # 兼容 BusyBox ping 的 "4 packets received" 与 iputils 的 "4 received"
         sent="$(printf '%s\n' "$out" | sed -n 's/^[[:space:]]*\([0-9]*\) packets transmitted.*/\1/p' | head -n1)"
-        recv="$(printf '%s\n' "$out" | sed -n 's/.* \([0-9]*\) received.*/\1/p' | head -n1)"
-        # rtt min/avg/max/mdev：取 avg（第2段）和 mdev（第4段）
-        stats="$(printf '%s\n' "$out" | sed -n 's#.*= \([0-9.]*\)/\([0-9.]*\)/\([0-9.]*\)/\([0-9.]*\) ms.*#\2 \4#p' | head -n1)"
+        recv="$(printf '%s\n' "$out" | sed -n 's/.*, *\([0-9][0-9]*\)\( packets\)\{0,1\} received.*/\1/p' | head -n1)"
+        # rtt min/avg/max/mdev（或 BusyBox stddev）：取 avg（第2段）和 mdev（第4段，缺失时置 -）
+        stats="$(printf '%s\n' "$out" | sed -n 's#.*= *\([0-9.]*\)/\([0-9.]*\)/\([0-9.]*\)\(/\([0-9.]*\)\)\{0,1\} ms.*#\2 \5#p' | head -n1)"
         rtt='-'; mdev='-'
-        if [ -n "$stats" ]; then rtt="${stats%% *}"; mdev="${stats#* }"; fi
+        if [ -n "$stats" ]; then
+          rtt="${stats%% *}"
+          mdev="${stats#* }"
+          [ -n "$mdev" ] && [ "$mdev" != "$rtt" ] || mdev='-'
+        fi
         # 丢包率由面板按真实收发数计算；没有可靠的收发数就不上报这一轮
         valid_int "$sent" || sent=0
         valid_int "$recv" || recv=0
@@ -742,6 +750,7 @@ while true; do
   # 新 Agent 已就位：等本次任务回报完，再触发 root 助手替换并重启（重启会结束本进程）。
   if [ -f "$SPOOL/update.sha" ] && [ -f "$SPOOL/update.staged" ]; then
     echo "$(date '+%F %T') 触发 Agent 自更新（sha=$(cat "$SPOOL/update.sha" 2>/dev/null)）" >> "$SPOOL/agent.log"
+    stop_watch
     : >"$SPOOL/update.request"
     sleep 10
   fi
