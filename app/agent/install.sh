@@ -296,10 +296,10 @@ SIGN_KEY="$(CONF_VALUE SIGN_KEY)"
 
 # 自身摘要与能力：面板据此判断「这台机器的 Agent 是不是旧版本、能不能推送更新」。
 AGENT_HASH="$( (sha256sum "$AGENT_SELF" 2>/dev/null || shasum -a 256 "$AGENT_SELF" 2>/dev/null) | awk '{print $1}')"
-AGENT_CAPS=""
+AGENT_CAPS="watch"
 if [ -f /etc/linkpilot/update.key ] && [ -f /usr/local/lib/linkpilot/apply-update.sh ] \
    && { [ -d /run/systemd/system ] || [ -f /etc/init.d/linkpilot-agent-watch ]; }; then
-  AGENT_CAPS="update"
+  AGENT_CAPS="update,watch"
 fi
 # 每次启动记一行：排查「Agent 是哪个版本、能不能被推送更新」时不用猜
 echo "$(date '+%F %T') Agent 启动 hash=${AGENT_HASH:0:12} caps=${AGENT_CAPS:-none}" >> "$SPOOL/agent.log"
@@ -346,6 +346,121 @@ verify_sig() {
   [ -n "$SIGN_KEY" ] && [ -n "$3" ] || return 1
   calc=$(printf '%s' "$1:$2" | openssl dgst -sha256 -hmac "$SIGN_KEY" 2>/dev/null | awk '{print $NF}')
   [ -n "$calc" ] && printf '%s' "$calc" | grep -Fqx "$3"
+}
+
+# ---------------- 日常链路监测（常驻 ping，不占任务队列） ----------------
+# 面板在心跳响应里捎带 watch_ver/watch_cfg/watch_sig；配置与任务下发同款 HMAC。
+# 监测循环是 agent 主进程的后台子进程，不阻塞心跳，也不让机器进入 busy 状态。
+
+stop_watch() {
+  if [ -f "$SPOOL/watch.pid" ]; then
+    kill "$(cat "$SPOOL/watch.pid" 2>/dev/null)" 2>/dev/null || true
+  fi
+  rm -f "$SPOOL/watch.pid"
+}
+
+start_watch() {
+  (run_watch_loop >> "$SPOOL/watch.log" 2>&1) &
+  echo $! > "$SPOOL/watch.pid"
+}
+
+apply_watch_cfg() {
+  ver="$(printf '%s\n' "$resp" | sed -n 's/^watch_ver=//p')"
+  [ -n "$ver" ] || return 0
+  if [ "$ver" = "off" ]; then
+    stop_watch
+    rm -f "$SPOOL/watch.ver"
+    return 0
+  fi
+  cfg_b64="$(printf '%s\n' "$resp" | sed -n 's/^watch_cfg=//p')"
+  cfg_sig="$(printf '%s\n' "$resp" | sed -n 's/^watch_sig=//p')"
+  if ! verify_sig "watch:$ver" "$cfg_b64" "$cfg_sig"; then
+    echo "$(date '+%F %T') 拒绝监测配置：签名失败" >> "$SPOOL/agent.log"
+    stop_watch
+    return 0
+  fi
+  if [ "$(cat "$SPOOL/watch.ver" 2>/dev/null || echo '')" = "$ver" ]; then
+    # 版本没变：循环意外挂掉时补拉起
+    if ! [ -f "$SPOOL/watch.pid" ] || ! kill -0 "$(cat "$SPOOL/watch.pid" 2>/dev/null)" 2>/dev/null; then
+      rm -f "$SPOOL/watch.pid"
+      start_watch
+    fi
+    return 0
+  fi
+  stop_watch
+  printf '%s' "$cfg_b64" | base64 -d > "$SPOOL/watch.cfg" 2>/dev/null || return 0
+  printf '%s' "$ver" > "$SPOOL/watch.ver"
+  start_watch
+  echo "$(date '+%F %T') 监测配置更新 ver=$ver" >> "$SPOOL/watch.log"
+}
+
+run_watch_loop() {
+  cfg="$(cat "$SPOOL/watch.cfg" 2>/dev/null)" || return 0
+  wval() { printf '%s\n' "$cfg" | sed -n "s/^$1=//p" | head -n1; }
+  [ "$(wval enabled)" = "1" ] || return 0
+  count="$(wval count)"; valid_int "$count" || count=4
+  in_range "$count" 1 10 || count=4
+  tasks="$(wval tasks)"; [ -n "$tasks" ] || return 0
+  # 多任务：每个任务有独立的 mode / interval / dests，逐任务校验白名单
+  for id in $tasks; do
+    valid_int "$id" || return 0
+    case "$(wval mode_$id)" in A|B) ;; *) return 0 ;; esac
+    interval="$(wval interval_$id)"; valid_int "$interval" || interval=10
+    in_range "$interval" 5 3600 || interval=10
+  done
+  echo "$(date '+%F %T') 监测循环启动 tasks=$tasks count=$count" >> "$SPOOL/watch.log"
+  # 每个任务独立的下一轮时间戳：改一个任务的间隔、暂停一个任务，互不影响
+  now=$(date +%s)
+  for id in $tasks; do
+    printf '%s' "$((now + $(wval interval_$id)))" > "$SPOOL/watch.next.$id"
+  done
+  while :; do
+    now=$(date +%s)
+    for id in $tasks; do
+      next=$(cat "$SPOOL/watch.next.$id" 2>/dev/null || echo 0)
+      [ "$now" -ge "$next" ] || continue
+      interval="$(wval interval_$id)"
+      valid_int "$interval" || interval=10
+      in_range "$interval" 5 3600 || interval=10
+      printf '%s' "$((now + interval))" > "$SPOOL/watch.next.$id"
+      mode="$(wval mode_$id)"
+      dests="$(wval dests_$id)"
+      [ -n "$dests" ] || continue
+      for item in $dests; do
+        did="${item%%:*}"; host="${item#*:}"
+        # 目标地址白名单字符（IP / IPv6 / 域名）；IPv6 自带冒号，靠最长/最短匹配拆分
+        case "$host" in ''|*[!0-9A-Fa-f.:\-_]*) continue ;; esac
+        out="$(LC_ALL=C timeout 15 ping -n -c "$count" -i 0.3 -W 2 "$host" 2>/dev/null || true)"
+        # 统计行以数字开头（"4 packets transmitted, ..."）：锚定行首，避免贪婪匹配吞掉数字
+        sent="$(printf '%s\n' "$out" | sed -n 's/^[[:space:]]*\([0-9]*\) packets transmitted.*/\1/p' | head -n1)"
+        recv="$(printf '%s\n' "$out" | sed -n 's/.* \([0-9]*\) received.*/\1/p' | head -n1)"
+        # rtt min/avg/max/mdev：取 avg（第2段）和 mdev（第4段）
+        stats="$(printf '%s\n' "$out" | sed -n 's#.*= \([0-9.]*\)/\([0-9.]*\)/\([0-9.]*\)/\([0-9.]*\) ms.*#\2 \4#p' | head -n1)"
+        rtt='-'; mdev='-'
+        if [ -n "$stats" ]; then rtt="${stats%% *}"; mdev="${stats#* }"; fi
+        # 丢包率由面板按真实收发数计算；没有可靠的收发数就不上报这一轮
+        valid_int "$sent" || sent=0
+        valid_int "$recv" || recv=0
+        [ "$sent" -ge 1 ] || continue
+        printf 'W %s %s %s %s %s %s %s %s\n' "$(date +%s)" "$id" "$did" "$mode" \
+          "$rtt" "$mdev" "$sent" "$recv" >> "$SPOOL/watch.spool"
+      done
+    done
+    sleep 1     # 调度粒度 1 秒：各任务按自己的间隔独立到期，顺序执行控制并发
+  done
+}
+
+# 样本回传：spool 原子换出后上报，失败滚回等下一轮，不丢已测数据
+flush_watch() {
+  [ -s "$SPOOL/watch.spool" ] || return 0
+  mv "$SPOOL/watch.spool" "$SPOOL/watch.sending" 2>/dev/null || return 0
+  : > "$SPOOL/watch.spool"
+  if ! curl -fsS -m 15 -X POST "$PANEL_URL/api/agent/watch" \
+      -H "X-Agent-Token: $TOKEN" \
+      --data-urlencode "watch@$SPOOL/watch.sending" >/dev/null 2>&1; then
+    cat "$SPOOL/watch.sending" >> "$SPOOL/watch.spool" 2>/dev/null || true
+  fi
+  rm -f "$SPOOL/watch.sending"
 }
 
 P() { sed -n "s/^$1=//p" "$SPOOL/payload" | head -n1; }
@@ -494,10 +609,13 @@ run_job() {
       printf '%s' "$sha" | grep -Eq '^[0-9a-f]{64}$' || return 2
       valid_int "$ts" || return 2
       [ -n "$sig_u" ] || return 2
-      [ "$AGENT_CAPS" = "update" ] || {
-        echo "本机 Agent 不具备推送更新能力（缺少 apply-update / update.key），请重跑接入命令"
-        return 3
-      }
+      case ",$AGENT_CAPS," in
+        *,update,*) ;;
+        *)
+          echo "本机 Agent 不具备推送更新能力（缺少 apply-update / update.key），请重跑接入命令"
+          return 3
+          ;;
+      esac
       staged="$SPOOL/update.staged"
       curl -fsSL -m 60 "$PANEL_URL/agent/agent.sh" -o "$staged" || {
         echo "下载新 Agent 失败"; rm -f "$staged"; return 1
@@ -524,7 +642,19 @@ run_job() {
   esac
 }
 
+# Agent 刚启动（或服务重启）时先按上次存下的配置拉起监测循环；
+# 面板侧的配置变化会在几秒后的心跳里同步（ver 不一致会自动重启循环）。
+if [ -f "$SPOOL/watch.ver" ]; then
+  if [ -f "$SPOOL/watch.pid" ] && kill -0 "$(cat "$SPOOL/watch.pid" 2>/dev/null)" 2>/dev/null; then
+    :
+  else
+    rm -f "$SPOOL/watch.pid"
+    start_watch
+  fi
+fi
+
 while true; do
+  flush_watch
   resp=$(heartbeat); rc=$?
   if [ "$rc" -ne 0 ]; then
     echo "$(date '+%F %T') 心跳失败 curl_exit=$rc" >> "$SPOOL/agent.log"
@@ -534,6 +664,7 @@ while true; do
     echo "$(date '+%F %T') 面板要求重新接入 Agent" >> "$SPOOL/agent.log"
     sleep 10; continue
   fi
+  apply_watch_cfg
   job_id=$(printf '%s\n' "$resp" | sed -n 's/^job_id=//p')
   [ -n "$job_id" ] || { sleep 3; continue; }
   timeout=$(printf '%s\n' "$resp" | sed -n 's/^timeout=//p'); timeout=${timeout:-120}
@@ -580,7 +711,12 @@ while true; do
     # 会继续跑满时长，既占着目标机端口又会和下一轮抢带宽。
     tick=$((tick + 1))
     if [ $((tick % 3)) -eq 1 ]; then
+      flush_watch
       hb="$(busy_heartbeat)" || hb=""
+      if [ -n "$hb" ]; then
+        resp="$hb"
+        apply_watch_cfg
+      fi
       case "$hb" in
         *"cancel_job=$job_id"*)
           echo "$(date '+%F %T') 面板要求中止任务 #$job_id" >> "$SPOOL/agent.log"

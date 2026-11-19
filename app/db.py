@@ -4,6 +4,7 @@ import hashlib
 import ipaddress
 import json
 import os
+import random
 import secrets
 import sqlite3
 import string
@@ -67,6 +68,9 @@ CREATE TABLE IF NOT EXISTS machines (
     role TEXT NOT NULL DEFAULT 'backend',
     region TEXT NOT NULL DEFAULT '',
     bandwidth TEXT NOT NULL DEFAULT '',
+    isp TEXT NOT NULL DEFAULT '',
+    lat TEXT NOT NULL DEFAULT '',
+    lng TEXT NOT NULL DEFAULT '',
     token TEXT NOT NULL DEFAULT '',
     sign_key TEXT NOT NULL DEFAULT '',
     update_key TEXT NOT NULL DEFAULT '',
@@ -200,6 +204,56 @@ CREATE INDEX IF NOT EXISTS idx_jobs_machine_status ON jobs(machine_id, status, i
 CREATE INDEX IF NOT EXISTS idx_run_items_run ON run_items(run_id);
 CREATE INDEX IF NOT EXISTS idx_runs_schedule ON runs(schedule_id, id);
 CREATE INDEX IF NOT EXISTS idx_schedule_runs_schedule ON schedule_runs(schedule_id, run_id);
+-- 面板级开关/配置的通用 KV（面板落点地区、每轮包数等存这里）
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT ''
+);
+-- 日常链路监测任务：多任务、双模式，相互独立启停
+CREATE TABLE IF NOT EXISTS watch_tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    mode TEXT NOT NULL DEFAULT 'A',
+    status TEXT NOT NULL DEFAULT 'running',
+    backend_ids TEXT NOT NULL DEFAULT '[]',
+    target_ids TEXT NOT NULL DEFAULT '[]',
+    interval_seconds INTEGER NOT NULL DEFAULT 10,
+    archived INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    updated_at TEXT
+);
+-- 日常链路监测原始样本：Agent 常驻 ping 的每轮结果（rtt 为空 = 该轮全部超时；
+-- 丢包率由面板按 sent/recv 计算，不信任 Agent 侧百分比）
+CREATE TABLE IF NOT EXISTS ping_watch (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER NOT NULL DEFAULT 0,
+    machine_id INTEGER NOT NULL,
+    dest_id INTEGER NOT NULL DEFAULT 0,
+    mode TEXT NOT NULL DEFAULT 'A',
+    rtt REAL,
+    jit REAL,
+    sent INTEGER NOT NULL DEFAULT 0,
+    recv INTEGER NOT NULL DEFAULT 0,
+    ts INTEGER NOT NULL
+);
+-- 分钟聚合：原始样本 2 小时后滚动进这张表，支撑 24 小时 / 7 天趋势
+CREATE TABLE IF NOT EXISTS ping_watch_minute (
+    task_id INTEGER NOT NULL,
+    machine_id INTEGER NOT NULL,
+    dest_id INTEGER NOT NULL,
+    mode TEXT NOT NULL,
+    bucket INTEGER NOT NULL,
+    sent INTEGER NOT NULL DEFAULT 0,
+    recv INTEGER NOT NULL DEFAULT 0,
+    rtt_sum REAL NOT NULL DEFAULT 0,
+    rtt_min REAL,
+    rtt_max REAL,
+    samples INTEGER NOT NULL DEFAULT 0,
+    timeout INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (task_id, machine_id, dest_id, mode, bucket)
+);
+CREATE INDEX IF NOT EXISTS idx_watch_task_ts ON ping_watch(task_id, machine_id, dest_id, mode, ts);
+CREATE INDEX IF NOT EXISTS idx_watch_tasks ON watch_tasks(archived, mode, status);
 '''
 
 
@@ -211,6 +265,17 @@ def init_db():
         db.executescript(
             'DROP TABLE IF EXISTS run_items; DROP TABLE IF EXISTS jobs; '
             'DROP TABLE IF EXISTS runs; DROP TABLE IF EXISTS machines;')
+    # v0.11 迁移要先于 SCHEMA：旧库的 ping_watch 需先补列，
+    # 否则 SCHEMA 里的新索引会引用不存在的列
+    cols_w = [r['name'] for r in db.execute('PRAGMA table_info(ping_watch)').fetchall()]
+    if cols_w:
+        for col, ddl in (('task_id', 'INTEGER NOT NULL DEFAULT 0'),
+                         ('sent', 'INTEGER NOT NULL DEFAULT 0'),
+                         ('recv', 'INTEGER NOT NULL DEFAULT 0')):
+            if col not in cols_w:
+                db.execute(f'ALTER TABLE ping_watch ADD COLUMN {col} {ddl}')
+        db.execute('DROP INDEX IF EXISTS idx_watch_machine_ts')
+        db.execute('DROP INDEX IF EXISTS idx_watch_task_ts')
     db.executescript(SCHEMA)
     # 旧库补列/补表
     cols_items = [r['name'] for r in db.execute('PRAGMA table_info(run_items)').fetchall()]
@@ -240,6 +305,10 @@ def init_db():
     if cols_m and 'sort_order' not in cols_m:
         db.execute('ALTER TABLE machines ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0')
         db.execute('UPDATE machines SET sort_order=id WHERE sort_order=0')
+    # 机器资料补充：运营商标记与可选坐标（无坐标时按地区匹配）
+    for col in ('isp', 'lat', 'lng'):
+        if cols_m and col not in cols_m:
+            db.execute(f"ALTER TABLE machines ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
     cols_r = [r['name'] for r in db.execute('PRAGMA table_info(runs)').fetchall()]
     if cols_r and 'ip_version' not in cols_r:
         db.execute('ALTER TABLE runs ADD COLUMN ip_version INTEGER NOT NULL DEFAULT 4')
@@ -588,10 +657,11 @@ def create_machine(f):
     db = get_db()
     cur = db.execute(
         'INSERT INTO machines '
-        '(name, role, region, bandwidth, addr_override, token, sign_key, update_key, sort_order) '
-        'VALUES (?,?,?,?,?,?,?,?,'
+        '(name, role, region, bandwidth, isp, lat, lng, addr_override, token, sign_key, update_key, sort_order) '
+        'VALUES (?,?,?,?,?,?,?,?,?,?,?,'
         ' (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM machines))',
         (f['name'], f['role'], f['region'], f['bandwidth'],
+         (f.get('isp') or '').strip(), (f.get('lat') or '').strip(), (f.get('lng') or '').strip(),
          (f.get('addr_override') or '').strip(),
          secrets.token_hex(32), secrets.token_hex(32), secrets.token_hex(32)))
     db.commit()
@@ -625,10 +695,11 @@ def reorder_machines(ids):
 
 def update_machine(mid, f):
     db = get_db()
-    db.execute('UPDATE machines SET name=?, role=?, region=?, bandwidth=?, addr_override=? '
+    db.execute('UPDATE machines SET name=?, role=?, region=?, bandwidth=?, isp=?, lat=?, lng=?, addr_override=? '
                'WHERE id=?',
                (f['name'], f['role'], f['region'], f['bandwidth'],
-                (f.get('addr_override') or '').strip(), mid))
+                (f.get('isp') or '').strip(), (f.get('lat') or '').strip(),
+                (f.get('lng') or '').strip(), (f.get('addr_override') or '').strip(), mid))
     db.commit()
     return get_machine(mid)
 
@@ -920,6 +991,8 @@ def delete_machine(mid, payload='', sig=''):
     db.execute('DELETE FROM machines WHERE id=?', (mid,))
     db.execute('DELETE FROM jobs WHERE machine_id=?', (mid,))
     db.execute('DELETE FROM agent_reg_codes WHERE machine_id=?', (mid,))
+    db.execute('DELETE FROM ping_watch WHERE machine_id=? OR dest_id=?', (mid, mid))
+    db.execute('DELETE FROM ping_watch_minute WHERE machine_id=? OR dest_id=?', (mid, mid))
     db.commit()
 
 
@@ -1542,3 +1615,578 @@ def schedule_run_window(sid, limit=10000):
                 it['metrics_obj'] = None
             items_by_run[it['run_id']].append(it)
     return [{'run': run, 'items': items_by_run[run['id']]} for run in runs]
+
+
+# ---------------- 全球视图：日常链路监测（多任务、双模式） ----------------
+
+# 留存策略：原始样本 2 小时（覆盖「最近一次 / 1 分钟均值 / 短窗统计」），
+# 分钟聚合 7 天（覆盖 24 小时 / 7 天趋势）。10 秒间隔下单链路原始 ≤1440 行、
+# 分钟聚合 ≤10080 行，长期运行不会膨胀。
+WATCH_RAW_RETENTION = 2 * 3600
+WATCH_MINUTE_RETENTION = 7 * 86400
+WATCH_RAW_CAP = 2400               # 单链路原始样本行数上限（防超短间隔刷爆库）
+WATCH_STATS_WINDOW = 5 * 60        # 列表「RTT avg / 丢包」的统计窗口
+WATCH_QUERY_WINDOW = 30 * 60       # 视图查询窗口：覆盖「数据过期」判定（> 3×间隔即过期）
+WATCH_SPARK_N = 30                 # 列表趋势的点数（原始轮次）
+WATCH_HISTORY_RANGES = {'1h': 3600, '4h': 4 * 3600, '1d': 86400, '7d': 7 * 86400}
+WATCH_TASK_STATUS = ('running', 'paused', 'stopped')
+
+
+def get_setting(key, default=''):
+    row = get_db().execute('SELECT value FROM settings WHERE key=?', (key,)).fetchone()
+    return row['value'] if row else default
+
+
+def set_setting(key, value):
+    db = get_db()
+    db.execute('INSERT INTO settings (key, value) VALUES (?,?) '
+               'ON CONFLICT(key) DO UPDATE SET value=excluded.value', (key, str(value)))
+    db.commit()
+
+
+def _watch_int(value, lo, hi, label):
+    try:
+        v = int(value)
+    except (TypeError, ValueError):
+        raise ValueError(f'{label}必须是 {lo}–{hi} 的整数')
+    if not lo <= v <= hi:
+        raise ValueError(f'{label}必须在 {lo}–{hi} 之间')
+    return v
+
+
+def watch_panel_settings():
+    """面板级展示设置：模式 B 的面板落点地区、每轮包数。"""
+    try:
+        count = min(10, max(1, int(get_setting('watch_count', 4))))
+    except (TypeError, ValueError):
+        count = 4
+    return {'panel_region': str(get_setting('watch_panel_region', '') or '')[:32],
+            'count': count}
+
+
+def set_watch_panel_settings(data):
+    if 'panel_region' in data:
+        set_setting('watch_panel_region', str(data.get('panel_region') or '').strip()[:32])
+    if data.get('count') is not None:
+        set_setting('watch_count', _watch_int(data.get('count'), 1, 10, '每轮 ping 次数'))
+    return watch_panel_settings()
+
+
+def _task_id_list(value):
+    """机器 id 列表：接受数组或逗号/空格分隔的字符串，去重保序。"""
+    if isinstance(value, str):
+        value = value.replace(',', ' ').split()
+    out, seen = [], set()
+    for raw in value or []:
+        try:
+            mid = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if mid > 0 and mid not in seen:
+            seen.add(mid)
+            out.append(mid)
+    return out
+
+
+def _watch_task_row(row):
+    t = dict(row)
+    try:
+        t['backend_ids'] = json.loads(t.get('backend_ids') or '[]')
+    except ValueError:
+        t['backend_ids'] = []
+    try:
+        t['target_ids'] = json.loads(t.get('target_ids') or '[]')
+    except ValueError:
+        t['target_ids'] = []
+    t['probe_count'] = (len(t['backend_ids']) *
+                        (len(t['target_ids']) if t['mode'] == 'A' else 1))
+    return t
+
+
+def watch_tasks_list(include_archived=False):
+    sql = 'SELECT * FROM watch_tasks'
+    if not include_archived:
+        sql += ' WHERE archived=0'
+    rows = get_db().execute(sql + ' ORDER BY id').fetchall()
+    now = int(time.time())
+    out = []
+    for row in rows:
+        t = _watch_task_row(row)
+        last = get_db().execute(
+            'SELECT MAX(ts) AS m FROM ping_watch WHERE task_id=?', (t['id'],)).fetchone()
+        t['last_report_at'] = last['m'] if last and last['m'] else None
+        t['data_age'] = (now - t['last_report_at']) if t['last_report_at'] else None
+        out.append(t)
+    return out
+
+
+def watch_task_get(tid):
+    row = get_db().execute('SELECT * FROM watch_tasks WHERE id=?', (tid,)).fetchone()
+    return _watch_task_row(row) if row else None
+
+
+def _validate_watch_task(data, current=None):
+    name = str(data.get('name', current['name'] if current else '') or '').strip()[:64]
+    if not name:
+        raise ValueError('任务名称不能为空')
+    mode_raw = str(data.get('mode', current['mode'] if current else 'A') or '').strip().upper()
+    mode = 'B' if mode_raw == 'B' else 'A'
+    backend_ids = (_task_id_list(data['backend_ids']) if 'backend_ids' in data
+                   else list(current['backend_ids']))
+    if 'target_ids' in data:
+        target_ids = _task_id_list(data['target_ids'])
+    else:
+        target_ids = list(current['target_ids']) if current and mode == current['mode'] else []
+    if mode == 'A' and 'target_ids' not in (data or {}) and current is None:
+        target_ids = []
+    if not backend_ids:
+        raise ValueError('请至少选择一台参与探测的机器')
+    if mode == 'A' and not target_ids:
+        raise ValueError('模式 A 请至少选择一台目标机器')
+    if mode == 'B':
+        target_ids = []
+    interval = _watch_int(data.get('interval', current['interval_seconds'] if current else 10),
+                          5, 3600, '探测间隔')
+    db = get_db()
+    machines = {m['id']: m for m in
+                db.execute('SELECT id, role FROM machines').fetchall()}
+    for mid in backend_ids:
+        if mid not in machines:
+            raise ValueError('参与机器不存在或已删除')
+    for tid in target_ids:
+        if tid not in machines:
+            raise ValueError('目标机器不存在或已删除')
+        if machines[tid]['role'] != 'target':
+            raise ValueError(f'模式 A 的目标必须角色为目标机器（id={tid}）')
+    return {'name': name, 'mode': mode, 'backend_ids': backend_ids,
+            'target_ids': target_ids, 'interval': interval}
+
+
+def watch_task_conflicts(mode, backend_ids, target_ids, exclude_id=None):
+    """与既有任务重复的探测关系提示（不阻止创建，由用户自行决定）。"""
+    conflicts = []
+    for t in watch_tasks_list():
+        if t['archived'] or t['id'] == exclude_id or t['mode'] != mode:
+            continue
+        shared = sorted(set(t['backend_ids']) & set(backend_ids))
+        if not shared:
+            continue
+        if mode == 'B':
+            conflicts.append({'task': t['name'], 'task_id': t['id'],
+                              'machines': shared, 'targets': []})
+        else:
+            targets = sorted(set(t['target_ids']) & set(target_ids))
+            if targets:
+                conflicts.append({'task': t['name'], 'task_id': t['id'],
+                                  'machines': shared, 'targets': targets})
+    return conflicts
+
+
+def watch_task_create(data):
+    v = _validate_watch_task(data)
+    db = get_db()
+    db.execute(
+        'INSERT INTO watch_tasks (name, mode, status, backend_ids, target_ids, interval_seconds) '
+        "VALUES (?,?,'running',?,?,?)",
+        (v['name'], v['mode'], json.dumps(v['backend_ids']),
+         json.dumps(v['target_ids']), v['interval']))
+    db.commit()
+    tid = db.execute('SELECT MAX(id) AS id FROM watch_tasks').fetchone()['id']
+    return watch_task_get(tid), watch_task_conflicts(
+        v['mode'], v['backend_ids'], v['target_ids'], exclude_id=tid)
+
+
+def watch_task_update(tid, data):
+    cur = watch_task_get(tid)
+    if not cur or cur['archived']:
+        raise ValueError('任务不存在或已删除')
+    v = _validate_watch_task(data, current=cur)
+    db = get_db()
+    db.execute(
+        'UPDATE watch_tasks SET name=?, mode=?, backend_ids=?, target_ids=?, '
+        "interval_seconds=?, updated_at=datetime('now','localtime') WHERE id=?",
+        (v['name'], v['mode'], json.dumps(v['backend_ids']),
+         json.dumps(v['target_ids']), v['interval'], tid))
+    db.commit()
+    return watch_task_get(tid), watch_task_conflicts(
+        v['mode'], v['backend_ids'], v['target_ids'], exclude_id=tid)
+
+
+def watch_task_action(tid, action):
+    """start=启动/恢复 running；pause=暂停；stop=停止（保留配置与历史）。"""
+    cur = watch_task_get(tid)
+    if not cur or cur['archived']:
+        raise ValueError('任务不存在或已删除')
+    status = {'start': 'running', 'resume': 'running', 'pause': 'paused',
+              'stop': 'stopped'}.get(str(action).strip().lower())
+    if not status:
+        raise ValueError(f'不支持的任务操作：{action}')
+    db = get_db()
+    db.execute("UPDATE watch_tasks SET status=?, updated_at=datetime('now','localtime') "
+               'WHERE id=?', (status, tid))
+    db.commit()
+    return watch_task_get(tid)
+
+
+def watch_task_delete(tid, purge=False):
+    """删除任务：默认只归档配置、保留历史；purge=True 才一并清理样本。"""
+    cur = watch_task_get(tid)
+    if not cur or cur['archived']:
+        raise ValueError('任务不存在或已删除')
+    db = get_db()
+    db.execute("UPDATE watch_tasks SET archived=1, status='stopped', "
+               "updated_at=datetime('now','localtime') WHERE id=?", (tid,))
+    if purge:
+        db.execute('DELETE FROM ping_watch WHERE task_id=?', (tid,))
+        db.execute('DELETE FROM ping_watch_minute WHERE task_id=?', (tid,))
+    db.commit()
+
+
+def agent_watch_plan(machine_id, panel_host=''):
+    """某台机器当前应执行的探测清单，供心跳捎带下发。
+
+    返回 [{task_id, mode, interval, dest_id, host}]；模式 B 的 host 由
+    调用方（心跳处理器）填面板入口地址。
+    """
+    plan = []
+    addr_cache = None
+    for t in watch_tasks_list():
+        if t['status'] != 'running' or machine_id not in t['backend_ids']:
+            continue
+        if t['mode'] == 'B':
+            if panel_host:
+                plan.append({'task_id': t['id'], 'mode': 'B',
+                             'interval': t['interval_seconds'],
+                             'dest_id': 0, 'host': panel_host})
+            continue
+        if addr_cache is None:
+            addr_cache = {r['id']: dict(r) for r in get_db().execute(
+                'SELECT id, ip4, ip6, addr_override FROM machines').fetchall()}
+        for tid in t['target_ids']:
+            row = addr_cache.get(tid)
+            addr = machine_test_ip(row, 4) or machine_test_ip(row, 6) if row else ''
+            if addr:
+                plan.append({'task_id': t['id'], 'mode': 'A',
+                             'interval': t['interval_seconds'],
+                             'dest_id': tid, 'host': addr})
+    return plan
+
+
+def insert_watch_samples(machine_id, text):
+    """解析 Agent 上报的监测样本并入库。
+
+    每行格式：W <ts> <task_id> <dest_id> <mode> <rtt_avg|-> <rtt_mdev|->
+              <sent> <recv>
+    rtt/mdev 为 '-' 表示该轮全部超时；丢包率由面板按 sent/recv 计算，
+    不信任 Agent 侧百分比。单次上报最多收 600 行。
+    返回入库条数。
+    """
+    db = get_db()
+    now = int(time.time())
+    valid_tasks = {t['id']: t for t in watch_tasks_list()}
+    rows = []
+    for line in str(text or '').splitlines()[:600]:
+        parts = line.strip().split()
+        if len(parts) != 9 or parts[0] != 'W':
+            continue
+        try:
+            ts = int(parts[1])
+            task_id = int(parts[2])
+            dest_id = int(parts[3])
+            mode = parts[4]
+            rtt = None if parts[5] == '-' else float(parts[5])
+            jit = None if parts[6] == '-' else float(parts[6])
+            sent = int(parts[7])
+            recv = int(parts[8])
+        except ValueError:
+            continue
+        task = valid_tasks.get(task_id)
+        if not task or task['archived']:
+            continue                      # 任务已删除/不存在：样本无处归属，丢弃
+        if mode not in ('A', 'B') or dest_id < 0:
+            continue
+        if mode != task['mode']:
+            continue                     # 样本模式与任务模式不符：丢弃，杜绝混线
+        if mode == 'B' and dest_id != 0:
+            continue
+        if not 0 <= sent <= 64 or not 0 <= recv <= sent:
+            continue
+        if rtt is not None and not 0 < rtt < 60000:
+            continue
+        # 时钟漂移超过 7 天或明显来自未来的样本没有意义，直接丢
+        if ts < now - 7 * 86400 or ts > now + 300:
+            continue
+        rows.append((task_id, machine_id, dest_id, mode, rtt, jit, sent, recv,
+                     min(ts, now)))
+    if rows:
+        db.executemany(
+            'INSERT INTO ping_watch (task_id, machine_id, dest_id, mode, rtt, jit, '
+            'sent, recv, ts) VALUES (?,?,?,?,?,?,?,?,?)', rows)
+        if random.random() < 0.05:
+            rollup_watch_raw()
+        db.commit()
+    return len(rows)
+
+
+def rollup_watch_raw():
+    """维护线程定期调用：原始样本 → 分钟聚合，并按留存策略裁剪。
+
+    聚合语义：sent/recv/rtt_sum/轮数累加，min/max 取极值；
+    每行原始样本只会被聚合一次（同事务内聚合后即删除）。
+    """
+    db = get_db()
+    now = int(time.time())
+    cutoff = now - WATCH_RAW_RETENTION
+    db.execute(
+        '''
+        INSERT INTO ping_watch_minute
+            (task_id, machine_id, dest_id, mode, bucket, sent, recv, rtt_sum,
+             rtt_min, rtt_max, samples, timeout)
+        SELECT task_id, machine_id, dest_id, mode, ts - ts % 60,
+               SUM(sent), SUM(recv), COALESCE(SUM(rtt), 0),
+               MIN(rtt), MAX(rtt),
+               SUM(CASE WHEN rtt IS NOT NULL THEN 1 ELSE 0 END),
+               SUM(CASE WHEN rtt IS NULL THEN 1 ELSE 0 END)
+        FROM ping_watch WHERE ts < ?
+        GROUP BY task_id, machine_id, dest_id, mode, ts - ts % 60
+        ON CONFLICT(task_id, machine_id, dest_id, mode, bucket) DO UPDATE SET
+            sent = sent + excluded.sent,
+            recv = recv + excluded.recv,
+            rtt_sum = rtt_sum + excluded.rtt_sum,
+            rtt_min = CASE WHEN rtt_min IS NULL THEN excluded.rtt_min
+                           WHEN excluded.rtt_min IS NULL THEN rtt_min
+                           WHEN excluded.rtt_min < rtt_min THEN excluded.rtt_min
+                           ELSE rtt_min END,
+            rtt_max = CASE WHEN rtt_max IS NULL THEN excluded.rtt_max
+                           WHEN excluded.rtt_max IS NULL THEN rtt_max
+                           WHEN excluded.rtt_max > rtt_max THEN excluded.rtt_max
+                           ELSE rtt_max END,
+            samples = samples + excluded.samples,
+            timeout = timeout + excluded.timeout
+        ''', (cutoff,))
+    db.execute('DELETE FROM ping_watch WHERE ts < ?', (cutoff,))
+    db.execute('DELETE FROM ping_watch_minute WHERE bucket < ?',
+               (now - WATCH_MINUTE_RETENTION,))
+    # 单链路原始样本上限（超短间隔保护；正常 2 小时窗口远达不到）
+    db.execute(
+        'DELETE FROM ping_watch WHERE id IN (SELECT id FROM ('
+        ' SELECT id, ROW_NUMBER() OVER (PARTITION BY task_id, machine_id, dest_id, mode'
+        '        ORDER BY ts DESC, id DESC) AS rn'
+        ' FROM ping_watch) WHERE rn > ?)', (WATCH_RAW_CAP,))
+    db.commit()
+
+
+def _link_status(series, interval, now):
+    """链路状态三概念分离：任务状态由任务表决定；这里是「数据」状态。
+
+    - stale  数据过期：最近样本太久（Agent 掉线 / 任务暂停后残留窗口）
+    - down   不可达：最近几轮全部丢包
+    - warn   网络异常：最近几轮存在丢包
+    - ok     在线
+    """
+    if not series:
+        return 'stale'
+    last_ts = series[-1][0]
+    if now - last_ts > max(3 * interval, 120):
+        return 'stale'
+    recent = series[-5:]
+    tail = series[-2:]                      # 末尾连续 2 轮全超时才算不可达（单轮不下结论）
+    tail_sent = sum(x[2] for x in tail)
+    tail_recv = sum(x[3] for x in tail)
+    if tail_sent and tail_recv == 0:
+        return 'down'
+    if any(x[3] < x[2] for x in recent):
+        return 'warn'
+    return 'ok'
+
+
+def watch_view(mode, task_id=None):
+    """全球视图「日常链路」数据：任务列表 + 链路聚合（同一份数据供地图/表格/详情）。
+
+    链路字段：最近 RTT、5 分钟均值/极值/加权丢包、1 分钟均值、抖动、
+    状态（ok/warn/down/stale）与最近若干轮序列（供趋势图断点）。
+    """
+    tasks = [t for t in watch_tasks_list()
+             if t['mode'] == mode and (task_id is None or t['id'] == task_id)]
+    if not tasks:
+        return {'tasks': [], 'links': []}
+    task_map = {t['id']: t for t in tasks}
+    task_ids = sorted(task_map)
+    marks = ','.join('?' * len(task_ids))
+    now = int(time.time())
+    rows = get_db().execute(
+        f'SELECT task_id, machine_id, dest_id, mode, rtt, sent, recv, ts '
+        f'FROM ping_watch WHERE task_id IN ({marks}) AND mode = ? AND ts >= ? '
+        'ORDER BY ts, id',
+        (*task_ids, mode, now - WATCH_QUERY_WINDOW)).fetchall()
+    machines = {m['id']: dict(m) for m in get_db().execute(
+        'SELECT id, name, region, isp, ip4, ip6, last_seen FROM machines').fetchall()}
+    grouped = {}
+    for r in rows:
+        key = (r['task_id'], r['machine_id'], r['dest_id'])
+        g = grouped.setdefault(key, [])
+        g.append((r['ts'], r['rtt'], r['sent'], r['recv']))
+    links = []
+    for (tid, mid, did), series in grouped.items():
+        task = task_map[tid]
+        machine = machines.get(mid, {})
+        dest = machines.get(did, {}) if did else {}
+        valid = [x[1] for x in series if x[1] is not None]
+        recent5 = series[-5:]
+        sent_sum = sum(x[2] for x in recent5)
+        recv_sum = sum(x[3] for x in recent5)
+        last_ts, last_rtt = series[-1][0], series[-1][1]
+        avg1 = [x[1] for x in series if x[1] is not None and x[0] >= now - 60]
+        jit = None
+        if len(valid) > 1:
+            gaps = [abs(b - a) for a, b in zip(valid, valid[1:])]
+            jit = sum(gaps) / len(gaps)
+        machine_online = bool(machine and machine.get('last_seen')
+                              and now - machine['last_seen'] <= ONLINE_WINDOW)
+        status = 'stale' if not machine_online and not series[-1][2] else \
+            _link_status(series, task['interval_seconds'], now)
+        if not machine_online and status == 'ok' and now - last_ts > max(3 * task['interval_seconds'], 120):
+            status = 'stale'
+        links.append({
+            'task_id': tid, 'task_name': task['name'],
+            'machine_id': mid, 'machine_name': machine.get('name', f'#{mid}'),
+            'machine_region': machine.get('region', ''),
+            'machine_ip': machine.get('ip4') or machine.get('ip6') or '',
+            'machine_isp': machine.get('isp') or '',
+            'dest_id': did,
+            'dest_name': dest.get('name', '') if did else '面板端',
+            'dest_region': dest.get('region', '') if did else '',
+            'dest_ip': (dest.get('ip4') or dest.get('ip6') or '') if did else '',
+            'rtt': last_rtt,
+            'avg': (sum(valid) / len(valid)) if valid else None,
+            'avg1m': (sum(avg1) / len(avg1)) if avg1 else None,
+            'min': min(valid) if valid else None,
+            'max': max(valid) if valid else None,
+            'jit': jit,
+            'loss': ((1 - recv_sum / sent_sum) * 100) if sent_sum else None,
+            'sent': sent_sum, 'recv': recv_sum,
+            'status': status,
+            'n': len(series), 'last_ts': last_ts,
+            'spark': [x[1] for x in series[-WATCH_SPARK_N:]],
+        })
+    return {'tasks': tasks, 'links': links}
+
+
+def watch_history(task_id, machine_id, dest_id, mode, rng):
+    """单链路历史趋势：1h 用原始样本（分钟桶）；4h/1d/7d 用分钟聚合
+    （分别按 5 分钟 / 1 小时 / 2 小时分桶）。"""
+    span = WATCH_HISTORY_RANGES.get(rng)
+    if not span:
+        raise ValueError('不支持的时间范围')
+    now = int(time.time())
+    points = []
+    if rng == '1h':
+        rows = get_db().execute(
+            'SELECT ts, rtt, sent, recv FROM ping_watch '
+            'WHERE task_id=? AND machine_id=? AND dest_id=? AND mode=? AND ts >= ? '
+            'ORDER BY ts', (task_id, machine_id, dest_id, mode, now - span)).fetchall()
+        buckets = {}
+        for r in rows:
+            b = r['ts'] - r['ts'] % 60
+            agg = buckets.setdefault(b, {'sent': 0, 'recv': 0, 'rtts': []})
+            agg['sent'] += r['sent']
+            agg['recv'] += r['recv']
+            if r['rtt'] is not None:
+                agg['rtts'].append(r['rtt'])
+        for b in sorted(buckets):
+            agg = buckets[b]
+            rtt = (sum(agg['rtts']) / len(agg['rtts'])) if agg['rtts'] else None
+            loss = ((1 - agg['recv'] / agg['sent']) * 100) if agg['sent'] else None
+            points.append({'t': b, 'rtt': rtt, 'loss': loss})
+    else:
+        step = {'4h': 300, '1d': 3600, '7d': 2 * 3600}[rng]
+        rows = get_db().execute(
+            'SELECT bucket, sent, recv, samples, rtt_sum FROM ping_watch_minute '
+            'WHERE task_id=? AND machine_id=? AND dest_id=? AND mode=? AND bucket >= ? '
+            'ORDER BY bucket', (task_id, machine_id, dest_id, mode, now - span)).fetchall()
+        buckets = {}
+        for r in rows:
+            b = r['bucket'] - r['bucket'] % step
+            agg = buckets.setdefault(b, {'sent': 0, 'recv': 0, 'rtt_sum': 0.0, 'samples': 0})
+            agg['sent'] += r['sent']
+            agg['recv'] += r['recv']
+            agg['rtt_sum'] += r['rtt_sum']
+            agg['samples'] += r['samples']
+        for b in sorted(buckets):
+            agg = buckets[b]
+            rtt = (agg['rtt_sum'] / agg['samples']) if agg['samples'] else None
+            loss = ((1 - agg['recv'] / agg['sent']) * 100) if agg['sent'] else None
+            points.append({'t': b, 'rtt': rtt, 'loss': loss})
+    return {'range': rng, 'points': points}
+
+
+def watch_test_runs(limit=30):
+    """最近若干轮已结束的测试记录摘要，供「测试链路」视图切换轮次。"""
+    db = get_db()
+    rows = db.execute(
+        "SELECT r.id AS run_id, r.target_id, r.target_name, r.target_region, "
+        "r.created_at, r.source, r.status, "
+        "COALESCE(SUM(CASE WHEN ri.status='done' THEN 1 ELSE 0 END), 0) AS done, "
+        "COUNT(ri.id) AS total "
+        "FROM runs r LEFT JOIN run_items ri ON ri.run_id = r.id "
+        "WHERE r.status IN ('finished','partial') "
+        "GROUP BY r.id ORDER BY r.id DESC LIMIT ?", (int(limit),)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def watch_test_links(run_id=None):
+    """指定或最近一轮测试（后端 → 目标）的链路数据，供「测试链路」视图。
+
+    另附同一目标机最近 10 轮里各后端的 rtt_avg 序列作趋势。
+    """
+    db = get_db()
+    if run_id is not None:
+        run = db.execute(
+            "SELECT id, target_id, target_name, target_region, created_at, source, status, ip_version "
+            "FROM runs WHERE id=? AND status IN ('finished','partial')",
+            (int(run_id),)).fetchone()
+    else:
+        run = db.execute(
+            "SELECT id, target_id, target_name, target_region, created_at, source, status, ip_version "
+            "FROM runs WHERE status IN ('finished','partial') ORDER BY id DESC LIMIT 1").fetchone()
+    if not run:
+        return None
+    links = []
+    for it in db.execute(
+            'SELECT machine_id, machine_name, machine_region, status, metrics '
+            'FROM run_items WHERE run_id=?', (run['id'],)).fetchall():
+        try:
+            met = json.loads(it['metrics'] or '{}')
+        except ValueError:
+            met = {}
+        done = it['status'] == 'done'
+        links.append({
+            'machine_id': it['machine_id'], 'machine_name': it['machine_name'],
+            'region': it['machine_region'], 'status': it['status'],
+            'rtt': met.get('rtt_avg') if done else None,
+            'jit': met.get('mdev_ms') if done else None,
+            'loss': met.get('loss_pct') if done else None,
+            'up': met.get('up_mbits'), 'down': met.get('down_mbits'),
+        })
+    trend = {}
+    run_ids = [r['id'] for r in db.execute(
+        "SELECT id FROM runs WHERE target_id=? AND status IN ('finished','partial') "
+        'ORDER BY id DESC LIMIT 10', (run['target_id'],)).fetchall()]
+    if run_ids:
+        marks = ','.join('?' * len(run_ids))
+        for it in db.execute(
+                f'SELECT machine_id, metrics FROM run_items WHERE run_id IN ({marks}) '
+                'ORDER BY run_id', run_ids).fetchall():
+            try:
+                met = json.loads(it['metrics'] or '{}')
+            except ValueError:
+                continue
+            rtt = met.get('rtt_avg')
+            if rtt is not None:
+                trend.setdefault(it['machine_id'], []).append(float(rtt))
+    return {
+        'run_id': run['id'], 'target_id': run['target_id'],
+        'target_name': run['target_name'], 'target_region': run['target_region'],
+        'created_at': run['created_at'], 'source': run['source'],
+        'status': run['status'], 'links': links, 'trend': trend,
+    }

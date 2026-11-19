@@ -264,8 +264,18 @@ function renderMachines() {
   const backendCount = MACHINES.filter(m => m.role === 'backend' && m.online).length;
   setStat('statOnline', onlineCount);
   setStat('statBackends', backendCount);
-  $('railOnline').textContent = `${onlineCount} / ${MACHINES.length}`;
-  $('railBackends').textContent = `${backendCount} 台后端可用`;
+  if ($('railOnline')) $('railOnline').textContent = `${onlineCount} / ${MACHINES.length}`;
+  if ($('railBackends')) $('railBackends').textContent = `${backendCount} 台后端可用`;
+  if ($('railOnlineBar')) {
+    const pct = MACHINES.length ? Math.round((onlineCount / MACHINES.length) * 100) : 0;
+    $('railOnlineBar').style.width = `${pct}%`;
+  }
+  if ($('headerPulse')) {
+    const pulse = $('headerPulse');
+    pulse.classList.toggle('is-off', onlineCount === 0);
+    const label = pulse.querySelector('span');
+    if (label) label.textContent = MACHINES.length ? `在线 ${onlineCount}/${MACHINES.length}` : '暂无节点';
+  }
   pushSpark('sparkStatOnline', onlineCount);
   pushSpark('sparkStatBackends', backendCount);
   renderHomeNodes();
@@ -291,7 +301,7 @@ function renderMachines() {
         <div class="quiet">${m.active_job ? '执行中' : (m.online ? '在线' : '离线')}</div></td>
       <td class="machine-address"><span class="badge ${m.role}">${m.role === 'target' ? '目标' : '后端'}</span>
         <div class="quiet">${addrCell(m)}</div></td>
-      <td class="machine-meta">${esc(m.region) || '—'} · ${esc(m.bandwidth) || '—'}
+      <td class="machine-meta">${esc(m.region) || '—'} · ${esc(m.bandwidth) || '—'}${m.isp ? ` · ${esc(m.isp)}` : ''}
         ${m.agent_outdated ? `<span class="badge update" title="面板上的 Agent 脚本比这台机器新；点「更新」可直接推送，无需重跑接入命令">Agent 可更新</span>` : ''}
         <div class="quiet">${esc(m.hostname) || '—'}</div></td>
       <td class="machine-actions"><div class="btn-grid">
@@ -637,6 +647,8 @@ function openMachineForm(m) {
   $('mRole').value = m ? m.role : 'backend';
   $('mRegion').value = m ? m.region : '';
   $('mBandwidth').value = m ? m.bandwidth : '';
+  if ($('mIsp')) $('mIsp').value = m ? (m.isp || '') : '';
+  if ($('mCoords')) $('mCoords').value = m && m.lat && m.lng ? `${m.lat},${m.lng}` : '';
   $('mAddr').value = m ? (m.addr_override || '') : '';
   updateRoleHint();
   $('mStepForm').classList.remove('hidden');
@@ -739,9 +751,25 @@ function closeModal() {
 }
 
 async function saveMachine() {
+  let lat = '', lng = '';
+  const rawCoords = $('mCoords') ? $('mCoords').value.trim() : '';
+  if (rawCoords) {
+    const parts = rawCoords.split(/[，,]/).map(s => s.trim());
+    if (parts.length !== 2 || !parts[0] || !parts[1]) {
+      return errorToast('手动坐标格式应为 纬度,经度（如 22.32,114.17）');
+    }
+    const latV = Number(parts[0]), lngV = Number(parts[1]);
+    if (!Number.isFinite(latV) || !Number.isFinite(lngV) || latV < -90 || latV > 90 || lngV < -180 || lngV > 180) {
+      return errorToast('手动坐标超出有效范围（纬度 -90~90，经度 -180~180）');
+    }
+    lat = parts[0];
+    lng = parts[1];
+  }
   const body = {
     name: $('mName').value, role: $('mRole').value,
     region: $('mRegion').value, bandwidth: $('mBandwidth').value,
+    isp: $('mIsp') ? $('mIsp').value.trim() : '',
+    lat, lng,
     addr_override: $('mAddr').value.trim(),
   };
   const id = $('mId').value;
@@ -902,9 +930,9 @@ function renderRunForm() {
                       min="1" max="65535" step="1" style="width:76px;padding:2px 6px">
              </label>`
           : '';
-        return `<div class="chk" style="gap:8px;flex-wrap:wrap">
-          <label class="chk" style="gap:6px"><input type="checkbox" value="${m.id}"> ${esc(m.name)}</label>
-          <span class="muted">(${meta} · ${v6})</span>
+        return `<div class="chk run-backend-card">
+          <label class="chk"><input type="checkbox" value="${m.id}"> <span class="rb-name">${esc(m.name)}</span></label>
+          <span class="muted rb-meta">${meta} · ${v6}</span>
           ${adv}
         </div>`;
       }).join('')
@@ -1539,8 +1567,9 @@ function applyTheme(t, origin = null) {
       button.setAttribute('aria-label', action);
       button.setAttribute('title', action);
     }
-    // 手机状态栏/浏览器 chrome 跟随主题色
+    // 手机状态栏/浏览器 chrome 跟随主题色，并通知全球视图重绘底图颜色
     updateThemeColor();
+    document.dispatchEvent(new Event('linkpilot:appearance'));
   };
   const reduced = window.matchMedia &&
     window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -2725,7 +2754,7 @@ function drawTrendChart(d) {
 
 /* ---------------- 手机端 App 底部导航（标签页切换） ---------------- */
 
-const APP_TABS = ['home', 'machines', 'run', 'tasks', 'records'];
+const APP_TABS = ['home', 'geo', 'machines', 'run', 'tasks', 'records'];
 
 function moveNavInd() {
   const nav = $('appNav');
@@ -2747,7 +2776,8 @@ function setAppTab(tab) {
     btn.classList.toggle('active', on);
     if (on) {
       btn.setAttribute('aria-current', 'page');
-      $('dashboardContext').textContent = btn.textContent.trim();
+      const label = btn.querySelector('.nav-long') || btn;
+      $('dashboardContext').textContent = label.textContent.trim();
     } else btn.removeAttribute('aria-current');
   });
   moveNavInd();
@@ -2759,17 +2789,19 @@ function setAppTab(tab) {
   // 切换标签页时收起打开中的详情整页
   if (!$('runDetail').classList.contains('hidden')) closeRunDetail();
   if (!$('schedDetail').classList.contains('hidden')) closeSchedDetail();
+  if (typeof GEO !== 'undefined') GEO.onTab(tab === 'geo');
   window.scrollTo(0, 0);
 }
 
-/* 手机端左右滑动切换标签页（避开输入框、横向滚动区与弹层） */
+/* 手机端左右滑动切换标签页（避开输入框、横向滚动区、地图与弹层） */
 let swipeX = 0, swipeY = 0, swipeT = 0;
 document.addEventListener('touchstart', e => {
   swipeT = 0;
   if (window.innerWidth > 720 || !e.touches || e.touches.length !== 1) return;
-  if (!$('modal').classList.contains('hidden') || !$('schedModal').classList.contains('hidden')) return;
+  if (!$('modal').classList.contains('hidden') || !$('schedModal').classList.contains('hidden')
+      || ($('watchModal') && !$('watchModal').classList.contains('hidden'))) return;
   if (document.body.classList.contains('app-detail-open')) return;
-  if (e.target.closest && e.target.closest('input,textarea,select,.tbl-wrap,#chartWrap,.chart-picker,.segmented,#appNav,a')) return;
+  if (e.target.closest && e.target.closest('input,textarea,select,.tbl-wrap,#chartWrap,.chart-picker,.segmented,#appNav,#geoMapBox,a')) return;
   const t = e.touches[0];
   swipeX = t.clientX;
   swipeY = t.clientY;
@@ -2845,6 +2877,15 @@ const ACTIONS = {
   toggleSchedCard: (d) => toggleSchedCard(d.id),
   gotoRun: () => setAppTab('run'),
   closeRunDetail,
+  setGeoSource: (d) => typeof GEO !== 'undefined' && GEO.setSource(d.source),
+  setGeoDir: (d) => typeof GEO !== 'undefined' && GEO.setDir(d.dir),
+  openWatchTasks: () => typeof GEO !== 'undefined' && GEO.openWatchTasks(),
+  createWatchTask: () => typeof GEO !== 'undefined' && GEO.openWatchForm(null),
+  closeWatchModal: () => typeof GEO !== 'undefined' && GEO.closeWatchModal(),
+  watchShowList: () => { $('watchFormView').classList.add('hidden'); $('watchListView').classList.remove('hidden'); },
+  saveWatchTask: () => typeof GEO !== 'undefined' && GEO.saveWatchTask(),
+  wSelectAll: () => typeof GEO !== 'undefined' && GEO.toggleChecks(true),
+  wInvert: () => typeof GEO !== 'undefined' && GEO.toggleChecks(false),
 };
 
 let LAST_CLICK = null;   // 最近一次点击落点，用于把确认键贴到鼠标旁边
@@ -2976,7 +3017,7 @@ async function init() {
     syncUdpControls('cfgUdp', 'cfgUdpBw');
     syncUdpControls('sUdp', 'sUdpBw');
     const me = await api('/api/me');
-    $('meUser').textContent = me.user ? `👤 ${me.user}` : '';
+    $('meUser').textContent = me.user || '';
     await loadMachines();
     await loadRuns();
     await loadSchedules();

@@ -337,10 +337,15 @@ def finish_pending():
 
 
 def _loop():
+    last_watch_rollup = 0.0
     while True:
         try:
             finish_pending()
             due_check_once()
+            now = time.monotonic()
+            if now - last_watch_rollup >= 60:
+                db.rollup_watch_raw()
+                last_watch_rollup = now
         except Exception:
             traceback.print_exc()
         time.sleep(TICK_SECONDS)

@@ -1,208 +1,374 @@
 <!doctype html>
-<html lang="zh-CN" data-appearance="fusion">
+<html lang="zh-CN">
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
-<title>LinkPilot · 线路测试面板</title>
+<title>LinkPilot · 线路测试与监控面板</title>
 <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='logo.svg') }}"/>
-<meta name="theme-color" content="#f7f8fc" id="metaTheme"/>
+<meta name="theme-color" content="#f2f0fb" id="metaTheme"/>
 <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}"/>
 <meta name="mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
 <meta name="apple-mobile-web-app-title" content="LinkPilot"/>
-<script src="{{ url_for('static', filename='appearance.js') }}?v={{ version }}-design"></script>
-<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}?v={{ version }}-themes"/>
-<link rel="stylesheet" href="{{ url_for('static', filename='appearance.css') }}?v={{ version }}-design"/>
-<link rel="stylesheet" href="{{ url_for('static', filename='dashboard-themes.css') }}?v={{ version }}-rail"/>
-<script src="{{ url_for('static', filename='app.js') }}?v={{ version }}-themes" defer></script>
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}?v={{ version }}-v2"/>
+<link rel="stylesheet" href="{{ url_for('static', filename='global-view.css') }}?v={{ version }}-v2"/>
+<script src="{{ url_for('static', filename='global-view.js') }}?v={{ version }}-v2" defer></script>
+<script src="{{ url_for('static', filename='app.js') }}?v={{ version }}-v2" defer></script>
 </head>
 <body class="dashboard" data-app-tab="home" data-agent-url="{{ agent_url }}" data-allow-insecure-agent="{{ 1 if allow_insecure_agent else 0 }}">
 <header>
   <h1><img class="brand-mark" src="{{ url_for('static', filename='logo.svg') }}" alt="LinkPilot"/>
     <span class="brand-text">LinkPilot <span class="brand-product">线路测试面板</span>
-      <span class="muted" style="font-size:12px;font-weight:400">v{{ version }}</span></span></h1>
+      <span class="muted">v{{ version }}</span></span></h1>
   <div class="dashboard-context"><span>工作台</span><span aria-hidden="true">/</span><b id="dashboardContext">总览</b></div>
-  {% include '_theme_picker.html' %}
-  <div class="actions">
-    <span id="meUser" class="muted" style="font-size:12px"></span>
-    <button class="small theme-toggle" data-action="toggleTheme" id="themeBtn"
-            aria-label="切换到深色模式" title="切换到深色模式">
-      <svg class="theme-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-           stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="M20.4 14.2A8.4 8.4 0 0 1 9.8 3.6 8.5 8.5 0 1 0 20.4 14.2Z"/>
-      </svg>
-      <svg class="theme-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-           stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <circle cx="12" cy="12" r="3.6"/>
-        <path d="M12 2.2v2M12 19.8v2M4.1 4.1l1.4 1.4M18.5 18.5l1.4 1.4M2.2 12h2M19.8 12h2M4.1 19.9l1.4-1.4M18.5 5.5l1.4-1.4"/>
-      </svg>
-      <span class="theme-toggle-track" aria-hidden="true"><span class="theme-toggle-knob"></span></span>
-      <span class="theme-toggle-label" id="themeLabel">深色</span>
-    </button>
-    <span class="fusion-profile" aria-hidden="true">
-      <img src="{{ url_for('static', filename='logo.svg') }}" alt="" width="24" height="18"/>
-    </span>
-    <button class="small" data-action="logout">退出登录</button>
+  <div class="header-right">
+    <span class="header-pulse" id="headerPulse" title="节点在线概览"><i aria-hidden="true"></i><span>节点检测中</span></span>
+    <div class="actions">
+      <span id="meUser" class="user-pill"></span>
+      <button class="small theme-toggle" data-action="toggleTheme" id="themeBtn"
+              aria-label="切换到深色模式" title="切换到深色模式">
+        <svg class="theme-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M20.4 14.2A8.4 8.4 0 0 1 9.8 3.6 8.5 8.5 0 1 0 20.4 14.2Z"/>
+        </svg>
+        <svg class="theme-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="3.6"/>
+          <path d="M12 2.2v2M12 19.8v2M4.1 4.1l1.4 1.4M18.5 18.5l1.4 1.4M2.2 12h2M19.8 12h2M4.1 19.9l1.4-1.4M18.5 5.5l1.4-1.4"/>
+        </svg>
+        <span class="theme-toggle-track" aria-hidden="true"><span class="theme-toggle-knob"></span></span>
+        <span class="theme-toggle-label" id="themeLabel">深色</span>
+      </button>
+      <button class="small logout-btn" data-action="logout">退出登录</button>
+    </div>
   </div>
 </header>
+
 <nav id="appNav" aria-label="主导航">
   <span class="nav-ind" aria-hidden="true"></span>
   <div class="workspace-brand">
-    <img src="{{ url_for('static', filename='logo.svg') }}" width="34" height="34" alt=""/>
-    <span>LinkPilot <small>Network Lab</small></span>
+    <div class="brand-badge-box">
+      <img src="{{ url_for('static', filename='logo.svg') }}" width="30" height="22" alt=""/>
+    </div>
+    <div>
+      <strong>LinkPilot</strong>
+      <small>v{{ version }} · 网络观测台</small>
+    </div>
   </div>
-  <button data-action="setAppTab" data-tab="home" class="active" aria-current="page">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10.8 12 4l8 6.8V20a1 1 0 0 1-1 1h-4.4v-6.4H9.4V21H5a1 1 0 0 1-1-1z"/></svg>
+  <div class="nav-group-label">工作台</div>
+  <button data-action="setAppTab" data-tab="home" class="active" aria-current="page" title="总览">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10.8 12 4l8 6.8V20a1 1 0 0 1-1 1h-4.4v-6.4H9.4V21H5a1 1 0 0 1-1-1z"/></svg>
     <span>总览</span>
   </button>
-  <button data-action="setAppTab" data-tab="machines">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>
-    <span>机器</span>
+  <button data-action="setAppTab" data-tab="geo" title="全球视图">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a13.5 13.5 0 0 1 3.8 9A13.5 13.5 0 0 1 12 21a13.5 13.5 0 0 1-3.8-9A13.5 13.5 0 0 1 12 3z"/></svg>
+    <span class="nav-long">全球视图</span><span class="nav-short">地图</span>
   </button>
-  <button data-action="setAppTab" data-tab="run">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2.5 5.2 13.4h5.6l-0.6 8.1 8.8-11.9H15.2z"/></svg>
-    <span>测试</span>
+  <button data-action="setAppTab" data-tab="machines" title="机器管理">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>
+    <span class="nav-long">机器管理</span><span class="nav-short">机器</span>
   </button>
-  <button data-action="setAppTab" data-tab="tasks">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.6"/><path d="M12 7.4V12l3.2 1.9"/></svg>
-    <span>任务</span>
+  <button data-action="setAppTab" data-tab="run" title="发起测试">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2.5 5.2 13.4h5.6l-0.6 8.1 8.8-11.9H15.2z"/></svg>
+    <span class="nav-long">发起测试</span><span class="nav-short">测试</span>
   </button>
-  <button data-action="setAppTab" data-tab="records">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 3.5h7.4l4 4v13H6.5z"/><path d="M13.6 3.5v4.2h4.3"/><path d="M9.6 12.6h5M9.6 16.1h5"/></svg>
-    <span>记录</span>
+  <button data-action="setAppTab" data-tab="tasks" title="定时任务">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.6"/><path d="M12 7.4V12l3.2 1.9"/></svg>
+    <span class="nav-long">定时任务</span><span class="nav-short">任务</span>
+  </button>
+  <button data-action="setAppTab" data-tab="records" title="测试记录">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 3.5h7.4l4 4v13H6.5z"/><path d="M13.6 3.5v4.2h4.3"/><path d="M9.6 12.6h5M9.6 16.1h5"/></svg>
+    <span class="nav-long">测试记录</span><span class="nav-short">记录</span>
   </button>
   <div class="workspace-status">
-    <span>节点在线</span>
-    <strong id="railOnline">—</strong>
-    <span id="railBackends">—</span>
+    <div class="ws-head">
+      <span>节点在线</span>
+      <strong id="railOnline">—</strong>
+    </div>
+    <div class="ws-meter" aria-hidden="true"><i id="railOnlineBar"></i></div>
+    <span class="ws-sub" id="railBackends">—</span>
   </div>
 </nav>
+
 <main>
   <div id="homeQuick" class="home-quick">
     <div>
+      <span class="home-eyebrow">NETWORK OBSERVATORY</span>
       <h2>网络总览</h2>
-      <p>查看机器状态、最近测试和定时任务。</p>
+      <p>实时掌握节点状态、吞吐活动、日常链路质量与定时对比趋势。</p>
     </div>
-    <button class="primary" data-action="setAppTab" data-tab="run">发起测试</button>
+    <div class="home-quick-actions">
+      <button class="btn-outline" data-action="setAppTab" data-tab="geo">全球视图</button>
+      <button class="primary" data-action="setAppTab" data-tab="run">＋ 发起测试</button>
+    </div>
   </div>
+
   <div id="homeFeed">
-  <section class="overview" aria-label="运行概况">
-    <div class="stat"><b id="statOnline">—</b><span>在线机器</span><svg class="stat-spark" id="sparkStatOnline" viewBox="0 0 64 22" preserveAspectRatio="none" aria-hidden="true"></svg></div>
-    <div class="stat"><b id="statBackends">—</b><span>可用后端</span><svg class="stat-spark" id="sparkStatBackends" viewBox="0 0 64 22" preserveAspectRatio="none" aria-hidden="true"></svg></div>
-    <div class="stat"><b id="statSchedules">—</b><span>启用中的定时任务</span><svg class="stat-spark" id="sparkStatSchedules" viewBox="0 0 64 22" preserveAspectRatio="none" aria-hidden="true"></svg></div>
-    <div class="stat"><b id="statRuns">—</b><span>最近测试记录</span><svg class="stat-spark" id="sparkStatRuns" viewBox="0 0 64 22" preserveAspectRatio="none" aria-hidden="true"></svg></div>
-  </section>
+    <section class="overview" aria-label="运行概况">
+      <div class="stat">
+        <div class="stat-top"><span class="stat-label">在线机器</span><span class="stat-ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="4" width="14" height="5" rx="1.5"/><rect x="3" y="11" width="14" height="5" rx="1.5"/><circle cx="6.2" cy="6.5" r=".7" fill="currentColor"/><circle cx="6.2" cy="13.5" r=".7" fill="currentColor"/></svg></span></div>
+        <b id="statOnline">—</b>
+        <div class="stat-foot"><span>实时心跳在线</span><svg class="stat-spark" id="sparkStatOnline" viewBox="0 0 64 22" preserveAspectRatio="none" aria-hidden="true"></svg></div>
+      </div>
+      <div class="stat">
+        <div class="stat-top"><span class="stat-label">可用后端</span><span class="stat-ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 10h12M11.5 5.5 16 10l-4.5 4.5"/></svg></span></div>
+        <b id="statBackends">—</b>
+        <div class="stat-foot"><span>可执行测试端</span><svg class="stat-spark" id="sparkStatBackends" viewBox="0 0 64 22" preserveAspectRatio="none" aria-hidden="true"></svg></div>
+      </div>
+      <div class="stat">
+        <div class="stat-top"><span class="stat-label">定时任务</span><span class="stat-ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="10" cy="10" r="7"/><path d="M10 6.5V10l2.5 1.5"/></svg></span></div>
+        <b id="statSchedules">—</b>
+        <div class="stat-foot"><span>启用中长期对比</span><svg class="stat-spark" id="sparkStatSchedules" viewBox="0 0 64 22" preserveAspectRatio="none" aria-hidden="true"></svg></div>
+      </div>
+      <div class="stat">
+        <div class="stat-top"><span class="stat-label">测试记录</span><span class="stat-ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 14l4-4 3 3 5-6"/></svg></span></div>
+        <b id="statRuns">—</b>
+        <div class="stat-foot"><span>近期累计轮次</span><svg class="stat-spark" id="sparkStatRuns" viewBox="0 0 64 22" preserveAspectRatio="none" aria-hidden="true"></svg></div>
+      </div>
+    </section>
+
     <section class="card" id="homeActivityCard">
       <div class="card-head">
         <h2>测试活动</h2>
-        <div class="activity-legend" aria-label="图例"><span>发起</span><span>完成</span></div>
-        <span class="muted home-activity-period">近 7 天</span>
+        <div class="head-right-meta">
+          <div class="activity-legend" aria-label="图例"><span>发起</span><span>完成</span></div>
+          <span class="period-pill home-activity-period">近 7 天</span>
+        </div>
       </div>
       <div id="homeActivityChart" class="home-activity" aria-live="polite"></div>
     </section>
-    <section class="card" id="homeRunsCard">
-      <div class="card-head"><h2>最近测试</h2>
-        <button class="small" data-action="setAppTab" data-tab="records">全部 ›</button></div>
-      <div id="homeRunsList"></div>
-    </section>
-    <section class="card" id="homeSchedCard">
-      <div class="card-head"><h2>定时任务动态</h2>
-        <button class="small" data-action="setAppTab" data-tab="tasks">管理 ›</button></div>
-      <div id="homeSchedList"></div>
-    </section>
-    <section class="card" id="homeNodesCard">
-      <div class="card-head"><h2>节点在线状态</h2>
-        <button class="small" data-action="setAppTab" data-tab="machines">机器 ›</button></div>
-      <div id="homeNodesList"></div>
-    </section>
+
     <section class="card" id="homeQualityCard">
-      <div class="card-head"><h2>测试完成率</h2><span class="muted home-activity-period">近 7 天</span></div>
+      <div class="card-head">
+        <h2>测试完成率</h2>
+        <span class="period-pill home-activity-period">近 7 天</span>
+      </div>
       <div id="homeQualitySummary"></div>
     </section>
+
+    <section class="card" id="homeNodesCard">
+      <div class="card-head">
+        <h2>节点在线状态</h2>
+        <button class="small" data-action="setAppTab" data-tab="machines">机器 ›</button>
+      </div>
+      <div id="homeNodesList"></div>
+    </section>
+
+    <section class="card" id="homeSchedCard">
+      <div class="card-head">
+        <h2>定时任务动态</h2>
+        <button class="small" data-action="setAppTab" data-tab="tasks">管理 ›</button>
+      </div>
+      <div id="homeSchedList"></div>
+    </section>
+
+    <section class="card" id="homeRunsCard">
+      <div class="card-head">
+        <h2>最近测试</h2>
+        <button class="small" data-action="setAppTab" data-tab="records">全部 ›</button>
+      </div>
+      <div id="homeRunsList"></div>
+    </section>
+
     <section class="card" id="homeWorkspaceCard">
-      <div class="card-head"><h2>最近测试配置</h2>
-        <button class="small" data-action="setAppTab" data-tab="run">去测试 ›</button></div>
+      <div class="card-head">
+        <h2>最近测试配置</h2>
+        <button class="small" data-action="setAppTab" data-tab="run">复用并测 ›</button>
+      </div>
       <div id="homeWorkspaceSummary"></div>
     </section>
   </div>
-  <div class="dashboard-grid">
-  <section class="card" id="machinesCard">
-    <div class="card-head">
-      <h2>机器管理</h2>
+
+  <!-- 全球视图：测试链路（最近一轮测试结果）+ 日常链路（多任务、双模式常驻监测） -->
+  <section class="card geo-card" id="geoCard">
+    <div class="card-head geo-head">
+      <div class="geo-title">
+        <span class="geo-logo" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+            <circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 2.6 3.9 5.6 3.9 9s-1.3 6.4-3.9 9c-2.6-2.6-3.9-5.6-3.9-9S9.4 5.6 12 3z"/>
+          </svg>
+        </span>
+        <h2>Global Network Map <span class="geo-live" aria-hidden="true"><i></i>LIVE</span>
+          <span class="geo-subtitle" id="geoSubtitle">Global Network Map</span></h2>
+      </div>
       <div class="actions">
-        <button class="small hidden" id="updateAllAgentsBtn" data-action="updateAllAgents">↑ 全部更新 Agent</button>
-        <button data-action="openMachineForm">＋ 添加机器</button>
+        <div class="segmented geo-seg" id="geoSourceSeg" role="group" aria-label="链路来源">
+          <button class="active" data-action="setGeoSource" data-source="test">测试链路</button>
+          <button data-action="setGeoSource" data-source="daily">日常链路</button>
+        </div>
+        <span class="geo-sep" aria-hidden="true"></span>
+        <button class="small geo-btn-ghost" id="geoTaskBtn" data-action="openWatchTasks">
+          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M5.5 4h8M5.5 8h8M5.5 12h8"/><circle cx="2.5" cy="4" r=".6" fill="currentColor"/><circle cx="2.5" cy="8" r=".6" fill="currentColor"/><circle cx="2.5" cy="12" r=".6" fill="currentColor"/></svg>
+          监控任务</button>
+        <button class="primary small geo-btn-primary" data-action="createWatchTask">＋ 创建监控任务</button>
       </div>
     </div>
-    <div class="tbl-wrap">
-    <table class="machines-table">
-      <colgroup>
-        <col class="col-machine"/>
-        <col class="col-address"/>
-        <col class="col-meta"/>
-        <col class="col-actions"/>
-      </colgroup>
-      <thead><tr><th>机器</th><th>角色 / 地址</th><th>标签</th><th>操作</th></tr></thead>
-      <tbody id="machinesBody"></tbody>
-    </table>
+    <div class="geo-bar" id="geoTestBar">
+      <label class="geo-ctl">测试记录
+        <select id="geoRunFilter"><option value="">最新一轮</option></select>
+      </label>
+      <div class="geo-run-nav">
+        <button type="button" class="small" id="geoRunPrev" title="上一轮（更早）">‹ 上一轮</button>
+        <button type="button" class="small" id="geoRunNext" title="下一轮（更新）">下一轮 ›</button>
+      </div>
+      <span class="muted geo-taskstats" id="geoRunStats"></span>
+      <span class="geo-flex"></span>
+      <button type="button" class="small" id="geoOpenRunBtn">查看完整报告 ›</button>
+    </div>
+    <div class="geo-bar hidden" id="geoDailyBar">
+      <div class="segmented geo-seg" id="geoDirSeg" role="group" aria-label="数据视图（不影响后台任务）">
+        <button class="active" data-action="setGeoDir" data-dir="A">Backend → Target</button>
+        <button data-action="setGeoDir" data-dir="B">Nodes → Panel</button>
+      </div>
+      <label class="geo-ctl">任务
+        <select id="geoTaskFilter"><option value="">全部任务</option></select>
+      </label>
+      <span class="muted geo-taskstats" id="geoTaskStats"></span>
+      <span class="geo-flex"></span>
+      <label class="geo-ctl">每轮
+        <select id="geoCount">
+          <option value="4">4 次</option>
+          <option value="10">10 次</option>
+          <option value="20">20 次</option>
+        </select>
+      </label>
+      <label class="geo-ctl">面板地区
+        <input id="geoPanelRegion" maxlength="32" placeholder="如 杭州（模式 B 落点）"/>
+      </label>
+      <label class="lp-switch geo-switch" data-tooltip="仅控制页面数据刷新，不影响后台探测任务">
+        <input type="checkbox" id="geoAutoRefresh" checked/><span class="track"></span>自动刷新
+      </label>
+    </div>
+    <div class="geo-map" id="geoMapBox">
+      <svg id="geoSvg" role="img" aria-label="全球链路地图"></svg>
+      <div class="geo-hud" id="geoHud" aria-live="polite"></div>
+      <div class="geo-zoom" role="group" aria-label="地图缩放">
+        <button type="button" id="geoZoomIn" data-tooltip="放大" aria-label="放大">
+          <svg viewBox="0 0 16 16" width="14" height="14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg></button>
+        <button type="button" id="geoZoomOut" data-tooltip="缩小" aria-label="缩小">
+          <svg viewBox="0 0 16 16" width="14" height="14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 8h10"/></svg></button>
+        <button type="button" class="geo-reset" id="geoResetBtn" data-tooltip="复位缩放" aria-label="复位缩放">
+          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 8a5.5 5.5 0 1 0 1.7-4M2.5 2.5v3h3"/></svg></button>
+      </div>
+      <div class="legend geo-legend" id="geoLegend">
+        <span><i style="--c:var(--green)"></i>优 &lt;60ms</span>
+        <span><i style="--c:var(--lime)"></i>良 60–120</span>
+        <span><i style="--c:var(--orange)"></i>中 120–200</span>
+        <span><i style="--c:var(--red)"></i>差 ≥200</span>
+        <span><i class="off" style="--c:var(--muted)"></i>不可达 / 暂无数据</span>
+      </div>
+      <span class="geo-updated" id="geoUpdated"></span>
+      <div class="geo-scroll-hint" id="geoScrollHint" aria-hidden="true">点击地图启用滚轮缩放</div>
+      <div class="geo-tip" id="geoTip" aria-hidden="true"></div>
+    </div>
+    <div class="geo-cols">
+      <div class="geo-list">
+        <div class="geo-list-head"><h3 id="geoListTitle">链路明细</h3><span class="muted">按 RTT 升序 · 悬停高亮地图连线</span></div>
+        <div class="tbl-wrap geo-tbl">
+          <table>
+            <thead><tr><th>状态</th><th>链路</th><th>RTT avg</th><th>抖动</th><th>丢包</th><th>趋势</th></tr></thead>
+            <tbody id="geoTbody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div id="geoDetail" class="geo-detail" aria-live="polite"></div>
     </div>
   </section>
 
-  <section class="card" id="runCard">
-    <div class="card-head"><h2>发起测试</h2></div>
-    <div class="run-form">
-      <label class="run-section-label">目标机器
-        <select id="targetSelect"></select>
-      </label>
-      <div class="run-section-label run-backend-head">
-        <span>后端机器</span>
-        <div class="run-backend-actions">
-          <button type="button" class="small" id="selectAllBackends"
-                  data-action="selectAllBackends">全选</button>
-          <button type="button" class="small" id="invertBackends"
-                  data-action="invertBackends">反选</button>
-          <span class="quiet" id="backendSelectionSummary" aria-live="polite"></span>
+  <div class="dashboard-grid">
+    <section class="card" id="machinesCard">
+      <div class="card-head">
+        <div>
+          <h2>机器管理</h2>
+          <span class="muted head-sub" id="machinesSummary"></span>
+        </div>
+        <div class="actions">
+          <button class="small hidden" id="updateAllAgentsBtn" data-action="updateAllAgents">↑ 全部更新 Agent</button>
+          <button class="primary small" data-action="openMachineForm">＋ 添加机器</button>
         </div>
       </div>
-      <div id="backendList" class="run-backend-list"></div>
-      <div class="run-options">
-        <label class="chk"><input type="checkbox" id="useIpv6"> 使用 IPv6 测试</label>
-        <label class="chk"><input type="checkbox" id="cfgUdp"> UDP 测试</label>
-        <label class="chk"><input type="checkbox" id="cfgAdvPorts"> 每台机器单独指定端口</label>
+      <div class="tbl-wrap">
+        <table class="machines-table">
+          <colgroup>
+            <col class="col-machine"/>
+            <col class="col-address"/>
+            <col class="col-meta"/>
+            <col class="col-actions"/>
+          </colgroup>
+          <thead><tr><th>机器</th><th>角色 / 地址</th><th>标签</th><th>操作</th></tr></thead>
+          <tbody id="machinesBody"></tbody>
+        </table>
       </div>
-      <div class="run-hint" id="ipv6Hint"></div>
-      <div class="row params-grid run-params-grid">
-      <div class="field"><label>线程数 -P</label>
-        <input type="number" id="cfgStreams" value="1" min="1" max="32" step="1"></div>
-      <div class="field"><label>单向时长 -t</label>
-        <input type="number" id="cfgDuration" value="10" min="1" max="300" step="1"></div>
-      <div class="field"><label>目标机端口 -p</label>
-        <input type="number" id="cfgPort" value="5201" min="1" max="65535" step="1" data-prev="5201"
-               title="目标机 iperf3 -s 的端口；后端机默认也连这个端口（NAT 端口映射一般是同号映射，只改这里即可）"></div>
-      <div class="field"><label>Ping 次数 -c</label>
-        <input type="number" id="cfgPing" value="200" min="1" max="2000" step="1"></div>
-      <div class="field"><label>UDP 带宽/流</label>
-        <input id="cfgUdpBw" value="100M" placeholder="100M" disabled></div>
+    </section>
+
+    <section class="card" id="runCard">
+      <div class="card-head">
+        <div>
+          <h2>发起测试</h2>
+          <span class="muted head-sub">左侧选择目标端与发起端节点，右侧调整协议、并发与时长参数</span>
+        </div>
       </div>
-      <button class="primary run-submit" data-action="startRun">开始测试</button>
-    </div>
-  </section>
+      <div class="run-form run-workbench">
+        <div class="run-panel run-panel-nodes">
+          <label class="run-section-label">目标机器（被测端 iperf3 -s）
+            <select id="targetSelect"></select>
+          </label>
+          <div class="run-section-label run-backend-head">
+            <span>后端机器（发起测试）</span>
+            <div class="run-backend-actions">
+              <button type="button" class="small" id="selectAllBackends"
+                      data-action="selectAllBackends">全选</button>
+              <button type="button" class="small" id="invertBackends"
+                      data-action="invertBackends">反选</button>
+              <span class="quiet" id="backendSelectionSummary" aria-live="polite"></span>
+            </div>
+          </div>
+          <div id="backendList" class="run-backend-list"></div>
+        </div>
+        <div class="run-panel run-panel-config">
+          <div class="run-config-title">测试参数与协议</div>
+          <div class="run-options">
+            <label class="chk"><input type="checkbox" id="useIpv6"> 使用 IPv6 测试</label>
+            <label class="chk"><input type="checkbox" id="cfgUdp"> UDP 测试</label>
+            <label class="chk"><input type="checkbox" id="cfgAdvPorts"> 每台机器单独指定端口</label>
+          </div>
+          <div class="run-hint" id="ipv6Hint"></div>
+          <div class="row params-grid run-params-grid">
+            <div class="field"><label>线程数 -P</label>
+              <input type="number" id="cfgStreams" value="1" min="1" max="32" step="1"></div>
+            <div class="field"><label>单向时长 -t</label>
+              <input type="number" id="cfgDuration" value="10" min="1" max="300" step="1"></div>
+            <div class="field"><label>目标机端口 -p</label>
+              <input type="number" id="cfgPort" value="5201" min="1" max="65535" step="1" data-prev="5201"
+                     title="目标机 iperf3 -s 的端口；后端机默认也连这个端口（NAT 端口映射一般是同号映射，只改这里即可）"></div>
+            <div class="field"><label>Ping 次数 -c</label>
+              <input type="number" id="cfgPing" value="200" min="1" max="2000" step="1"></div>
+            <div class="field"><label>UDP 带宽/流</label>
+              <input id="cfgUdpBw" value="100M" placeholder="100M" disabled></div>
+          </div>
+          <button class="primary run-submit" data-action="startRun">开始测试</button>
+        </div>
+      </div>
+    </section>
   </div>
 
   <section class="card" id="schedulesCard">
     <div class="card-head">
-      <h2>定时任务（长期对比）</h2>
+      <div>
+        <h2>定时任务（长期对比）</h2>
+        <span class="muted head-sub">按周期自动多轮采样，持续对比线路吞吐、延迟与稳定性演变</span>
+      </div>
       <button class="primary" data-action="openScheduleForm">＋ 新建定时任务</button>
     </div>
     <div class="tbl-wrap">
-    <table>
-      <thead><tr>
-        <th>状态</th><th>名称</th><th>目标 ← 后端</th><th>参数</th><th>间隔</th>
-        <th>下次执行</th><th>累计（成功/失败/未跑）</th><th>最近一轮</th><th>操作</th>
-      </tr></thead>
-      <tbody id="schedulesBody"></tbody>
-    </table>
+      <table>
+        <thead><tr>
+          <th>状态</th><th>名称</th><th>目标 ← 后端</th><th>参数</th><th>间隔</th>
+          <th>下次执行</th><th>累计（成功/失败/未跑）</th><th>最近一轮</th><th>操作</th>
+        </tr></thead>
+        <tbody id="schedulesBody"></tbody>
+      </table>
     </div>
   </section>
 
@@ -242,30 +408,33 @@
     <div class="legend" id="chartLegend"></div>
     <h3>跨轮汇总（全部轮次的均值 / 极值）</h3>
     <div class="tbl-wrap">
-    <table>
-      <thead><tr>
-        <th>机器</th><th>地区</th><th>样本</th><th>上行 均/低/高</th><th>下行 均/低/高</th>
-        <th>丢包均值</th><th>RTT</th><th>抖动</th><th>重传</th>
-        <th>趋势（后半 vs 前半）</th><th>最好/最差</th>
-      </tr></thead>
-      <tbody id="schedStatsBody"></tbody>
-    </table>
+      <table>
+        <thead><tr>
+          <th>机器</th><th>地区</th><th>样本</th><th>上行 均/低/高</th><th>下行 均/低/高</th>
+          <th>丢包均值</th><th>RTT</th><th>抖动</th><th>重传</th>
+          <th>趋势（后半 vs 前半）</th><th>最好/最差</th>
+        </tr></thead>
+        <tbody id="schedStatsBody"></tbody>
+      </table>
     </div>
     <h3>每轮明细 <span class="muted" style="font-weight:400;font-size:12px">（点「查看」跳到该轮完整报告）</span></h3>
     <div class="tbl-wrap">
-    <table>
-      <thead><tr>
-        <th>轮次</th><th>时间</th><th>后端机器</th><th>上行</th><th>下行</th>
-        <th>丢包</th><th>RTT avg</th><th>评价</th><th>操作</th>
-      </tr></thead>
-      <tbody id="schedRoundsBody"></tbody>
-    </table>
+      <table>
+        <thead><tr>
+          <th>轮次</th><th>时间</th><th>后端机器</th><th>上行</th><th>下行</th>
+          <th>丢包</th><th>RTT avg</th><th>评价</th><th>操作</th>
+        </tr></thead>
+        <tbody id="schedRoundsBody"></tbody>
+      </table>
     </div>
   </section>
 
   <section class="card" id="runsCard">
     <div class="card-head">
-      <h2>测试记录</h2>
+      <div>
+        <h2>测试记录</h2>
+        <span class="muted head-sub">按来源筛选手动测试与定时任务轮次，点击查看完整诊断与报告</span>
+      </div>
       <div class="actions">
         <div class="segmented" id="runsFilter" role="group" aria-label="记录筛选">
           <button class="active" data-action="setRunsFilter" data-filter="manual">手动测试</button>
@@ -276,10 +445,10 @@
       </div>
     </div>
     <div class="tbl-wrap">
-    <table>
-      <thead><tr><th>ID</th><th>来源</th><th>目标机器</th><th>进度</th><th>状态</th><th>开始时间</th><th>操作</th></tr></thead>
-      <tbody id="runsBody"></tbody>
-    </table>
+      <table>
+        <thead><tr><th>ID</th><th>来源</th><th>目标机器</th><th>进度</th><th>状态</th><th>开始时间</th><th>操作</th></tr></thead>
+        <tbody id="runsBody"></tbody>
+      </table>
     </div>
   </section>
 
@@ -305,13 +474,13 @@
     </details>
     <h3>结果汇总</h3>
     <div class="tbl-wrap">
-    <table id="detailResultTable">
-      <thead><tr>
-        <th>后端机器</th><th>地区</th><th>带宽</th><th>丢包率</th><th>RTT avg</th><th>抖动 mdev</th>
-        <th>上行</th><th>下行</th><th id="thRetr">重传</th><th>评级</th><th>说明</th>
-      </tr></thead>
-      <tbody id="detailTableBody"></tbody>
-    </table>
+      <table id="detailResultTable">
+        <thead><tr>
+          <th>后端机器</th><th>地区</th><th>带宽</th><th>丢包率</th><th>RTT avg</th><th>抖动 mdev</th>
+          <th>上行</th><th>下行</th><th id="thRetr">重传</th><th>评级</th><th>说明</th>
+        </tr></thead>
+        <tbody id="detailTableBody"></tbody>
+      </table>
     </div>
     <h3>原始数据</h3>
     <div id="rawWrap"></div>
@@ -320,7 +489,6 @@
     <div id="reportRender" class="md-render hidden"></div>
   </section>
 </main>
-
 
 <div id="modal" class="modal-mask hidden">
   <div class="modal">
@@ -340,6 +508,10 @@
       <div class="grid2">
         <div class="field"><label>地区标记（如 香港 / 洛杉矶）</label><input id="mRegion" placeholder="香港"/></div>
         <div class="field"><label>带宽标记（如 500M / 1G / 不限）</label><input id="mBandwidth" placeholder="500M"/></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>运营商（可选，如 阿里云 / GIA）</label><input id="mIsp" maxlength="32" placeholder="阿里云 / 电信"/></div>
+        <div class="field"><label>手动坐标（可选，留空按地区匹配）</label><input id="mCoords" placeholder="纬度,经度 如 22.32,114.17"/></div>
       </div>
       <div class="field"><label>手动测试地址（可选，留空 = 自动探测）</label>
         <input id="mAddr" placeholder="如 203.0.113.10（示例地址，请填该机器的真实 IP）"
@@ -453,6 +625,72 @@
   </div>
 </div>
 
+<!-- 监控任务管理（全球视图 · 日常链路）：轻量入口，列表 + 表单两步 -->
+<div id="watchModal" class="modal-mask hidden">
+  <div class="modal watch-modal">
+    <!-- 列表视图 -->
+    <div id="watchListView">
+      <div class="watch-head">
+        <h3>监控任务</h3>
+        <span class="muted">多任务相互独立，可同时运行；暂停/停止不影响其它任务</span>
+        <button type="button" class="geo-x" data-action="closeWatchModal" aria-label="关闭">✕</button>
+      </div>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>任务</th><th>模式</th><th>探测关系</th><th>间隔</th><th>状态</th><th>最近数据</th><th>操作</th></tr></thead>
+          <tbody id="watchTaskBody"></tbody>
+        </table>
+      </div>
+      <div class="actions watch-foot">
+        <button class="primary" data-action="createWatchTask">＋ 创建监控任务</button>
+        <button data-action="closeWatchModal">关闭</button>
+      </div>
+    </div>
+    <!-- 表单视图（创建 / 编辑） -->
+    <div id="watchFormView" class="hidden">
+      <div class="watch-head">
+        <h3 id="watchFormTitle">创建监控任务</h3>
+        <button type="button" class="geo-x" data-action="closeWatchModal" aria-label="关闭">✕</button>
+      </div>
+      <input type="hidden" id="wTaskId"/>
+      <div class="grid2">
+        <div class="field"><label>任务名称 *</label><input id="wName" maxlength="64" placeholder="如：香港业务线路监控"/></div>
+        <div class="field"><label>探测间隔 *</label>
+          <select id="wInterval">
+            <option value="5">5 秒</option>
+            <option value="10" selected>10 秒</option>
+            <option value="30">30 秒</option>
+            <option value="60">60 秒</option>
+          </select>
+        </div>
+      </div>
+      <div class="field"><label>探测模式 *</label>
+        <select id="wMode">
+          <option value="A">模式 A：后端 → 目标端</option>
+          <option value="B">模式 B：机器 → 面板端</option>
+        </select>
+      </div>
+      <div class="field">
+        <div class="run-backend-head"><span>参与机器 *（发起探测）</span>
+          <div class="run-backend-actions">
+            <button type="button" class="small" data-action="wSelectAll">全选</button>
+            <button type="button" class="small" data-action="wInvert">反选</button>
+          </div>
+        </div>
+        <div id="wBackends" class="chk-list"></div>
+      </div>
+      <div class="field" id="wTargetsField">
+        <div class="run-backend-head"><span>目标机器 *（被探测端，可多选）</span></div>
+        <div id="wTargets" class="chk-list"></div>
+      </div>
+      <p class="hint hidden" id="wConflictHint"></p>
+      <div class="actions watch-foot end">
+        <button data-action="watchShowList">返回列表</button>
+        <button class="primary" data-action="saveWatchTask">保存任务</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 </body>
 </html>

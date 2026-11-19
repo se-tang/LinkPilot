@@ -7,6 +7,7 @@ import hmac
 import io
 import ipaddress
 import json
+import math
 import os
 import re
 import secrets
@@ -421,8 +422,19 @@ def _machine_fields(data):
             ipaddress.ip_address(addr)
         except ValueError:
             raise ValueError('手动测试地址不是合法 IP（留空则自动探测）')
+    lat = clean('lat', 24)
+    lng = clean('lng', 24)
+    for raw, lo, hi in ((lat, -90, 90), (lng, -180, 180)):
+        if raw:
+            try:
+                v = float(raw)
+                if not math.isfinite(v) or not (lo <= v <= hi):
+                    raise ValueError()
+            except ValueError:
+                raise ValueError('坐标格式无效（纬度 -90~90，经度 -180~180）')
     return {'name': name, 'role': role,
             'region': clean('region', 32), 'bandwidth': clean('bandwidth', 32),
+            'isp': clean('isp', 32), 'lat': lat, 'lng': lng,
             'addr_override': addr}
 
 
@@ -657,6 +669,38 @@ def _agent_machine():
     return db.get_machine_by_token(request.headers.get('X-Agent-Token', ''))
 
 
+def _watch_cfg_lines(m):
+    """心跳捎带的日常监测配置（多任务切片），Agent 据此启停本地探测循环。"""
+    host = request.host or ''
+    if host.startswith('['):          # IPv6 Host 头形如 [::1]:8443
+        host = host[1:host.find(']')]
+    else:
+        host = host.rsplit(':', 1)[0]
+    plan = db.agent_watch_plan(m['id'], panel_host=host.strip())
+    if not plan:
+        return ['watch_ver=off']
+    count = db.watch_panel_settings()['count']
+    tasks, order = {}, []
+    for p in plan:
+        tid = p['task_id']
+        if tid not in tasks:
+            tasks[tid] = {'mode': p['mode'], 'interval': p['interval'], 'dests': []}
+            order.append(tid)
+        tasks[tid]['dests'].append(f"{p['dest_id']}:{p['host']}")
+    lines = ['enabled=1', f'count={count}',
+             'tasks=' + ' '.join(str(t) for t in order)]
+    for tid in order:
+        t = tasks[tid]
+        lines.append(f'mode_{tid}={t["mode"]}')
+        lines.append(f'interval_{tid}={t["interval"]}')
+        lines.append(f'dests_{tid}=' + ' '.join(t['dests']))
+    body = '\n'.join(lines)
+    ver = hashlib.sha256(body.encode('utf-8')).hexdigest()[:16]
+    b64 = base64.b64encode(body.encode('utf-8')).decode('ascii')
+    sig = _job_sig(m['sign_key'], f'watch:{ver}', b64)
+    return [f'watch_ver={ver}', f'watch_cfg={b64}', f'watch_sig={sig}']
+
+
 @app.post('/api/agent/heartbeat')
 def agent_heartbeat():
     m = _agent_machine()
@@ -689,6 +733,7 @@ def agent_heartbeat():
         running = db.running_job_id(m['id'])
         if running and db.job_cancel_requested(running):
             lines.append(f'cancel_job={running}')
+        lines += _watch_cfg_lines(m)
         return Response('\n'.join(lines) + '\n', mimetype='text/plain; charset=utf-8')
     job = db.next_queued_job(m['id'])
     lines = ['status=ok', 'protocol=2']
@@ -704,6 +749,7 @@ def agent_heartbeat():
         lines += [f"job_id={job['id']}", f"kind={job['kind']}",
                   f"timeout={job['timeout']}", f'payload_b64={payload_b64}',
                   f"sig={_job_sig(m['sign_key'], job['id'], payload_b64)}"]
+    lines += _watch_cfg_lines(m)
     return Response('\n'.join(lines) + '\n', mimetype='text/plain; charset=utf-8')
 
 
@@ -734,6 +780,119 @@ def agent_output():
             db.set_machine_probe(
                 m['id'], 'Agent 版本过旧，不支持推送更新：请重新生成接入码并重跑一次接入命令')
     return Response('status=ok\n', mimetype='text/plain; charset=utf-8')
+
+
+@app.post('/api/agent/watch')
+def agent_watch():
+    """Agent 常驻监测样本上报。与心跳同令牌；内容只是每轮 ping 的数字汇总，
+    面板只解析入库，不存在任何执行面。"""
+    m = _agent_machine()
+    if not m:
+        return jsonify({'error': 'invalid token'}), 403
+    db.touch_machine_seen(m['id'], request.headers.get('X-Agent-Host', ''))
+    n = db.insert_watch_samples(m['id'], request.form.get('watch', ''))
+    return Response(f'status=ok\nsaved={n}\n', mimetype='text/plain; charset=utf-8')
+
+
+# ---------------- 全球视图（测试链路 / 日常链路监测：多任务、双模式） ----------------
+
+@app.get('/api/watch/settings')
+def api_watch_settings_get():
+    return jsonify(db.watch_panel_settings())
+
+
+@app.post('/api/watch/settings')
+def api_watch_settings_set():
+    data = request.get_json(force=True, silent=True) or {}
+    try:
+        return jsonify(db.set_watch_panel_settings(data))
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+
+
+@app.get('/api/watch/tasks')
+def api_watch_tasks_list():
+    return jsonify({'tasks': db.watch_tasks_list()})
+
+
+@app.post('/api/watch/tasks')
+def api_watch_task_create():
+    data = request.get_json(force=True, silent=True) or {}
+    try:
+        task, conflicts = db.watch_task_create(data)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    return jsonify({'task': task, 'conflicts': conflicts})
+
+
+@app.post('/api/watch/tasks/<int:tid>')
+def api_watch_task_update(tid):
+    data = request.get_json(force=True, silent=True) or {}
+    try:
+        task, conflicts = db.watch_task_update(tid, data)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    return jsonify({'task': task, 'conflicts': conflicts})
+
+
+@app.post('/api/watch/tasks/<int:tid>/action')
+def api_watch_task_action(tid):
+    data = request.get_json(force=True, silent=True) or {}
+    try:
+        task = db.watch_task_action(tid, data.get('action', ''))
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    return jsonify({'task': task})
+
+
+@app.delete('/api/watch/tasks/<int:tid>')
+def api_watch_task_delete(tid):
+    # purge=1 才连同历史数据一起清理；默认只归档配置、保留历史
+    purge = request.args.get('purge', type=int) == 1
+    try:
+        db.watch_task_delete(tid, purge=purge)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    return jsonify({'ok': True, 'purged': purge})
+
+
+@app.get('/api/watch/tasks/<int:tid>/history')
+def api_watch_task_history(tid):
+    """单链路历史趋势（1h 原始分钟桶 / 4h·1d·7d 分钟聚合桶）。"""
+    try:
+        args = request.args
+        data = db.watch_history(tid, args.get('machine_id', type=int),
+                                args.get('dest_id', type=int),
+                                args.get('mode', 'A'), args.get('range', '1h'))
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    return jsonify(data)
+
+
+@app.get('/api/geo/daily')
+def api_geo_daily():
+    """日常链路视图数据：任务列表 + 链路聚合（视图级 A/B 与任务筛选，不影响后台任务）。"""
+    mode = 'B' if request.args.get('mode') == 'B' else 'A'
+    task_filter = request.args.get('task', type=int)
+    view = db.watch_view(mode, task_filter)
+    machines = [{
+        'id': m['id'], 'name': m['name'], 'role': m['role'], 'region': m['region'],
+        'isp': m['isp'], 'lat': m['lat'], 'lng': m['lng'],
+        'bandwidth': m['bandwidth'], 'ip4': m['ip4'], 'ip6': m['ip6'],
+        'online': bool(m['online']), 'watch_supported': 'watch' in str(m.get('agent_caps') or ''),
+    } for m in db.get_machines()]
+    return jsonify({'view': {'mode': mode, 'task': task_filter},
+                    'tasks': view['tasks'], 'links': view['links'],
+                    'machines': machines,
+                    'settings': db.watch_panel_settings(),
+                    'now': int(time.time())})
+
+
+@app.get('/api/geo/test')
+def api_geo_test():
+    """测试链路视图数据：指定或最近一轮测试的后端 RTT，附同目标近 10 轮趋势与轮次列表。"""
+    run_id = request.args.get('run_id', type=int)
+    return jsonify({'run': db.watch_test_links(run_id), 'runs': db.watch_test_runs()})
 
 
 # ---------------- 测试任务 ----------------
