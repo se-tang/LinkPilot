@@ -1068,6 +1068,12 @@ const GEO = (() => {
   function select(key, keep) {
     selected = (selected === key && !keep) ? null : key;
     paintLinks();
+    if (selected && window.innerWidth <= 1080) {
+      const box = $('geoDetail');
+      if (box && typeof box.scrollIntoView === 'function') {
+        requestAnimationFrame(() => box.scrollIntoView({behavior: 'smooth', block: 'nearest'}));
+      }
+    }
   }
 
   // 探测光点：一个光点完成「请求 → 应答」的完整往返，速度与 RTT 挂钩

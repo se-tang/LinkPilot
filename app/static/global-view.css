@@ -368,10 +368,20 @@
 
 /* List & Detail Panel */
 .geo-cols { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(320px, 1fr); gap: 16px; margin-top: 16px; align-items: start; }
+.geo-list, .geo-detail { min-width: 0; max-width: 100%; }
 .geo-list-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
 .geo-list-head h3, .geo-dhead h3 { margin: 0; font-size: 14px; font-weight: 700; }
 .geo-list-head .muted { font-size: 11.5px; }
-.geo-tbl { border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--card); }
+.geo-tbl {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y;
+}
 .geo-tbl table { border-collapse: separate; border-spacing: 0; }
 .geo-tbl th { white-space: nowrap; font-size: 11.5px; letter-spacing: 0.02em; background: var(--surface2); }
 #geoTbody tr { cursor: pointer; transition: background 0.12s; }
@@ -596,7 +606,7 @@
 }
 
 @media (max-width: 1080px) {
-  .geo-cols { grid-template-columns: 1fr; }
+  .geo-cols { grid-template-columns: minmax(0, 1fr); }
   .geo-detail { position: static; }
 }
 @media (max-width: 720px) {
@@ -609,6 +619,17 @@
   .geo-legend { position: static; border-radius: 0; border-width: 1px 0 0; box-shadow: none; }
   .geo-updated { bottom: auto; top: 12px; right: 56px; }
   .geo-zoom { top: auto; bottom: 52px; }
+  .geo-list-head { flex-wrap: wrap; gap: 4px 8px; }
+  .geo-detail { padding: 12px 12px 14px; }
+  .geo-path { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 6px; padding: 10px; }
+  .geo-path .wire { min-width: 52px; }
+  .geo-detail .big { flex-wrap: wrap; gap: 4px 6px; }
+  .geo-detail .big b { font-size: 30px; }
+  .geo-detail .big .ago { margin-left: 0; flex-basis: 100%; }
   .geo-detail .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .geo-detail .fields { grid-template-columns: minmax(0, 1fr); }
+  .geo-detail .fields > div { overflow-wrap: anywhere; word-break: break-word; }
+  .geo-detail .spark-wrap .cap { flex-wrap: wrap; gap: 6px; }
+  .geo-range-seg { max-width: 100%; overflow-x: auto; }
   .watch-modal .tbl-wrap { max-height: 46vh; }
 }
