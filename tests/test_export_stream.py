@@ -125,6 +125,46 @@ class ExportTest(unittest.TestCase):
         self.assertEqual(refreshed['down_block'], 'sender   203 Mbits/sec  retr 320')
         self.assertEqual(db.get_run_item(item['id'])['metrics'], metrics)
 
+    def test_report_sorts_failed_items_last(self):
+        rid = make_run(machines=5)
+        items = db.get_run_items(rid)
+        names = ['node-a', 'node-fail-1', 'node-c', 'node-fail-2', 'node-e']
+        for idx, (item, name) in enumerate(zip(items, names)):
+            db.get_db().execute(
+                'UPDATE run_items SET machine_name=?, machine_host=? WHERE id=?',
+                (name, f'198.51.100.{idx + 1}', item['id']),
+            )
+            if 'fail' in name:
+                db.update_item(item['id'], status='failed', error='端口不可达', metrics='')
+            else:
+                db.update_item(item['id'], status='done', metrics=METRICS_OK)
+        db.get_db().commit()
+
+        detail = self.client.get(f'/api/runs/{rid}').get_json()
+        report = self.client.get(f'/api/runs/{rid}/report').get_data(as_text=True)
+        self.assertEqual(detail['run']['report'], report)
+
+        table_part, raw_part = report.split('### 原始数据', 1)
+        table_rows = [
+            line.split('|')[1].strip()
+            for line in table_part.splitlines()
+            if line.startswith('| ') and not line.startswith('| 机器 ')
+        ]
+        self.assertEqual(table_rows, ['node-a', 'node-c', 'node-e', 'node-fail-1', 'node-fail-2'])
+
+        raw_headings = [
+            line.split('（', 1)[0]
+            for line in raw_part.splitlines()
+            if line.startswith('#### 后端机器')
+        ]
+        self.assertEqual(raw_headings, [
+            '#### 后端机器1：node-a',
+            '#### 后端机器2：node-c',
+            '#### 后端机器3：node-e',
+            '#### 后端机器4：node-fail-1',
+            '#### 后端机器5：node-fail-2',
+        ])
+
 
 class StreamTest(unittest.TestCase):
     def setUp(self):

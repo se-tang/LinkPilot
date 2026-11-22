@@ -1320,7 +1320,15 @@ function renderRunDetail(d) {
   const udp = !!d.run.udp;
   // UDP 没有重传，那一列改成 UDP 丢包（上/下）
   if ($('thRetr')) $('thRetr').textContent = udp ? 'UDP 丢包 上/下' : '重传';
-  const rows = d.items.map((it, i) => {
+  // 测试结束后将失败项稳定排到末尾，与 Markdown 报告的表格和原始数据顺序保持一致
+  const items = d.run.status === 'running'
+    ? d.items
+    : [...d.items].sort((a, b) => {
+        const fa = (a.status === 'done' && a.metrics_obj) ? 0 : 1;
+        const fb = (b.status === 'done' && b.metrics_obj) ? 0 : 1;
+        return fa - fb;
+      });
+  const rows = items.map((it, i) => {
     const region = esc(it.machine_region) || '—';
     const bw = esc(it.machine_bandwidth) || '—';
     const port = it.port && d.run.port && it.port !== d.run.port
@@ -1359,7 +1367,7 @@ function renderRunDetail(d) {
   }).join('');
   $('detailTableBody').innerHTML = rows || '<tr><td colspan="10" class="muted">等待执行...</td></tr>';
 
-  $('rawWrap').innerHTML = d.items.map((it, i) => {
+  $('rawWrap').innerHTML = items.map((it, i) => {
     const mt = it.metrics_obj || {};
     let content;
     if (it.status === 'done') {

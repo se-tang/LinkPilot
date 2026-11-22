@@ -663,11 +663,19 @@ def mask_report_text(text):
     return _IPV4_RE.sub(r'\1.*.*', text)
 
 
+def sort_report_items(items):
+    """将测试失败（非 done 或无有效指标）的记录稳定排到最后，方便导出后直接清理。"""
+    return sorted(
+        items,
+        key=lambda it: 0 if (it.get('status') == 'done' and it.get('metrics')) else 1,
+    )
+
+
 def build_report(run, target, items):
     """生成 Markdown：保留汇总表，并附上每台后端与目标机之间的原始测试输出。"""
     context = dict(run)
     context.setdefault('target_bandwidth', target.get('bandwidth') or '')
-    items = [refresh_item_rating(dict(item), context) for item in items]
+    items = sort_report_items([refresh_item_rating(dict(item), context) for item in items])
     udp = bool(int(run.get('udp') or 0))
 
     def cell(value):
